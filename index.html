@@ -86,6 +86,9 @@ h1 { margin: 0; font-size: 16px; line-height: 1.25; overflow-wrap: anywhere; }
 .seg button.on { background: var(--accent-soft); color: var(--accent); }
 .mini { font: inherit; font-size: 12.5px; font-weight: 600; border: 1px solid var(--line); background: var(--surface); color: var(--ink);
   border-radius: 9px; padding: 6px 10px; cursor: pointer; margin-left: auto; }
+.sitioicon { background: #16a34a; border: 2px solid #fff; border-radius: 3px; box-shadow: 0 1px 3px rgba(0,0,0,.4); }
+.sitioicon span { position: absolute; left: 18px; top: -3px; white-space: nowrap; font: 700 11px/1 var(--sans); color: #14532d;
+  background: rgba(255,255,255,.9); padding: 2px 4px; border-radius: 4px; }
 .medpt { background: #f59e0b; border: 2px solid #fff; border-radius: 50%; box-shadow: 0 1px 3px rgba(0,0,0,.4); }
 </style>
 </head>
@@ -205,14 +208,17 @@ h1 { margin: 0; font-size: 16px; line-height: 1.25; overflow-wrap: anywhere; }
     var horas = Math.max(1, Math.round(resta / 3600000));
     var nombres = [];
     (d.caminos || []).forEach(function (c) { if (c.nombre && nombres.indexOf(c.nombre) < 0) nombres.push(c.nombre); });
-    d.titulo = nombres.length ? nombres.slice(0, 3).join(', ') + (nombres.length > 3 ? '…' : '') : (d.titulo || 'Recorrido');
+    var cliente = d.tipo === 'cliente';
+    if (!cliente) d.titulo = nombres.length ? nombres.slice(0, 3).join(', ') + (nombres.length > 3 ? '…' : '') : (d.titulo || 'Recorrido');
     document.title = d.titulo;
     var bots = ordenar(d.botellas || [], d.caminos || []);
     var nc = nombres.length || (d.caminos || []).length;
 
     var h = '';
     h += '<header><h1>' + esc(d.titulo) + '</h1><div class="meta">';
-    if (nc > 1) h += '<span class="chip">' + nc + ' caminos ópticos</span>';
+    if (cliente) {
+      if ((d.sitios || []).length) h += '<span class="chip">' + d.sitios.length + ' sitios</span>';
+    } else if (nc > 1) h += '<span class="chip">' + nc + ' caminos ópticos</span>';
     h += '<span class="chip">' + bots.length + (bots.length === 1 ? ' botella' : ' botellas') + '</span>';
     h += '<span class="chip" id="largo"></span>';
     h += '<span class="chip vence">Vence en ' + horas + ' h</span></div></header>';
@@ -312,6 +318,17 @@ h1 { margin: 0; font-size: 16px; line-height: 1.25; overflow-wrap: anywhere; }
 
     // ---- botellas ----
     var sel = -1;
+    // sitios (cuadrado verde con nombre) y camaras (punto naranja chico), solo en el mapa
+    (d.sitios || []).forEach(function (s0) {
+      L.marker([s0.lat, s0.lon], {icon: L.divIcon({className: 'sitioicon', html: '<span>' + esc(s0.nombre) + '</span>', iconSize: [16, 16]}),
+        zIndexOffset: 500}).bindPopup('<b>Sitio ' + esc(s0.nombre) + '</b><br><a href="' + ruta(s0.lat, s0.lon) +
+        '" target="_blank" rel="noopener">Cómo llegar ↗</a>').addTo(grupo);
+    });
+    (d.camaras || []).forEach(function (c0) {
+      L.circleMarker([c0.lat, c0.lon], {radius: 4, color: '#fff', weight: 1.5, fillColor: '#f59e0b', fillOpacity: 1})
+        .bindPopup('<b>Cámara</b> ' + esc(c0.nombre) + '<br><a href="' + ruta(c0.lat, c0.lon) +
+        '" target="_blank" rel="noopener">Cómo llegar ↗</a>').addTo(grupo);
+    });
     var marcas = bots.map(function (b, i) {
       var m = L.marker([b.lat, b.lon], {icon: L.divIcon({className: 'pinicon', html: String(i + 1), iconSize: [26, 26]})});
       m.on('click', function () { if (midiendo) agregarPunto(L.latLng(b.lat, b.lon), true); else elegir(i, false); });
