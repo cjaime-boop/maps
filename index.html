@@ -1,0 +1,187 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex, nofollow">
+<meta name="referrer" content="no-referrer">
+<title>Recorrido</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="">
+<style>
+:root {
+  --bg: #eef1f5; --surface: #ffffff; --ink: #172033; --muted: #5d6779; --line: #dbe1ea;
+  --accent: #1d5bd8; --accent-soft: #e6eefc; --route: #1d5bd8; --pin: #d63a2f;
+  --warn: #9a5a00; --warn-soft: #fff3dc;
+  --sans: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --mono: ui-monospace, "SF Mono", Consolas, "Roboto Mono", monospace;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) { :root {
+  --bg: #0f141d; --surface: #182030; --ink: #e8edf6; --muted: #9aa5b8; --line: #2a3446;
+  --accent: #6f9cf5; --accent-soft: #1f2d48; --route: #2f6fe4; --pin: #e2463b;
+  --warn: #f2c06b; --warn-soft: #3a2e17; color-scheme: dark } }
+* { box-sizing: border-box; }
+html, body { margin: 0; background: var(--bg); color: var(--ink); font-family: var(--sans); font-size: 15px; }
+body { padding-top: env(safe-area-inset-top, 0px); padding-bottom: env(safe-area-inset-bottom, 0px); }
+.app { max-width: 720px; margin: 0 auto; background: var(--surface); min-height: 100vh; }
+header { padding: 14px max(16px, env(safe-area-inset-right, 0px)) 12px max(16px, env(safe-area-inset-left, 0px));
+  display: grid; gap: 7px; border-bottom: 1px solid var(--line); }
+.marca { font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); font-weight: 600; }
+h1 { margin: 0; font-size: 19px; line-height: 1.25; overflow-wrap: anywhere; }
+.meta { display: flex; flex-wrap: wrap; gap: 6px; }
+.chip { font-size: 12px; font-weight: 600; padding: 3px 9px; border-radius: 999px; background: var(--accent-soft); color: var(--accent); }
+.chip.vence { background: var(--warn-soft); color: var(--warn); }
+#mapa { height: 52vh; min-height: 280px; background: #e5e3df; }
+.lista h2 { margin: 0; padding: 12px 16px 6px; font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+.bot { display: grid; grid-template-columns: 26px 1fr auto; gap: 10px; align-items: center;
+  padding: 10px max(16px, env(safe-area-inset-right, 0px)) 10px max(16px, env(safe-area-inset-left, 0px)); border-top: 1px solid var(--line); }
+.num { width: 26px; height: 26px; border-radius: 50%; background: var(--pin); color: #fff; font-size: 12px; font-weight: 700;
+  display: grid; place-items: center; font-variant-numeric: tabular-nums; cursor: pointer; border: 0; padding: 0; }
+.t { min-width: 0; cursor: pointer; }
+.t b { display: block; font-family: var(--mono); font-size: 13.5px; overflow-wrap: anywhere; }
+.t small { color: var(--muted); font-size: 12.5px; overflow-wrap: anywhere; }
+.ir { font-size: 13px; font-weight: 600; color: var(--accent); background: var(--accent-soft); border-radius: 9px;
+  padding: 8px 11px; white-space: nowrap; text-decoration: none; }
+.pie { padding: 12px 16px 18px; display: grid; gap: 8px; border-top: 1px solid var(--line); }
+.btn { font: inherit; font-weight: 600; font-size: 14px; border-radius: 11px; padding: 12px; text-align: center;
+  border: 1px solid var(--line); background: var(--surface); color: var(--ink); text-decoration: none; cursor: pointer; }
+.btn.prim { background: var(--route); color: #fff; border-color: var(--route); }
+.btn:focus-visible, .ir:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+.aviso { padding: 40px 20px; text-align: center; display: grid; gap: 8px; }
+.aviso b { font-size: 17px; }
+.aviso span { color: var(--muted); }
+.msg { font-size: 13px; color: var(--muted); text-align: center; min-height: 1em; }
+.pinicon { background: var(--pin); color: #fff; border: 2px solid #fff; border-radius: 50%; font: 700 12px/22px var(--sans);
+  text-align: center; width: 26px !important; height: 26px !important; box-shadow: 0 1px 4px rgba(0,0,0,.35); }
+.yoicon { background: #1a73e8; border: 3px solid #fff; border-radius: 50%; box-shadow: 0 0 0 6px rgba(26,115,232,.25); }
+.leaflet-container { font-family: var(--sans); }
+</style>
+</head>
+<body>
+<div class="app" id="app">
+  <div class="aviso" id="cargando"><b>Cargando recorrido…</b></div>
+</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
+<script>
+(function () {
+  var BASE = 'https://gnqvhlpknxtdnzuxfybc.supabase.co/storage/v1/object/public/recorridos/';
+  var app = document.getElementById('app');
+  var id = (location.hash || '').replace('#', '').trim();
+
+  function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
+    return {'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[c]; }); }
+  function aviso(t, s) { app.innerHTML = '<div class="aviso"><b>' + esc(t) + '</b><span>' + esc(s) + '</span></div>'; }
+  function ruta(lat, lon) { return 'https://www.google.com/maps/dir/?api=1&destination=' + lat + ',' + lon; }
+
+  if (!/^[A-Za-z0-9]{10}$/.test(id)) { aviso('Link incompleto', 'Revisá que hayas copiado el link entero.'); return; }
+
+  fetch(BASE + id + '.json', {cache: 'no-store'}).then(function (r) {
+    if (!r.ok) throw new Error('no');
+    return r.json();
+  }).then(mostrar).catch(function () {
+    aviso('Este recorrido venció', 'Los links duran 24 horas. Pedile uno nuevo a quien te lo mandó.');
+  });
+
+  function mostrar(d) {
+    var vence = new Date(d.vence).getTime();
+    var resta = vence - Date.now();
+    if (!(resta > 0)) { aviso('Este recorrido venció', 'Los links duran 24 horas. Pedile uno nuevo a quien te lo mandó.'); return; }
+    var horas = Math.max(1, Math.round(resta / 3600000));
+    document.title = d.titulo || 'Recorrido';
+    var bots = d.botellas || [];
+    var nc = (d.caminos || []).length;
+
+    var h = '';
+    h += '<header><span class="marca">Recorrido</span><h1>' + esc(d.titulo) + '</h1><div class="meta">';
+    h += '<span class="chip">' + nc + (nc === 1 ? ' camino óptico' : ' caminos ópticos') + '</span>';
+    h += '<span class="chip">' + bots.length + (bots.length === 1 ? ' botella' : ' botellas') + '</span>';
+    h += '<span class="chip vence">Vence en ' + horas + ' h</span></div></header>';
+    h += '<div id="mapa" role="region" aria-label="Mapa del recorrido"></div>';
+    h += '<div class="lista"><h2>Botellas del recorrido</h2>';
+    bots.forEach(function (b, i) {
+      h += '<div class="bot"><button class="num" type="button" data-i="' + i + '" aria-label="Ver botella ' + (i + 1) + ' en el mapa">' + (i + 1) + '</button>' +
+           '<span class="t" data-i="' + i + '"><b>' + esc(b.nombre) + '</b>' + (b.sub ? '<small>' + esc(b.sub) + '</small>' : '') + '</span>' +
+           '<a class="ir" href="' + ruta(b.lat, b.lon) + '" target="_blank" rel="noopener">Ir ↗</a></div>';
+    });
+    if (!bots.length) h += '<div class="bot"><span></span><span class="t"><small>Este recorrido no tiene botellas.</small></span><span></span></div>';
+    h += '</div><div class="pie">';
+    if (bots.length) h += '<button class="btn prim" type="button" id="cercana">Ir a la botella más cercana</button>';
+    h += '<a class="btn" href="' + BASE + id + '.kml?download=' + encodeURIComponent((d.archivo || 'recorrido') + '.kml') + '">Descargar KML (para Google Earth)</a>';
+    h += '<div class="msg" id="msg"></div></div>';
+    app.innerHTML = h;
+
+    var mapa = L.map('mapa', {zoomControl: true, attributionControl: true});
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      maxZoom: 19, attribution: '&copy; OpenStreetMap'
+    }).addTo(mapa);
+    var grupo = L.featureGroup().addTo(mapa);
+    (d.caminos || []).forEach(function (c) {
+      (c.tramos || []).forEach(function (t) {
+        L.polyline(t, {color: getComputedStyle(document.documentElement).getPropertyValue('--route').trim() || '#1d5bd8',
+          weight: 5, opacity: .9}).bindTooltip(c.nombre || '').addTo(grupo);
+      });
+    });
+    var marcas = bots.map(function (b, i) {
+      var m = L.marker([b.lat, b.lon], {icon: L.divIcon({className: 'pinicon', html: String(i + 1), iconSize: [26, 26]})});
+      m.bindPopup('<b>' + esc(b.nombre) + '</b>' + (b.sub ? '<br>' + esc(b.sub) : '') +
+        '<br><a href="' + ruta(b.lat, b.lon) + '" target="_blank" rel="noopener">Cómo llegar ↗</a>');
+      m.addTo(grupo);
+      return m;
+    });
+    if (grupo.getLayers().length) mapa.fitBounds(grupo.getBounds(), {padding: [24, 24]});
+    else mapa.setView([-34.6, -58.45], 11);
+
+    app.querySelectorAll('[data-i]').forEach(function (el) {
+      el.addEventListener('click', function () {
+        var i = +el.getAttribute('data-i');
+        mapa.setView([bots[i].lat, bots[i].lon], 17);
+        marcas[i].openPopup();
+        document.getElementById('mapa').scrollIntoView({behavior: 'smooth', block: 'start'});
+      });
+    });
+
+    var yo = null;
+    var Yo = L.Control.extend({ options: {position: 'topright'}, onAdd: function () {
+      var b = L.DomUtil.create('a', 'leaflet-bar');
+      b.href = '#'; b.title = 'Mi ubicación'; b.setAttribute('role', 'button');
+      b.style.cssText = 'width:34px;height:34px;line-height:34px;text-align:center;background:#fff;font-size:18px;color:#1a73e8;text-decoration:none';
+      b.innerHTML = '◎';
+      L.DomEvent.on(b, 'click', function (e) { L.DomEvent.preventDefault(e); ubicar(function (p) { mapa.setView(p, 16); }); });
+      return b;
+    }});
+    mapa.addControl(new Yo());
+
+    function ubicar(ok) {
+      var msg = document.getElementById('msg');
+      if (!navigator.geolocation) { msg.textContent = 'Este celular no comparte la ubicación.'; return; }
+      msg.textContent = 'Buscando tu ubicación…';
+      navigator.geolocation.getCurrentPosition(function (pos) {
+        msg.textContent = '';
+        var p = [pos.coords.latitude, pos.coords.longitude];
+        if (yo) yo.setLatLng(p); else yo = L.marker(p, {icon: L.divIcon({className: 'yoicon', iconSize: [16, 16]})}).addTo(mapa);
+        ok(p);
+      }, function () {
+        msg.textContent = 'No pude obtener tu ubicación. Revisá que el permiso de ubicación esté activado.';
+      }, {enableHighAccuracy: true, timeout: 15000, maximumAge: 60000});
+    }
+
+    var bc = document.getElementById('cercana');
+    if (bc) bc.addEventListener('click', function () {
+      ubicar(function (p) {
+        var mejor = 0, dmin = Infinity;
+        bots.forEach(function (b, i) {
+          var dd = mapa.distance(p, [b.lat, b.lon]);
+          if (dd < dmin) { dmin = dd; mejor = i; }
+        });
+        var b = bots[mejor];
+        document.getElementById('msg').textContent = 'La más cercana es la ' + (mejor + 1) + ' (' + b.nombre + '), a ' +
+          (dmin < 1000 ? Math.round(dmin) + ' m' : (dmin / 1000).toFixed(1).replace('.', ',') + ' km') + '.';
+        window.location.href = ruta(b.lat, b.lon);
+      });
+    });
+  }
+})();
+</script>
+</body>
+</html>
