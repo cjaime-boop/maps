@@ -24,7 +24,8 @@
 [hidden] { display: none !important; }
 html, body { margin: 0; background: var(--bg); color: var(--ink); font-family: var(--sans); font-size: 15px; }
 body { padding-top: env(safe-area-inset-top, 0px); padding-bottom: env(safe-area-inset-bottom, 0px); }
-.app { max-width: 720px; margin: 0 auto; background: var(--surface); min-height: 100vh; }
+.app { max-width: 720px; margin: 0 auto; background: var(--surface); height: 100vh; height: 100dvh;
+  display: flex; flex-direction: column; overflow: hidden; }
 header { padding: 9px max(14px, env(safe-area-inset-right, 0px)) 8px max(14px, env(safe-area-inset-left, 0px));
   display: grid; gap: 5px; border-bottom: 1px solid var(--line); }
 .marca { font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); font-weight: 600; }
@@ -33,10 +34,9 @@ h1 { margin: 0; font-size: 16px; line-height: 1.25; overflow-wrap: anywhere; }
 .meta span + span::before { content: '·'; margin: 0 6px; color: var(--muted); }
 .chip { white-space: nowrap; }
 .chip.vence { color: var(--warn); font-weight: 600; }
-#mapa { height: 58vh; min-height: 300px; background: #e5e3df; }
-.lista h2 { margin: 0; padding: 12px 16px 6px; font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+#mapa { position: absolute; inset: 0; background: #e5e3df; }
 .bot { display: grid; grid-template-columns: 26px 1fr auto; gap: 10px; align-items: center;
-  padding: 10px max(16px, env(safe-area-inset-right, 0px)) 10px max(16px, env(safe-area-inset-left, 0px)); border-top: 1px solid var(--line); }
+  padding: 10px max(16px, env(safe-area-inset-right, 0px)) 10px max(16px, env(safe-area-inset-left, 0px)); border-bottom: 1px solid var(--line); }
 .num { width: 26px; height: 26px; border-radius: 50%; background: var(--pin); color: #fff; font-size: 12px; font-weight: 700;
   display: grid; place-items: center; font-variant-numeric: tabular-nums; cursor: pointer; border: 0; padding: 0; }
 .t { min-width: 0; cursor: pointer; }
@@ -57,13 +57,26 @@ h1 { margin: 0; font-size: 16px; line-height: 1.25; overflow-wrap: anywhere; }
   text-align: center; width: 26px !important; height: 26px !important; box-shadow: 0 1px 4px rgba(0,0,0,.35); }
 .yoicon { background: #1a73e8; border: 3px solid #fff; border-radius: 50%; box-shadow: 0 0 0 6px rgba(26,115,232,.25); }
 .leaflet-container { font-family: var(--sans); }
-.mapawrap { position: relative; }
+.mapawrap { position: relative; flex: 1; min-height: 0; --h: 40%; }
+.hoja { position: absolute; left: 0; right: 0; bottom: 0; height: var(--h); z-index: 1001; background: var(--surface);
+  border-top-left-radius: 16px; border-top-right-radius: 16px; box-shadow: 0 -4px 18px rgba(0,0,0,.22);
+  display: flex; flex-direction: column; transition: height .18s ease; }
+.hoja.arrastrando { transition: none; }
+.asa { touch-action: none; cursor: grab; padding: 8px max(14px, env(safe-area-inset-right, 0px)) 8px max(14px, env(safe-area-inset-left, 0px));
+  display: grid; gap: 7px; border-bottom: 1px solid var(--line); }
+.asa::before { content: ''; justify-self: center; width: 42px; height: 5px; border-radius: 3px; background: var(--line); }
+.asa .fila { display: flex; align-items: center; gap: 8px; min-height: 34px; }
+.asa .fila b { font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+.asa .irsel { margin-left: auto; font-size: 13px; font-weight: 700; color: #fff; background: var(--route); border-radius: 9px;
+  padding: 8px 11px; text-decoration: none; white-space: nowrap; max-width: 70%; overflow: hidden; text-overflow: ellipsis; }
+.cuerpo { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; -webkit-overflow-scrolling: touch; }
+.leaflet-bottom.leaflet-right { bottom: var(--h); }
 .bot.sel { background: var(--accent-soft); }
 .pinicon.sel { background: var(--route); transform: scale(1.18); z-index: 1000 !important; }
 .ctl { width: 36px; height: 36px; line-height: 36px; text-align: center; background: #fff; color: #333; font-size: 17px;
   text-decoration: none; display: block; }
 .ctl.on { background: #fff3dc; color: #9a5a00; }
-.regla { position: absolute; left: 10px; right: 10px; bottom: 10px; z-index: 1000; background: var(--surface); color: var(--ink);
+.regla { position: absolute; left: 10px; right: 10px; bottom: calc(var(--h) + 10px); z-index: 1000; background: var(--surface); color: var(--ink);
   border: 1px solid var(--line); border-radius: 14px; padding: 10px 12px; display: grid; gap: 8px; box-shadow: 0 4px 16px rgba(0,0,0,.18); }
 .regla .fila { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 .regla .dist { font-size: 20px; font-weight: 700; font-variant-numeric: tabular-nums; }
@@ -106,14 +119,96 @@ h1 { margin: 0; font-size: 16px; line-height: 1.25; overflow-wrap: anywhere; }
     return m < 1000 ? Math.round(m) + ' m' : (m / 1000).toFixed(2).replace('.', ',') + ' km';
   }
 
+  // Ordena las botellas a lo largo del cable (de una punta a la otra), no por el orden en que vienen.
+  function ordenar(bots, caminos) {
+    var R = 6371000, rad = Math.PI / 180;
+    function dist(a, b) {
+      var x = (b[1] - a[1]) * rad * Math.cos((a[0] + b[0]) / 2 * rad), y = (b[0] - a[0]) * rad;
+      return Math.sqrt(x * x + y * y) * R;
+    }
+    var N = [], A = [], segs = [];
+    caminos.forEach(function (c) { (c.tramos || []).forEach(function (t) {
+      var prev = -1;
+      t.forEach(function (p) {
+        N.push(p); A.push([]); var k = N.length - 1;
+        if (prev >= 0) { var w = dist(N[prev], p); A[prev].push([k, w]); A[k].push([prev, w]); segs.push([prev, k]); }
+        prev = k;
+      });
+    }); });
+    if (!N.length || bots.length < 2 || N.length > 6000) return bots;
+    for (var i = 0; i < N.length; i++) for (var j = i + 1; j < N.length; j++) {
+      var dd = dist(N[i], N[j]); if (dd < 15) { A[i].push([j, dd]); A[j].push([i, dd]); }
+    }
+    function dijkstra(o) {
+      var D = N.map(function () { return Infinity; }), V = [];
+      D[o] = 0;
+      for (;;) {
+        var u = -1, du = Infinity;
+        for (var k = 0; k < D.length; k++) if (!V[k] && D[k] < du) { du = D[k]; u = k; }
+        if (u < 0) break; V[u] = true;
+        A[u].forEach(function (e) { if (du + e[1] < D[e[0]]) D[e[0]] = du + e[1]; });
+      }
+      return D;
+    }
+    function lejos(D) { var m = 0; D.forEach(function (v, k) { if (v < Infinity && v > D[m]) m = k; }); return m; }
+    var D = dijkstra(lejos(dijkstra(0)));
+    return bots.map(function (b, idx) {
+      var best = Infinity, pos = Infinity, P = [b.lat, b.lon];
+      segs.forEach(function (s) {
+        var a = N[s[0]], c = N[s[1]], cx = Math.cos(a[0] * rad);
+        var ax = a[1] * cx, ay = a[0], bx = c[1] * cx, by = c[0], px = P[1] * cx, py = P[0];
+        var dx = bx - ax, dy = by - ay, l2 = dx * dx + dy * dy;
+        var t = l2 ? Math.max(0, Math.min(1, ((px - ax) * dx + (py - ay) * dy) / l2)) : 0;
+        var q = [ay + t * dy, (ax + t * dx) / cx], d0 = dist(P, q);
+        if (d0 < best) { best = d0; pos = Math.min(D[s[0]] + dist(a, q), D[s[1]] + dist(c, q)); }
+      });
+      return {b: b, pos: pos, idx: idx};
+    }).sort(function (x, y) { return (x.pos - y.pos) || (x.idx - y.idx); }).map(function (x) { return x.b; });
+  }
+
+  // Hoja inferior: se arrastra desde la barrita para ver más mapa o más lista.
+  function hojaArrastrable() {
+    var hoja = document.getElementById('hoja'), asa = document.getElementById('asa'), wrap = hoja.parentNode;
+    var min = 62, y0 = 0, h0 = 0, mov = false, activo = false;
+    function poner(px) {
+      var max = wrap.clientHeight * 0.9;
+      px = Math.max(min, Math.min(max, px));
+      wrap.style.setProperty('--h', px + 'px');
+    }
+    asa.addEventListener('pointerdown', function (e) {
+      if (e.target.closest('a')) return;
+      activo = true; mov = false; y0 = e.clientY; h0 = hoja.offsetHeight;
+      hoja.classList.add('arrastrando'); asa.setPointerCapture(e.pointerId);
+    });
+    asa.addEventListener('pointermove', function (e) {
+      if (!activo) return;
+      if (Math.abs(e.clientY - y0) > 4) mov = true;
+      poner(h0 + (y0 - e.clientY));
+    });
+    function soltar() {
+      if (!activo) return;
+      activo = false; hoja.classList.remove('arrastrando');
+      var H = wrap.clientHeight, h = hoja.offsetHeight;
+      var paradas = [min, H * 0.4, H * 0.9];
+      if (!mov) { poner(h <= min + 5 ? H * 0.4 : min); return; }   // un toque: abre o cierra
+      var mejor = paradas.reduce(function (a, b) { return Math.abs(b - h) < Math.abs(a - h) ? b : a; });
+      poner(mejor);
+    }
+    asa.addEventListener('pointerup', soltar);
+    asa.addEventListener('pointercancel', soltar);
+  }
+
   function mostrar(d) {
     var vence = new Date(d.vence).getTime();
     var resta = vence - Date.now();
     if (!(resta > 0)) { aviso('Este recorrido venció', 'Los links duran 24 horas. Pedile uno nuevo a quien te lo mandó.'); return; }
     var horas = Math.max(1, Math.round(resta / 3600000));
-    document.title = d.titulo || 'Recorrido';
-    var bots = d.botellas || [];
-    var nc = (d.caminos || []).length;
+    var nombres = [];
+    (d.caminos || []).forEach(function (c) { if (c.nombre && nombres.indexOf(c.nombre) < 0) nombres.push(c.nombre); });
+    d.titulo = nombres.length ? nombres.slice(0, 3).join(', ') + (nombres.length > 3 ? '…' : '') : (d.titulo || 'Recorrido');
+    document.title = d.titulo;
+    var bots = ordenar(d.botellas || [], d.caminos || []);
+    var nc = nombres.length || (d.caminos || []).length;
 
     var h = '';
     h += '<header><h1>' + esc(d.titulo) + '</h1><div class="meta">';
@@ -127,8 +222,10 @@ h1 { margin: 0; font-size: 16px; line-height: 1.25; overflow-wrap: anywhere; }
          '<button type="button" id="mRecta">En línea recta</button></span>' +
          '<button type="button" class="mini" id="mBorrar">Borrar</button><button type="button" class="mini" id="mCerrar" style="margin-left:0">Cerrar</button></div>' +
          '<div class="fila"><span class="dist" id="mDist">—</span></div>' +
-         '<div class="ayuda" id="mAyuda"></div></div></div>';
-    h += '<div class="lista"><h2>Botellas del recorrido · tocá una para elegirla</h2>';
+         '<div class="ayuda" id="mAyuda"></div></div>';
+    h += '<div class="hoja" id="hoja"><div class="asa" id="asa"><div class="fila"><b>' + bots.length +
+         (bots.length === 1 ? ' botella' : ' botellas') + ' · tocá una</b>' +
+         '<a class="irsel" id="irSel" hidden target="_blank" rel="noopener"></a></div></div><div class="cuerpo"><div class="lista">';
     bots.forEach(function (b, i) {
       h += '<div class="bot" id="b' + i + '"><button class="num" type="button" data-i="' + i + '" aria-label="Elegir botella ' + (i + 1) + '">' + (i + 1) + '</button>' +
            '<span class="t" data-i="' + i + '"><b>' + esc(b.nombre) + '</b>' + (b.sub ? '<small>' + esc(b.sub) + '</small>' : '') + '</span>' +
@@ -136,10 +233,10 @@ h1 { margin: 0; font-size: 16px; line-height: 1.25; overflow-wrap: anywhere; }
     });
     if (!bots.length) h += '<div class="bot"><span></span><span class="t"><small>Este recorrido no tiene botellas.</small></span><span></span></div>';
     h += '</div><div class="pie">';
-    if (bots.length) h += '<a class="btn prim" id="irSel" hidden target="_blank" rel="noopener"></a>';
     h += '<a class="btn" href="' + BASE + id + '.kml?download=' + encodeURIComponent((d.archivo || 'recorrido') + '.kml') + '">Descargar KML (para Google Earth)</a>';
-    h += '<div class="msg" id="msg"></div></div>';
+    h += '<div class="msg" id="msg"></div></div></div></div></div>';
     app.innerHTML = h;
+    hojaArrastrable();
 
     var css = getComputedStyle(document.documentElement);
     var colRuta = css.getPropertyValue('--route').trim() || '#1d5bd8';
@@ -221,7 +318,8 @@ h1 { margin: 0; font-size: 16px; line-height: 1.25; overflow-wrap: anywhere; }
       m.addTo(grupo);
       return m;
     });
-    if (grupo.getLayers().length) mapa.fitBounds(grupo.getBounds(), {padding: [24, 24]});
+    if (grupo.getLayers().length) mapa.fitBounds(grupo.getBounds(), {paddingTopLeft: [24, 24],
+      paddingBottomRight: [24, document.getElementById('hoja').offsetHeight + 24]});
     else mapa.setView([-34.6, -58.45], 11);
 
     function elegir(i, centrar) {
@@ -232,11 +330,13 @@ h1 { margin: 0; font-size: 16px; line-height: 1.25; overflow-wrap: anywhere; }
       L.DomUtil.addClass(marcas[i].getElement(), 'sel');
       var bt = document.getElementById('irSel');
       bt.href = ruta(b.lat, b.lon);
-      bt.textContent = 'Cómo llegar a la ' + (i + 1) + ' · ' + b.nombre;
+      bt.textContent = 'Cómo llegar a la ' + (i + 1) + ' ↗';
       bt.hidden = false;
       if (centrar) {
-        mapa.setView([b.lat, b.lon], Math.max(mapa.getZoom(), 17));
-        document.getElementById('mapa').scrollIntoView({behavior: 'smooth', block: 'start'});
+        var hoja = document.getElementById('hoja'), wrap = hoja.parentNode, hh = hoja.offsetHeight;
+        if (hh > wrap.clientHeight * 0.5) { hh = wrap.clientHeight * 0.4; wrap.style.setProperty('--h', hh + 'px'); }
+        mapa.setView([b.lat, b.lon], Math.max(mapa.getZoom(), 17), {animate: false});
+        mapa.panBy([0, hh / 2], {animate: false});
       }
     }
     app.querySelectorAll('[data-i]').forEach(function (el) {
