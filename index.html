@@ -78,6 +78,12 @@ h1 { margin: 0; font-size: 16px; line-height: 1.25; overflow-wrap: anywhere; }
 .ctl { width: 36px; height: 36px; line-height: 36px; text-align: center; background: #fff; color: #333; font-size: 17px;
   text-decoration: none; display: block; }
 .ctl.on { background: #fff3dc; color: #9a5a00; }
+.herr { display: flex; flex-direction: column; align-items: flex-end; gap: 8px; }
+.medir { display: inline-flex; align-items: center; gap: 6px; height: 40px; padding: 0 14px; border-radius: 20px;
+  background: var(--accent); color: #fff !important; font: 700 15px/1 var(--sans); text-decoration: none;
+  box-shadow: 0 2px 8px rgba(0,0,0,.28); -webkit-tap-highlight-color: transparent; }
+.medir:active { transform: scale(.97); }
+.medir.on { background: #9a5a00; }
 .regla { position: absolute; left: 8px; right: 8px; bottom: calc(var(--h) + 8px); z-index: 1000; background: var(--surface); color: var(--ink);
   border: 1px solid var(--line); border-radius: 12px; padding: 8px 10px; display: grid; gap: 6px; box-shadow: 0 4px 16px rgba(0,0,0,.18); }
 .regla .fila { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
@@ -518,6 +524,7 @@ h1 { margin: 0; font-size: 16px; line-height: 1.25; overflow-wrap: anywhere; }
     }
     function regla_(on) {
       midiendo = on; regla.hidden = !on; btnRegla.classList.toggle('on', on);
+      btnRegla.innerHTML = on ? '<span aria-hidden="true">✕</span> Terminar' : '<span aria-hidden="true">📏</span> Medir';
       if (!on) { pts = []; capaMed.clearLayers(); }
       else {
         var hoja = document.getElementById('hoja');
@@ -538,15 +545,17 @@ h1 { margin: 0; font-size: 16px; line-height: 1.25; overflow-wrap: anywhere; }
 
     var btnRegla;
     var Herr = L.Control.extend({ options: {position: 'topright'}, onAdd: function () {
-      var box = L.DomUtil.create('div', 'leaflet-bar');
-      btnRegla = L.DomUtil.create('a', 'ctl', box);
-      btnRegla.href = '#'; btnRegla.title = 'Medir'; btnRegla.setAttribute('role', 'button'); btnRegla.innerHTML = '📏';
+      var cont = L.DomUtil.create('div', 'herr');
+      btnRegla = L.DomUtil.create('a', 'medir', cont);
+      btnRegla.href = '#'; btnRegla.title = 'Medir distancias sobre el cable'; btnRegla.setAttribute('role', 'button');
+      btnRegla.innerHTML = '<span aria-hidden="true">📏</span> Medir';
+      var box = L.DomUtil.create('div', 'leaflet-bar', cont);
       var yoB = L.DomUtil.create('a', 'ctl', box);
       yoB.href = '#'; yoB.title = 'Mi ubicación'; yoB.setAttribute('role', 'button'); yoB.innerHTML = '◎'; yoB.style.color = '#1a73e8';
-      L.DomEvent.disableClickPropagation(box);
+      L.DomEvent.disableClickPropagation(cont);
       L.DomEvent.on(btnRegla, 'click', function (e) { L.DomEvent.preventDefault(e); regla_(!midiendo); });
       L.DomEvent.on(yoB, 'click', function (e) { L.DomEvent.preventDefault(e); ubicar(); });
-      return box;
+      return cont;
     }});
     mapa.addControl(new Herr());
     L.DomEvent.disableClickPropagation(regla);
