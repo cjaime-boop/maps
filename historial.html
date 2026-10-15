@@ -270,7 +270,7 @@ details.dia > summary span { color: var(--muted); text-align: right; }
     app.innerHTML =
       '<div class="barra">' +
         '<form class="busca" id="fb"><input id="q" type="search" enterkeyhint="search" autocomplete="off" ' +
-          'placeholder="Botella, coordenadas o link de Maps"><button class="btn prim" type="submit">Buscar</button></form>' +
+          'placeholder="ID de botella o coordenadas"><button class="btn prim" type="submit">Buscar</button></form>' +
         '<div class="opciones"><button class="chip" id="gps" type="button">📍 Dónde estoy</button><span class="sep"></span>' +
           [100, 300, 500, 1000].map(function (r) { return '<button class="chip rad" data-r="' + r + '" type="button">' + (r >= 1000 ? r / 1000 + ' km' : r + ' m') + '</button>'; }).join('') +
           '<span class="sep"></span>' +
@@ -279,8 +279,8 @@ details.dia > summary span { color: var(--muted); text-align: right; }
       '</div>' +
       '<div class="cuerpo"><div id="mapa"></div><div class="hint" id="hint">Tocá el mapa, usá el GPS o buscá arriba</div>' +
         '<div class="hoja" id="hoja"><div class="asa" id="asa"><i></i></div><div class="res" id="res">' +
-          '<div class="vacio">Tocá un punto del mapa, usá 📍 Dónde estoy, o pegá arriba un ID de botella, unas coordenadas, ' +
-          'un link de Google Maps o una ubicación compartida por WhatsApp.</div></div></div></div>';
+          '<div class="vacio">Tocá un punto del mapa, usá 📍 Dónde estoy, o escribí arriba un ID de botella ' +
+          'o unas coordenadas (ej. -34.58648, -58.84600).</div></div></div></div>';
     marcarChips();
     mapa = L.map('mapa', {zoomControl: false, attributionControl: true}).setView([-34.60, -58.45], 11);
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {maxZoom: 19, attribution: '© OpenStreetMap'}).addTo(mapa);
@@ -315,7 +315,7 @@ details.dia > summary span { color: var(--muted); text-align: right; }
   }
   function repetir() { if (ultimo) ultimo(); }
 
-  // coordenadas o links: "-34.6, -58.5", "34°35'10\"S 58°30'W", google maps (q=, @, ll=), ubicación de WhatsApp
+  // coordenadas: "-34.6, -58.5" o "34°35'10\"S 58°30'W"
   function coordenadas(txt) {
     var t = txt; try { t = decodeURIComponent(txt); } catch (e) {}
     t = t.replace(/\+/g, ' ');
@@ -339,8 +339,7 @@ details.dia > summary span { color: var(--muted); text-align: right; }
     var c = coordenadas(txt);
     if (c) { consultarPunto(c[0], c[1], 'Punto ' + c[0].toFixed(5) + ', ' + c[1].toFixed(5)); return; }
     if (/goo\.gl|maps\.app|https?:\/\//i.test(txt)) {
-      aviso('Ese link no trae las coordenadas a la vista (los links cortos de Google no se pueden leer desde acá). ' +
-            'Abrilo, mantené apretado el punto y copiá las coordenadas que aparecen arriba.'); return;
+      aviso('Escribí un ID de botella o unas coordenadas (ej. -34.58648, -58.84600).'); return;
     }
     consultarBT(txt.toUpperCase());
   }
