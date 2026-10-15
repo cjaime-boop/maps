@@ -129,7 +129,7 @@ h1 { margin: 0; font-size: 16px; line-height: 1.25; overflow-wrap: anywhere; }
     if (!r.ok) throw new Error('no');
     return r.json();
   }).then(mostrar).catch(function () {
-    aviso('Este recorrido venció', 'Los links duran 24 horas. Pedile uno nuevo a quien te lo mandó.');
+    aviso('Este link ya no está disponible', 'Venció (duran 24 horas) o lo dieron de baja. Pedile uno nuevo a quien te lo mandó.');
   });
 
   function metros(m) {
