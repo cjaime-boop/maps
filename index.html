@@ -304,12 +304,44 @@ h1 { margin: 0; font-size: 16px; line-height: 1.25; overflow-wrap: anywhere; }
         }
       });
     });
-    // empalmes: puntas de tramos que quedan a menos de 15 m se consideran unidas
-    for (var a = 0; a < nodos.length; a++) for (var b = a + 1; b < nodos.length; b++) {
-      if (nodos.length > 4000) break;
-      var dd = nodos[a].distanceTo(nodos[b]);
-      if (dd < 15 && !ady[a].some(function (e) { return e[0] === b; })) unir(a, b, dd);
+    // empalmes: puntos de tramos distintos a menos de 15 m se consideran unidos (grilla: anda con miles de puntos)
+    function cercanos(maxM, fn) {
+      var cel = maxM / 111000, g = {};
+      nodos.forEach(function (n, k) {
+        var key = Math.floor(n.lat / cel) + ',' + Math.floor(n.lng / cel);
+        (g[key] = g[key] || []).push(k);
+      });
+      nodos.forEach(function (n, k) {
+        var i = Math.floor(n.lat / cel), j = Math.floor(n.lng / cel);
+        for (var di = -1; di <= 1; di++) for (var dj = -2; dj <= 2; dj++) {
+          (g[(i + di) + ',' + (j + dj)] || []).forEach(function (o) {
+            if (o > k) { var dd = n.distanceTo(nodos[o]); if (dd < maxM) fn(k, o, dd); }
+          });
+        }
+      });
     }
+    cercanos(15, function (a, b, dd) { if (!ady[a].some(function (e) { return e[0] === b; })) unir(a, b, dd); });
+    // si el cable quedó partido en pedazos (huecos de dibujo de más de 15 m), se unen los pedazos
+    // por los puntos más cercanos, hasta 60 m. Solo une pedazos separados: no agrega atajos.
+    (function () {
+      var comp = new Array(nodos.length).fill(-1), nc = 0;
+      for (var s = 0; s < nodos.length; s++) {
+        if (comp[s] >= 0) continue;
+        var pila = [s]; comp[s] = nc;
+        while (pila.length) { var u = pila.pop(); ady[u].forEach(function (e) { if (comp[e[0]] < 0) { comp[e[0]] = nc; pila.push(e[0]); } }); }
+        nc++;
+      }
+      if (nc < 2) return;
+      var pares = [];
+      cercanos(60, function (a, b, dd) { if (comp[a] !== comp[b]) pares.push([dd, a, b]); });
+      pares.sort(function (x, y) { return x[0] - y[0]; });
+      var padre = []; for (var c = 0; c < nc; c++) padre.push(c);
+      function raiz(x) { while (padre[x] !== x) { padre[x] = padre[padre[x]]; x = padre[x]; } return x; }
+      pares.forEach(function (p) {
+        var ra = raiz(comp[p[1]]), rb = raiz(comp[p[2]]);
+        if (ra !== rb) { padre[ra] = rb; unir(p[1], p[2], p[0]); }
+      });
+    })();
     if (largoTotal) document.getElementById('largo').textContent = metros(largoTotal) + ' de cable';
     else document.getElementById('largo').hidden = true;
 
