@@ -76,19 +76,30 @@ h1 { margin: 0; font-size: 16px; line-height: 1.25; overflow-wrap: anywhere; }
 .ctl { width: 36px; height: 36px; line-height: 36px; text-align: center; background: #fff; color: #333; font-size: 17px;
   text-decoration: none; display: block; }
 .ctl.on { background: #fff3dc; color: #9a5a00; }
-.regla { position: absolute; left: 10px; right: 10px; bottom: calc(var(--h) + 10px); z-index: 1000; background: var(--surface); color: var(--ink);
-  border: 1px solid var(--line); border-radius: 14px; padding: 10px 12px; display: grid; gap: 8px; box-shadow: 0 4px 16px rgba(0,0,0,.18); }
+.regla { position: absolute; left: 8px; right: 8px; bottom: calc(var(--h) + 8px); z-index: 1000; background: var(--surface); color: var(--ink);
+  border: 1px solid var(--line); border-radius: 12px; padding: 8px 10px; display: grid; gap: 6px; box-shadow: 0 4px 16px rgba(0,0,0,.18); }
 .regla .fila { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
-.regla .dist { font-size: 20px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.regla .dist { font-size: 16px; font-weight: 700; font-variant-numeric: tabular-nums; line-height: 1.25; }
 .regla .ayuda { font-size: 12.5px; color: var(--muted); }
 .seg { display: inline-flex; border: 1px solid var(--line); border-radius: 9px; overflow: hidden; }
 .seg button { font: inherit; font-size: 12.5px; font-weight: 600; border: 0; padding: 6px 10px; background: var(--surface); color: var(--muted); cursor: pointer; }
 .seg button.on { background: var(--accent-soft); color: var(--accent); }
 .mini { font: inherit; font-size: 12.5px; font-weight: 600; border: 1px solid var(--line); background: var(--surface); color: var(--ink);
-  border-radius: 9px; padding: 6px 10px; cursor: pointer; margin-left: auto; }
+  border-radius: 9px; padding: 6px 10px; cursor: pointer; }
+#mBorrar { margin-left: auto; }
 .sitioicon { background: #16a34a; border: 2px solid #fff; border-radius: 3px; box-shadow: 0 1px 3px rgba(0,0,0,.4); }
 .sitioicon span { position: absolute; left: 18px; top: -3px; white-space: nowrap; font: 700 11px/1 var(--sans); color: #14532d;
   background: rgba(255,255,255,.9); padding: 2px 4px; border-radius: 4px; }
+.regla .dist small { display: block; font-size: 13px; font-weight: 600; color: var(--muted); margin-top: 2px; }
+.regla .dist .gan { color: var(--warn); }
+.campo { font-size: 12.5px; color: var(--muted); display: inline-flex; align-items: center; gap: 6px; }
+.campo input { font: inherit; font-size: 15px; width: 110px; padding: 6px 8px; border: 1px solid var(--line); border-radius: 8px;
+  background: var(--surface); color: var(--ink); }
+.campo.gan { margin-left: auto; }
+.campo input#mMetros { width: 96px; }
+.campo.gan input { width: 52px; font-size: 13px; padding: 4px 6px; }
+.corteicon { background: #dc2626; color: #fff; border: 2px solid #fff; border-radius: 50%; font: 700 13px/20px var(--sans);
+  text-align: center; box-shadow: 0 1px 4px rgba(0,0,0,.4); }
 .medpt { background: #f59e0b; border: 2px solid #fff; border-radius: 50%; box-shadow: 0 1px 3px rgba(0,0,0,.4); }
 </style>
 </head>
@@ -224,10 +235,12 @@ h1 { margin: 0; font-size: 16px; line-height: 1.25; overflow-wrap: anywhere; }
     h += '<span class="chip vence">Vence en ' + horas + ' h</span></div></header>';
     h += '<div class="mapawrap"><div id="mapa" role="region" aria-label="Mapa del recorrido"></div>';
     h += '<div class="regla" id="regla" hidden>' +
-         '<div class="fila"><span class="seg"><button type="button" id="mCable" class="on">Por el cable</button>' +
-         '<button type="button" id="mRecta">En línea recta</button></span>' +
-         '<button type="button" class="mini" id="mBorrar">Borrar</button><button type="button" class="mini" id="mCerrar" style="margin-left:0">Cerrar</button></div>' +
-         '<div class="fila"><span class="dist" id="mDist">—</span></div>' +
+         '<div class="fila"><span class="seg"><button type="button" id="mCable" class="on">Cable</button>' +
+         '<button type="button" id="mRecta">Recta</button><button type="button" id="mCorte">Corte</button></span>' +
+         '<button type="button" class="mini" id="mBorrar">Borrar</button><button type="button" class="mini" id="mCerrar">✕</button></div>' +
+         '<div class="fila" id="filaCorte"><label class="campo" hidden>Medidos <input id="mMetros" type="number" inputmode="decimal" min="0" step="1" placeholder="metros"></label>' +
+         '<label class="campo gan">Ganancia <input id="mGan" type="number" inputmode="decimal" min="0" max="60" step="1" value="15">%</label></div>' +
+         '<div class="dist" id="mDist">—</div>' +
          '<div class="ayuda" id="mAyuda"></div></div>';
     h += '<div class="hoja" id="hoja"><div class="asa" id="asa"><div class="fila"><b>' + bots.length +
          (bots.length === 1 ? ' botella' : ' botellas') + ' · tocá una</b>' +
@@ -288,32 +301,65 @@ h1 { margin: 0; font-size: 16px; line-height: 1.25; overflow-wrap: anywhere; }
       });
       return best;
     }
-    function porCable(p1, p2) {
-      // agrega los dos puntos proyectados como nodos temporales y busca el camino mas corto
-      var n0 = nodos.length, base = ady.length;
-      var extra = [p1, p2].map(function (p) {
-        var a = p.seg[0], b = p.seg[1], id2 = nodos.length;
+    // nodos temporales sobre el cable (puntos tocados), se agregan y se sacan en cada calculo
+    function conTemporales(ps, fn) {
+      var n0 = nodos.length;
+      var ids = ps.map(function (p) {
+        var a = p.seg[0], b = p.seg[1], k = nodos.length;
         nodos.push(p.q); ady.push([[a, p.q.distanceTo(nodos[a])], [b, p.q.distanceTo(nodos[b])]]);
-        ady[a].push([id2, p.q.distanceTo(nodos[a])]); ady[b].push([id2, p.q.distanceTo(nodos[b])]);
-        return id2;
+        ady[a].push([k, p.q.distanceTo(nodos[a])]); ady[b].push([k, p.q.distanceTo(nodos[b])]);
+        return k;
       });
-      if (p1.seg === p2.seg) { var w = p1.q.distanceTo(p2.q); ady[extra[0]].push([extra[1], w]); ady[extra[1]].push([extra[0], w]); }
+      for (var x = 0; x < ps.length; x++) for (var y = x + 1; y < ps.length; y++) if (ps[x].seg === ps[y].seg) {
+        var w = ps[x].q.distanceTo(ps[y].q); ady[ids[x]].push([ids[y], w]); ady[ids[y]].push([ids[x], w]);
+      }
+      try { return fn(ids); }
+      finally {
+        ady.forEach(function (l) { for (var k = l.length - 1; k >= 0; k--) if (l[k][0] >= n0) l.splice(k, 1); });
+        nodos.length = n0; ady.length = n0;
+      }
+    }
+    function dijkstra(o, hasta) {
       var dist = nodos.map(function () { return Infinity; }), prev = [], vis = [];
-      dist[extra[0]] = 0;
+      dist[o] = 0;
       for (;;) {
         var u = -1, du = Infinity;
         for (var i = 0; i < dist.length; i++) if (!vis[i] && dist[i] < du) { du = dist[i]; u = i; }
-        if (u < 0 || u === extra[1]) break;
+        if (u < 0 || u === hasta) break;
         vis[u] = true;
         ady[u].forEach(function (e) { if (du + e[1] < dist[e[0]]) { dist[e[0]] = du + e[1]; prev[e[0]] = u; } });
       }
-      var camino = [];
-      if (dist[extra[1]] < Infinity) for (var x = extra[1]; x !== undefined; x = prev[x]) camino.unshift(nodos[x]);
-      var res = {m: dist[extra[1]], linea: camino};
-      // sacar los nodos temporales
-      ady.forEach(function (l) { for (var k = l.length - 1; k >= 0; k--) if (l[k][0] >= n0) l.splice(k, 1); });
-      nodos.length = n0; ady.length = base;
-      return res;
+      return {dist: dist, prev: prev};
+    }
+    function linea(prev, fin) {
+      var out = [];
+      for (var x = fin; x !== undefined; x = prev[x]) out.unshift(nodos[x]);
+      return out;
+    }
+    function porCable(p1, p2) {
+      return conTemporales([p1, p2], function (ids) {
+        var r = dijkstra(ids[0], ids[1]);
+        return {m: r.dist[ids[1]], linea: r.dist[ids[1]] < Infinity ? linea(r.prev, ids[1]) : []};
+      });
+    }
+    // puntos del cable que quedan a D metros (por el cable) del punto p, en cada direccion
+    function aDistancia(p, D) {
+      return conTemporales([p], function (ids) {
+        var r = dijkstra(ids[0]), dist = r.dist, prev = r.prev, out = [], maximo = 0;
+        dist.forEach(function (v) { if (v < Infinity && v > maximo) maximo = v; });
+        for (var u = 0; u < nodos.length; u++) {
+          if (!(dist[u] <= D)) continue;
+          ady[u].forEach(function (e) {
+            var v = e[0];
+            if (prev[v] !== u || !(dist[v] > D)) return;
+            var f = (D - dist[u]) / e[1], A = nodos[u], B = nodos[v];
+            var q = L.latLng(A.lat + (B.lat - A.lat) * f, A.lng + (B.lng - A.lng) * f);
+            if (out.some(function (o) { return o.q.distanceTo(q) < 5; })) return;
+            out.push({q: q, linea: linea(prev, u).concat([q])});
+          });
+        }
+        return {puntos: out, maximo: maximo};
+      });
     }
 
     // ---- botellas ----
@@ -331,7 +377,7 @@ h1 { margin: 0; font-size: 16px; line-height: 1.25; overflow-wrap: anywhere; }
     });
     var marcas = bots.map(function (b, i) {
       var m = L.marker([b.lat, b.lon], {icon: L.divIcon({className: 'pinicon', html: String(i + 1), iconSize: [26, 26]})});
-      m.on('click', function () { if (midiendo) agregarPunto(L.latLng(b.lat, b.lon), true); else elegir(i, false); });
+      m.on('click', function () { if (midiendo) agregarPunto(L.latLng(b.lat, b.lon)); else elegir(i, false); });
       m.addTo(grupo);
       return m;
     });
@@ -360,60 +406,114 @@ h1 { margin: 0; font-size: 16px; line-height: 1.25; overflow-wrap: anywhere; }
       el.addEventListener('click', function () { elegir(+el.getAttribute('data-i'), true); });
     });
 
-    // ---- regla ----
+    function mm(m) { return Math.round(m).toLocaleString('es-AR') + ' m'; }
+    // ---- regla: por el cable (varios puntos), en linea recta, y punto de corte ----
     var midiendo = false, modo = 'cable', pts = [], capaMed = L.layerGroup().addTo(mapa);
     var regla = document.getElementById('regla');
+    var inGan = document.getElementById('mGan'), inMet = document.getElementById('mMetros');
+    try { var g0 = localStorage.getItem('ganancia'); if (g0) inGan.value = g0; } catch (e) {}
+    function gan() { var g = parseFloat(String(inGan.value).replace(',', '.')); return isFinite(g) && g >= 0 && g < 90 ? g : 15; }
+    function conGanancia(m) {
+      return '<small class="gan">Descontando ' + gan() + '% de ganancia: ' + mm(m * (1 - gan() / 100)) + '</small>';
+    }
     function ayuda() {
-      document.getElementById('mAyuda').textContent = modo === 'cable'
-        ? (tramos.length ? 'Tocá dos puntos sobre el cable (o dos botellas) para medir el tramo.' : 'Este recorrido no tiene cable dibujado.')
-        : 'Tocá puntos en el mapa. Se suma la distancia en línea recta.';
+      var t = {cable: 'Tocá puntos sobre el cable (o botellas). Se suma el recorrido por el cable entre cada uno.',
+               recta: 'Tocá puntos en el mapa. Se suma la distancia en línea recta.',
+               corte: 'Tocá desde dónde se midió (una botella o un punto del cable) y escribí los metros medidos.'}[modo];
+      if (modo !== 'recta' && !tramos.length) t = 'Este recorrido no tiene cable dibujado.';
+      document.getElementById('mAyuda').textContent = t;
+    }
+    function punto(ll, cls, html) {
+      L.marker(ll, {icon: L.divIcon({className: cls, html: html || '', iconSize: cls === 'corteicon' ? [24, 24] : [14, 14]}),
+        interactive: cls === 'corteicon'}).addTo(capaMed);
+    }
+    function botellaCerca(ll) {
+      var mejor = -1, dm = Infinity;
+      bots.forEach(function (b, i) { var x = ll.distanceTo([b.lat, b.lon]); if (x < dm) { dm = x; mejor = i; } });
+      return mejor < 0 ? '' : 'a ' + mm(dm) + ' de la botella ' + (mejor + 1) + ' (' + esc(bots[mejor].nombre) + ')';
     }
     function dibujar() {
       capaMed.clearLayers();
-      var txt = '—';
-      pts.forEach(function (p) { L.marker(p.ll, {icon: L.divIcon({className: 'medpt', iconSize: [14, 14]}), interactive: false}).addTo(capaMed); });
+      var txt = '—', out = document.getElementById('mDist');
+      pts.forEach(function (p) { punto(p.ll, 'medpt'); });
       if (modo === 'recta' && pts.length > 1) {
         var lls = pts.map(function (p) { return p.ll; }), m = 0;
         for (var k = 1; k < lls.length; k++) m += lls[k - 1].distanceTo(lls[k]);
         L.polyline(lls, {color: '#f59e0b', weight: 4, dashArray: '8 6'}).addTo(capaMed);
-        txt = metros(m) + ' en línea recta';
-      } else if (modo === 'cable' && pts.length === 2) {
-        var r = porCable(pts[0].p, pts[1].p);
-        if (r.m < Infinity) {
-          L.polyline(r.linea, {color: '#f59e0b', weight: 7, opacity: .9}).addTo(capaMed);
-          txt = metros(r.m) + ' por el cable';
-        } else txt = 'Esos dos puntos no están unidos por el cable';
-      } else if (modo === 'cable' && pts.length === 1) txt = 'Tocá el segundo punto';
-      document.getElementById('mDist').textContent = txt;
-    }
-    function agregarPunto(ll, esBotella) {
-      if (modo === 'cable') {
-        if (!tramos.length) return;
-        var p = proyectar(ll);
-        if (!p) return;
-        if (pts.length >= 2) pts = [];
-        pts.push({ll: p.q, p: p});
-      } else {
-        pts.push({ll: ll});
+        txt = mm(m) + ' en línea recta' + conGanancia(m);
+      } else if (modo === 'cable' && pts.length > 1) {
+        var total = 0, roto = false;
+        for (var j = 1; j < pts.length; j++) {
+          var r = porCable(pts[j - 1].p, pts[j].p);
+          if (r.m < Infinity) { total += r.m; L.polyline(r.linea, {color: '#f59e0b', weight: 7, opacity: .9}).addTo(capaMed); }
+          else roto = true;
+        }
+        txt = mm(total) + ' por el cable' + (pts.length > 2 ? ' (' + (pts.length - 1) + ' tramos)' : '') + conGanancia(total) +
+              (roto ? '<small>Algún punto no está unido por el cable y no se sumó</small>' : '');
+      } else if (modo === 'cable' && pts.length === 1) {
+        txt = 'Tocá el siguiente punto';
+      } else if (modo === 'corte') {
+        var med = parseFloat(String(inMet.value).replace(',', '.'));
+        if (!pts.length) txt = 'Tocá el punto desde donde se midió';
+        else if (!(med > 0)) txt = 'Escribí los metros medidos';
+        else {
+          var D = med * (1 - gan() / 100), r2 = aDistancia(pts[0].p, D);
+          if (!r2.puntos.length) {
+            txt = 'El cable termina antes' + '<small>Desde ese punto hay como máximo ' + mm(r2.maximo) + ' de cable en el mapa</small>';
+          } else {
+            txt = 'Corte a ' + mm(D) + ' sobre el mapa' + '<small>' + mm(med) + ' medidos − ' + gan() + '% de ganancia · ' +
+                  r2.puntos.length + (r2.puntos.length === 1 ? ' posición' : ' posiciones (una por cada dirección)') + '</small>';
+            r2.puntos.forEach(function (c, n) {
+              L.polyline(c.linea, {color: '#f59e0b', weight: 6, opacity: .85}).addTo(capaMed);
+              var mk = L.marker(c.q, {icon: L.divIcon({className: 'corteicon', html: '✂', iconSize: [24, 24]}), zIndexOffset: 2000});
+              mk.bindPopup('<b>Punto de corte ' + (r2.puntos.length > 1 ? (n + 1) : '') + '</b><br>' + botellaCerca(c.q) +
+                '<br>' + c.q.lat.toFixed(6) + ', ' + c.q.lng.toFixed(6) +
+                '<br><a href="' + ruta(c.q.lat.toFixed(6), c.q.lng.toFixed(6)) + '" target="_blank" rel="noopener">Cómo llegar ↗</a>');
+              mk.addTo(capaMed);
+              if (r2.puntos.length === 1) setTimeout(function () { mk.openPopup(); }, 50);
+            });
+          }
+        }
       }
+      out.innerHTML = txt;
+      document.getElementById('mAyuda').hidden = pts.length > 0;
+    }
+    function agregarPunto(ll) {
+      if (modo === 'recta') { pts.push({ll: ll}); dibujar(); return; }
+      if (!tramos.length) return;
+      var p = proyectar(ll);
+      if (!p) return;
+      if (modo === 'corte') pts = [];
+      pts.push({ll: p.q, p: p});
       dibujar();
+      if (modo === 'corte' && !inMet.value) inMet.focus();
     }
     function setModo(m) {
       modo = m; pts = [];
-      document.getElementById('mCable').classList.toggle('on', m === 'cable');
-      document.getElementById('mRecta').classList.toggle('on', m === 'recta');
+      ['cable', 'recta', 'corte'].forEach(function (x) {
+        document.getElementById('m' + x.charAt(0).toUpperCase() + x.slice(1)).classList.toggle('on', m === x);
+      });
+      document.getElementById('mMetros').parentNode.hidden = m !== 'corte';
+      if (m === 'corte' && sel >= 0) agregarPunto(L.latLng(bots[sel].lat, bots[sel].lon));
       ayuda(); dibujar();
     }
     function regla_(on) {
       midiendo = on; regla.hidden = !on; btnRegla.classList.toggle('on', on);
       if (!on) { pts = []; capaMed.clearLayers(); }
-      else { ayuda(); dibujar(); }
+      else {
+        var hoja = document.getElementById('hoja');
+        hoja.parentNode.style.setProperty('--h', '62px');
+        ayuda(); dibujar();
+      }
     }
-    mapa.on('click', function (e) { if (midiendo) agregarPunto(e.latlng, false); });
+    mapa.on('click', function (e) { if (midiendo) agregarPunto(e.latlng); });
     document.getElementById('mCable').onclick = function () { setModo('cable'); };
     document.getElementById('mRecta').onclick = function () { setModo('recta'); };
-    document.getElementById('mBorrar').onclick = function () { pts = []; dibujar(); };
+    document.getElementById('mCorte').onclick = function () { setModo('corte'); };
+    document.getElementById('mBorrar').onclick = function () { pts = []; inMet.value = ''; dibujar(); };
     document.getElementById('mCerrar').onclick = function () { regla_(false); };
+    inMet.addEventListener('input', dibujar);
+    inGan.addEventListener('input', function () { try { localStorage.setItem('ganancia', inGan.value); } catch (e) {} dibujar(); });
 
     var btnRegla;
     var Herr = L.Control.extend({ options: {position: 'topright'}, onAdd: function () {
