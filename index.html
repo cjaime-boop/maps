@@ -96,7 +96,8 @@ h1 { margin: 0; font-size: 16px; line-height: 1.25; overflow-wrap: anywhere; }
 .campo input { font: inherit; font-size: 15px; width: 110px; padding: 6px 8px; border: 1px solid var(--line); border-radius: 8px;
   background: var(--surface); color: var(--ink); }
 .campo.gan { margin-left: auto; }
-.campo input#mMetros { width: 96px; }
+.campo input#mMetros { width: 84px; }
+.mini.buscar { background: var(--route); color: #fff; border-color: var(--route); }
 .campo.gan input { width: 52px; font-size: 13px; padding: 4px 6px; }
 .corteicon { background: #dc2626; color: #fff; border: 2px solid #fff; border-radius: 50%; font: 700 13px/20px var(--sans);
   text-align: center; box-shadow: 0 1px 4px rgba(0,0,0,.4); }
@@ -133,6 +134,29 @@ h1 { margin: 0; font-size: 16px; line-height: 1.25; overflow-wrap: anywhere; }
     return m < 1000 ? Math.round(m) + ' m' : (m / 1000).toFixed(2).replace('.', ',') + ' km';
   }
 
+  // Dijkstra con cola de prioridad (rápido aunque el cable tenga miles de vértices)
+  function caminoMinimo(n, ady, o, hasta) {
+    var dist = new Float64Array(n).fill(Infinity), prev = new Int32Array(n).fill(-1), h = [[0, o]];
+    dist[o] = 0;
+    function push(x) { h.push(x); var i = h.length - 1; while (i > 0) { var p = (i - 1) >> 1; if (h[p][0] <= h[i][0]) break; var t = h[p]; h[p] = h[i]; h[i] = t; i = p; } }
+    function pop() {
+      var top = h[0], last = h.pop();
+      if (h.length) { h[0] = last; var i = 0;
+        for (;;) { var l = 2 * i + 1, r = l + 1, m = i;
+          if (l < h.length && h[l][0] < h[m][0]) m = l; if (r < h.length && h[r][0] < h[m][0]) m = r;
+          if (m === i) break; var t = h[m]; h[m] = h[i]; h[i] = t; i = m; } }
+      return top;
+    }
+    while (h.length) {
+      var it = pop(), du = it[0], u = it[1];
+      if (du > dist[u]) continue;
+      if (u === hasta) break;
+      var es = ady[u];
+      for (var k = 0; k < es.length; k++) { var v = es[k][0], nd = du + es[k][1]; if (nd < dist[v]) { dist[v] = nd; prev[v] = u; push([nd, v]); } }
+    }
+    return {dist: dist, prev: prev};
+  }
+
   // Ordena las botellas a lo largo del cable (de una punta a la otra), no por el orden en que vienen.
   function ordenar(bots, caminos) {
     var R = 6371000, rad = Math.PI / 180;
@@ -153,17 +177,7 @@ h1 { margin: 0; font-size: 16px; line-height: 1.25; overflow-wrap: anywhere; }
     for (var i = 0; i < N.length; i++) for (var j = i + 1; j < N.length; j++) {
       var dd = dist(N[i], N[j]); if (dd < 15) { A[i].push([j, dd]); A[j].push([i, dd]); }
     }
-    function dijkstra(o) {
-      var D = N.map(function () { return Infinity; }), V = [];
-      D[o] = 0;
-      for (;;) {
-        var u = -1, du = Infinity;
-        for (var k = 0; k < D.length; k++) if (!V[k] && D[k] < du) { du = D[k]; u = k; }
-        if (u < 0) break; V[u] = true;
-        A[u].forEach(function (e) { if (du + e[1] < D[e[0]]) D[e[0]] = du + e[1]; });
-      }
-      return D;
-    }
+    function dijkstra(o) { return Array.from(caminoMinimo(N.length, A, o).dist); }
     function lejos(D) { var m = 0; D.forEach(function (v, k) { if (v < Infinity && v > D[m]) m = k; }); return m; }
     var D = dijkstra(lejos(dijkstra(0)));
     return bots.map(function (b, idx) {
@@ -238,7 +252,8 @@ h1 { margin: 0; font-size: 16px; line-height: 1.25; overflow-wrap: anywhere; }
          '<div class="fila"><span class="seg"><button type="button" id="mCable" class="on">Cable</button>' +
          '<button type="button" id="mRecta">Recta</button><button type="button" id="mCorte">Corte</button></span>' +
          '<button type="button" class="mini" id="mBorrar">Borrar</button><button type="button" class="mini" id="mCerrar">✕</button></div>' +
-         '<div class="fila" id="filaCorte"><label class="campo" hidden>Medidos <input id="mMetros" type="number" inputmode="decimal" min="0" step="1" placeholder="metros"></label>' +
+         '<div class="fila" id="filaCorte"><label class="campo" hidden>Medidos <input id="mMetros" type="number" inputmode="decimal" enterkeyhint="search" min="0" step="1" placeholder="metros">' +
+         '<button type="button" class="mini buscar" id="mBuscar">Buscar</button></label>' +
          '<label class="campo gan">Ganancia <input id="mGan" type="number" inputmode="decimal" min="0" max="60" step="1" value="15">%</label></div>' +
          '<div class="dist" id="mDist">—</div>' +
          '<div class="ayuda" id="mAyuda"></div></div>';
@@ -320,16 +335,9 @@ h1 { margin: 0; font-size: 16px; line-height: 1.25; overflow-wrap: anywhere; }
       }
     }
     function dijkstra(o, hasta) {
-      var dist = nodos.map(function () { return Infinity; }), prev = [], vis = [];
-      dist[o] = 0;
-      for (;;) {
-        var u = -1, du = Infinity;
-        for (var i = 0; i < dist.length; i++) if (!vis[i] && dist[i] < du) { du = dist[i]; u = i; }
-        if (u < 0 || u === hasta) break;
-        vis[u] = true;
-        ady[u].forEach(function (e) { if (du + e[1] < dist[e[0]]) { dist[e[0]] = du + e[1]; prev[e[0]] = u; } });
-      }
-      return {dist: dist, prev: prev};
+      var r = caminoMinimo(nodos.length, ady, o, hasta), prev = [];
+      for (var i = 0; i < r.prev.length; i++) prev[i] = r.prev[i] >= 0 ? r.prev[i] : undefined;
+      return {dist: Array.from(r.dist), prev: prev};
     }
     function linea(prev, fin) {
       var out = [];
@@ -365,15 +373,24 @@ h1 { margin: 0; font-size: 16px; line-height: 1.25; overflow-wrap: anywhere; }
     // ---- botellas ----
     var sel = -1;
     // sitios (cuadrado verde con nombre) y camaras (punto naranja chico), solo en el mapa
+    // en modo medir, tocar un sitio o una cámara la usa como punto; si no, muestra su ficha
+    function tocable(capa, html, ll) {
+      capa.on('click', function (e) {
+        L.DomEvent.stopPropagation(e);
+        if (midiendo) agregarPunto(L.latLng(ll));
+        else L.popup().setLatLng(ll).setContent(html).openOn(mapa);
+      });
+      capa.addTo(grupo);
+    }
     (d.sitios || []).forEach(function (s0) {
-      L.marker([s0.lat, s0.lon], {icon: L.divIcon({className: 'sitioicon', html: '<span>' + esc(s0.nombre) + '</span>', iconSize: [16, 16]}),
-        zIndexOffset: 500}).bindPopup('<b>Sitio ' + esc(s0.nombre) + '</b><br><a href="' + ruta(s0.lat, s0.lon) +
-        '" target="_blank" rel="noopener">Cómo llegar ↗</a>').addTo(grupo);
+      tocable(L.marker([s0.lat, s0.lon], {icon: L.divIcon({className: 'sitioicon', html: '<span>' + esc(s0.nombre) + '</span>', iconSize: [16, 16]}),
+        zIndexOffset: 500}), '<b>Sitio ' + esc(s0.nombre) + '</b><br><a href="' + ruta(s0.lat, s0.lon) +
+        '" target="_blank" rel="noopener">Cómo llegar ↗</a>', [s0.lat, s0.lon]);
     });
     (d.camaras || []).forEach(function (c0) {
-      L.circleMarker([c0.lat, c0.lon], {radius: 4, color: '#fff', weight: 1.5, fillColor: '#f59e0b', fillOpacity: 1})
-        .bindPopup('<b>Cámara</b> ' + esc(c0.nombre) + '<br><a href="' + ruta(c0.lat, c0.lon) +
-        '" target="_blank" rel="noopener">Cómo llegar ↗</a>').addTo(grupo);
+      tocable(L.circleMarker([c0.lat, c0.lon], {radius: 4, color: '#fff', weight: 1.5, fillColor: '#f59e0b', fillOpacity: 1}),
+        '<b>Cámara</b> ' + esc(c0.nombre) + '<br><a href="' + ruta(c0.lat, c0.lon) +
+        '" target="_blank" rel="noopener">Cómo llegar ↗</a>', [c0.lat, c0.lon]);
     });
     var marcas = bots.map(function (b, i) {
       var m = L.marker([b.lat, b.lon], {icon: L.divIcon({className: 'pinicon', html: String(i + 1), iconSize: [26, 26]})});
@@ -512,8 +529,10 @@ h1 { margin: 0; font-size: 16px; line-height: 1.25; overflow-wrap: anywhere; }
     document.getElementById('mCorte').onclick = function () { setModo('corte'); };
     document.getElementById('mBorrar').onclick = function () { pts = []; inMet.value = ''; dibujar(); };
     document.getElementById('mCerrar').onclick = function () { regla_(false); };
-    inMet.addEventListener('input', dibujar);
-    inGan.addEventListener('input', function () { try { localStorage.setItem('ganancia', inGan.value); } catch (e) {} dibujar(); });
+    inMet.addEventListener('keydown', function (e) { if (e.key === 'Enter') { e.preventDefault(); inMet.blur(); dibujar(); } });
+    document.getElementById('mBuscar').onclick = function () { inMet.blur(); dibujar(); };
+    inGan.addEventListener('change', function () { try { localStorage.setItem('ganancia', inGan.value); } catch (e) {} dibujar(); });
+    inGan.addEventListener('keydown', function (e) { if (e.key === 'Enter') { e.preventDefault(); inGan.blur(); } });
 
     var btnRegla;
     var Herr = L.Control.extend({ options: {position: 'topright'}, onAdd: function () {
