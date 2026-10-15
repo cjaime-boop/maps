@@ -1,0 +1,468 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex, nofollow">
+<meta name="referrer" content="no-referrer">
+<meta name="theme-color" content="#1d5bd8">
+<title>Historial de casos</title>
+<meta property="og:title" content="Historial de casos">
+<meta property="og:description" content="Qué pasó cerca de un punto o de una botella.">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="">
+<style>
+:root {
+  --bg: #eef1f5; --surface: #ffffff; --ink: #172033; --muted: #5d6779; --line: #dbe1ea; --soft: #f4f6fa;
+  --accent: #1d5bd8; --accent-soft: #e6eefc;
+  --sans: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --mono: ui-monospace, "SF Mono", Consolas, "Roboto Mono", monospace;
+  --rojo-bg: #fef2f2; --rojo-bd: #dc2626; --rojo-tx: #7f1d1d;
+  --nar-bg: #fff7ed; --nar-bd: #ea580c; --nar-tx: #7c2d12;
+  --ama-bg: #fefce8; --ama-bd: #ca8a04; --ama-tx: #713f12;
+  --ver-bg: #f0fdf4; --ver-bd: #16a34a; --ver-tx: #14532d;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) { :root {
+  --bg: #0f141d; --surface: #182030; --ink: #e8edf6; --muted: #9aa5b8; --line: #2a3446; --soft: #1e2739;
+  --accent: #6f9cf5; --accent-soft: #1f2d48;
+  --rojo-bg: #3a2430; --rojo-bd: #e05c5c; --rojo-tx: #f3b0b0;
+  --nar-bg: #3a2a1c; --nar-bd: #f08a3c; --nar-tx: #f6c49a;
+  --ama-bg: #35301b; --ama-bd: #d4b13c; --ama-tx: #ecd98f;
+  --ver-bg: #1f3328; --ver-bd: #4caf7d; --ver-tx: #a6dcbf; color-scheme: dark } }
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+html, body { margin: 0; background: var(--bg); color: var(--ink); font-family: var(--sans); font-size: 15px; }
+.app { max-width: 720px; margin: 0 auto; background: var(--surface); height: 100vh; height: 100dvh;
+  display: flex; flex-direction: column; overflow: hidden; }
+button, input, select { font: inherit; color: inherit; }
+
+/* login */
+.login { margin: auto; width: min(340px, 90%); display: grid; gap: 12px; text-align: center; }
+.login img { width: 64px; height: 64px; margin: 0 auto; }
+.login h1 { margin: 0; font-size: 20px; }
+.login p { margin: 0; color: var(--muted); font-size: 14px; }
+.login input { padding: 13px 14px; border-radius: 12px; border: 1px solid var(--line); background: var(--soft); font-size: 16px; }
+.login .err { color: var(--rojo-bd); font-size: 13px; min-height: 1em; }
+
+/* barra superior */
+.barra { padding: 10px 12px 8px; display: grid; gap: 8px; border-bottom: 1px solid var(--line);
+  padding-top: max(10px, env(safe-area-inset-top, 0px)); }
+.busca { display: flex; gap: 6px; }
+.busca input { flex: 1; min-width: 0; padding: 11px 12px; border-radius: 12px; border: 1px solid var(--line);
+  background: var(--soft); font-size: 16px; }
+.btn { border: 1px solid var(--line); background: var(--surface); border-radius: 12px; padding: 10px 13px;
+  font-weight: 600; font-size: 14px; cursor: pointer; white-space: nowrap; }
+.btn.prim { background: var(--accent); border-color: var(--accent); color: #fff; }
+.btn:active { transform: scale(.98); }
+.opciones { display: flex; gap: 6px; align-items: center; overflow-x: auto; scrollbar-width: none; }
+.opciones::-webkit-scrollbar { display: none; }
+.chip { border: 1px solid var(--line); background: var(--surface); border-radius: 99px; padding: 6px 11px;
+  font-size: 13px; font-weight: 600; white-space: nowrap; cursor: pointer; color: var(--muted); }
+.chip.on { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); }
+.sep { width: 1px; height: 20px; background: var(--line); flex: none; }
+
+/* mapa + hoja */
+.cuerpo { position: relative; flex: 1; min-height: 0; }
+#mapa { position: absolute; inset: 0; background: #e5e3df; }
+.hint { position: absolute; top: 10px; left: 50%; transform: translateX(-50%); z-index: 900; background: rgba(23,32,51,.86);
+  color: #fff; font-size: 13px; padding: 7px 12px; border-radius: 99px; pointer-events: none; white-space: nowrap; }
+.hoja { position: absolute; left: 0; right: 0; bottom: 0; z-index: 1000; background: var(--surface);
+  border-radius: 16px 16px 0 0; box-shadow: 0 -4px 18px rgba(0,0,0,.18); display: flex; flex-direction: column;
+  max-height: 85%; height: var(--h, 46%); transition: height .15s; }
+.asa { padding: 8px 0 4px; display: grid; place-items: center; cursor: grab; touch-action: none; }
+.asa i { width: 40px; height: 5px; border-radius: 3px; background: var(--line); }
+.res { overflow-y: auto; padding: 0 12px calc(12px + env(safe-area-inset-bottom, 0px)); -webkit-overflow-scrolling: touch; }
+.alerta { border-radius: 10px; padding: 9px 11px; font-size: 13px; line-height: 1.4; border-left: 4px solid var(--line);
+  background: var(--soft); color: var(--muted); margin-bottom: 8px; }
+.alerta b { color: inherit; }
+.alerta.rojo { background: var(--rojo-bg); border-color: var(--rojo-bd); color: var(--rojo-tx); }
+.alerta.naranja { background: var(--nar-bg); border-color: var(--nar-bd); color: var(--nar-tx); }
+.alerta.amarillo { background: var(--ama-bg); border-color: var(--ama-bd); color: var(--ama-tx); }
+.alerta.verde { background: var(--ver-bg); border-color: var(--ver-bd); color: var(--ver-tx); }
+.alerta .tit { font-weight: 700; display: block; margin-bottom: 2px; }
+.sub { display: flex; justify-content: space-between; align-items: center; font-size: 11px; font-weight: 700;
+  letter-spacing: .08em; color: var(--muted); margin: 6px 2px; }
+.sub label { font-weight: 500; letter-spacing: 0; font-size: 12.5px; display: flex; gap: 6px; align-items: center; }
+details.wo { border: 1px solid var(--line); border-radius: 12px; margin-bottom: 7px; overflow: hidden; }
+details.wo > summary { list-style: none; padding: 10px 12px; cursor: pointer; display: grid; gap: 3px; background: var(--soft); }
+details.wo > summary::-webkit-details-marker { display: none; }
+.l1 { display: flex; justify-content: space-between; gap: 8px; align-items: baseline; }
+.l1 b { font-family: var(--mono); font-size: 13.5px; overflow-wrap: anywhere; }
+.l1 span { font-size: 12.5px; color: var(--muted); white-space: nowrap; }
+.l2 { font-size: 13px; display: flex; gap: 6px; align-items: center; }
+.l3 { font-size: 12px; color: var(--muted); overflow-wrap: anywhere; }
+.dot { width: 10px; height: 10px; border-radius: 50%; flex: none; display: inline-block; }
+details.dia { border-top: 1px solid var(--line); }
+details.dia > summary { list-style: none; padding: 8px 12px 8px 22px; cursor: pointer; font-size: 13px; display: flex;
+  justify-content: space-between; gap: 8px; }
+details.dia > summary::-webkit-details-marker { display: none; }
+details.dia > summary b { white-space: nowrap; }
+details.dia > summary span { color: var(--muted); text-align: right; }
+.ev { padding: 8px 12px 9px 30px; border-top: 1px dashed var(--line); font-size: 13px; display: grid; gap: 2px; cursor: pointer; }
+.ev .a { display: flex; gap: 6px; align-items: center; }
+.ev .a em { font-style: normal; color: var(--muted); margin-left: auto; white-space: nowrap; font-size: 12px; }
+.ev .d { color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }
+.ev .d code { font-family: var(--mono); color: var(--ink); }
+.vacio { text-align: center; color: var(--muted); padding: 18px 8px; font-size: 14px; }
+.pie { font-size: 11.5px; color: var(--muted); text-align: center; padding: 10px 0 2px; }
+.pie a { color: var(--muted); }
+.yo { background: #1a73e8; border: 3px solid #fff; border-radius: 50%; box-shadow: 0 0 0 6px rgba(26,115,232,.25); }
+.cruz { color: #111; font: 700 26px/26px var(--sans); text-align: center; text-shadow: 0 0 3px #fff, 0 0 3px #fff; }
+.cargando { opacity: .55; pointer-events: none; }
+</style>
+</head>
+<body>
+<div class="app" id="app"></div>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
+<script>
+(function () {
+  'use strict';
+  var SUPABASE = 'https://gnqvhlpknxtdnzuxfybc.supabase.co';
+  var CLAVE = 'sb_publishable_dUhjyCfRfNtLVLfOYnJ1WA_hfPD3kk9';
+  var EMAIL = 'qgis@mobisond.com';
+  var ALERTA_HORAS = 48, ALERTA_METROS = 60;
+  var COLORES = {
+    'Reasignación': '#d62728', 'Corte': '#ff7f0e', 'Botella nueva': '#9467bd', 'BT no documentada': '#e377c2',
+    'Reparación': '#1f77b4', 'Intervención Mobisond': '#17becf', 'Relevamiento Mobisond': '#7f7f7f',
+    'Punto cliente': '#2ca02c', 'Mención': '#bcbd22'
+  };
+  var ORDEN = Object.keys(COLORES);
+  var PRIO = ['Reasignación', 'Botella nueva', 'BT no documentada', 'Corte', 'Reparación', 'Intervención Mobisond',
+              'Relevamiento Mobisond', 'Punto cliente', 'Mención'];
+  var INTERV = ['Reasignación', 'Corte', 'Botella nueva', 'Reparación', 'Intervención Mobisond'];
+  var PLURAL = {'Reasignación': 'reasignaciones', 'Corte': 'cortes', 'Botella nueva': 'botellas nuevas',
+    'BT no documentada': 'BT no documentadas', 'Reparación': 'reparaciones', 'Intervención Mobisond': 'intervenciones Mobisond',
+    'Relevamiento Mobisond': 'relevamientos', 'Punto cliente': 'puntos del cliente', 'Mención': 'menciones'};
+  var SEM = ['dom', 'lun', 'mar', 'mié', 'jue', 'vie', 'sáb'];
+  var app = document.getElementById('app');
+
+  function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
+    return {'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[c]; }); }
+  function ls(k, v) { try { if (v === undefined) return localStorage.getItem(k); if (v === null) localStorage.removeItem(k); else localStorage.setItem(k, v); } catch (e) { return null; } }
+  function prio(c) { var i = PRIO.indexOf(c); return i < 0 ? 99 : i; }
+
+  // ---------------- sesión (mismo usuario fijo que el plugin; la contraseña la escribe la persona una vez)
+  var ses = {access: null, vence: 0};
+  function post(ruta, cuerpo, token) {
+    return fetch(SUPABASE + ruta, {method: 'POST', headers: {'Content-Type': 'application/json', apikey: CLAVE,
+      Authorization: 'Bearer ' + (token || CLAVE)}, body: JSON.stringify(cuerpo || {})})
+      .then(function (r) { return r.text().then(function (t) {
+        var d = null; try { d = t ? JSON.parse(t) : null; } catch (e) {}
+        if (!r.ok) { var err = new Error((d && (d.msg || d.message || d.error_description)) || ('Error ' + r.status)); err.status = r.status; throw err; }
+        return d; }); });
+  }
+  function guardar(d) {
+    if (!d || !d.access_token) throw new Error('No se pudo entrar');
+    ses.access = d.access_token; ses.vence = Date.now() + ((d.expires_in || 3600) - 60) * 1000;
+    ls('hc_refresh', d.refresh_token || '');
+  }
+  function entrar(clave) { return post('/auth/v1/token?grant_type=password', {email: EMAIL, password: clave}).then(guardar); }
+  function token() {
+    if (ses.access && Date.now() < ses.vence) return Promise.resolve(ses.access);
+    var r = ls('hc_refresh');
+    if (!r) return Promise.reject(Object.assign(new Error('login'), {login: true}));
+    return post('/auth/v1/token?grant_type=refresh_token', {refresh_token: r}).then(function (d) { guardar(d); return ses.access; })
+      .catch(function () { ls('hc_refresh', null); throw Object.assign(new Error('login'), {login: true}); });
+  }
+  function rpc(fn, params) {
+    return token().then(function (t) { return post('/rest/v1/rpc/' + fn, params, t); }).catch(function (e) {
+      if (e.status === 401) { ses.access = null; return token().then(function (t) { return post('/rest/v1/rpc/' + fn, params, t); }); }
+      throw e; });
+  }
+
+  // ---------------- análisis (igual que analisis.py del plugin)
+  function fecha(s) { var d = s ? new Date(s) : null; return d && !isNaN(d) ? d : null; }
+  function local(d) { return new Date(d.getTime() - 3 * 3600000); }      // hora de Argentina (UTC-3)
+  function dia(s) { var d = fecha(s); return d ? local(d).toISOString().slice(0, 10) : ''; }
+  function diaTitulo(k) {
+    if (!k) return 'sin fecha';
+    var p = k.split('-'), d = new Date(Date.UTC(+p[0], +p[1] - 1, +p[2]));
+    return SEM[d.getUTCDay()] + ' ' + p[2] + '/' + p[1] + '/' + p[0].slice(2);
+  }
+  function hora(s) { var d = fecha(s); return d ? local(d).toISOString().slice(11, 16) : ''; }
+  function horas(s) { var d = fecha(s); return d ? (Date.now() - d.getTime()) / 3600000 : null; }
+  function wosDe(e) { return String(e.wo || '').split(', ').filter(Boolean); }
+  function nombreCat(c, n) { return n !== 1 ? (PLURAL[c] || c) : (c.indexOf('BT') === 0 ? c : c.toLowerCase()); }
+
+  function agrupar(eventos, menciones) {
+    var grupos = {}, orden = [];
+    eventos.forEach(function (e) {
+      var cat = e.categoria || 'Mención', bt = String(e.bt || '').trim().toUpperCase(), lugar;
+      if (bt) lugar = bt; else if (e.lat != null) lugar = (+e.lat).toFixed(4) + ',' + (+e.lon).toFixed(4); else lugar = 'wo:' + e.wo;
+      var k = cat + '|' + lugar + '|' + dia(e.fecha), g = grupos[k];
+      if (!g) { g = Object.assign({}, e, {categoria: cat, _wos: [], _enl: [], n: 0}); grupos[k] = g; orden.push(k); }
+      g.n++;
+      if (e.wo && g._wos.indexOf(e.wo) < 0) g._wos.push(e.wo);
+      if (e.enlace && g._enl.indexOf(e.enlace) < 0) g._enl.push(e.enlace);
+      if ((e.distancia_m || 0) < (g.distancia_m || 0)) { g.distancia_m = e.distancia_m; g.lat = e.lat; g.lon = e.lon; g.detalle = e.detalle; }
+      if ((e.fecha || '') < (g.fecha || '')) g.fecha = e.fecha;
+      ['causa', 'id_cierre', 'estado'].forEach(function (c) { if (!g[c] && e[c]) g[c] = e[c]; });
+    });
+    var filas = orden.map(function (k) { var g = grupos[k]; g.wo = g._wos.sort().join(', '); g.enlace = g._enl.join(' / '); delete g._wos; delete g._enl; return g; });
+    var imp = {};
+    filas.forEach(function (f) { if (f.categoria !== 'Mención' && f.categoria !== 'Relevamiento Mobisond')
+      f.wo.split(', ').forEach(function (w) { imp[w + '|' + String(f.bt || '').toUpperCase() + '|' + dia(f.fecha)] = 1; }); });
+    var ocultas = 0, salida = [];
+    filas.forEach(function (f) {
+      if (f.categoria === 'Mención') {
+        var red = f.wo.split(', ').every(function (w) { return imp[w + '|' + String(f.bt || '').toUpperCase() + '|' + dia(f.fecha)]; });
+        if (red || !menciones) { ocultas++; return; }
+      }
+      salida.push(f);
+    });
+    salida.sort(function (a, b) { return (b.fecha || '').localeCompare(a.fecha || ''); });
+    return {filas: salida, ocultas: ocultas};
+  }
+
+  function resumen(ev, radio, dias) {
+    if (!ev.length) return {nivel: 'verde', html: 'Sin antecedentes a ' + radio + ' m en ' + (dias ? dias + ' días' : 'todo el historial') + '.'};
+    var conteo = {}, wos = {};
+    ev.forEach(function (e) { var c = e.categoria || 'Mención'; conteo[c] = (conteo[c] || 0) + 1;
+      String(e.wo || '').split(',').forEach(function (w) { w = w.trim(); if (w) wos[w] = 1; }); });
+    var alertas = [], nivel = 'amarillo';
+    ev.forEach(function (e) {
+      var h = horas(e.fecha), d = e.distancia_m || 0;
+      if (INTERV.indexOf(e.categoria) >= 0 && h != null && h >= 0 && h <= ALERTA_HORAS && d <= ALERTA_METROS) {
+        alertas.push('<b>Posible manipulación:</b> ' + esc(e.categoria) + ' hace ' + Math.round(h) + ' h a ' + d + ' m (' + esc(e.wo) + ', ' + esc(e.bt || 'sin ID de BT') + ')');
+        nivel = 'rojo';
+      }
+    });
+    ['BT no documentada', 'Botella nueva'].forEach(function (cat) {
+      var c = ev.filter(function (e) { return e.categoria === cat; });
+      if (c.length) {
+        var e = c.reduce(function (a, b) { return (b.distancia_m || 0) < (a.distancia_m || 0) ? b : a; });
+        alertas.push('<b>' + cat + '</b> a ' + (e.distancia_m || 0) + ' m: ' + esc(e.bt || 'sin ID') + ' (' + esc(e.wo) + ')');
+        if (nivel !== 'rojo') nivel = 'naranja';
+      }
+    });
+    if (ev.some(function (e) { return e.categoria === 'Reasignación'; }) && nivel === 'amarillo') nivel = 'naranja';
+    var partes = ORDEN.filter(function (c) { return conteo[c]; }).map(function (c) { return conteo[c] + ' ' + nombreCat(c, conteo[c]); });
+    alertas.push('A ' + radio + ' m / ' + (dias ? dias + ' días' : 'todo') + ': ' + partes.join(', ') + ' en ' + Object.keys(wos).length + ' WO.');
+    return {nivel: nivel, html: alertas.join('<br>')};
+  }
+
+  function resumenCats(lista) {
+    var cats = {};
+    lista.forEach(function (e) { cats[e.categoria] = (cats[e.categoria] || 0) + 1; });
+    var orden = Object.keys(cats).sort(function (a, b) { return prio(a) - prio(b); });
+    return {principal: orden[0], texto: orden.map(function (c) { return cats[c] + ' ' + nombreCat(c, cats[c]); }).join(', ')};
+  }
+
+  // ---------------- pantalla de login
+  function pantallaLogin(msg) {
+    app.innerHTML = '<form class="login" id="fl"><img src="icono.png" alt="" onerror="this.remove()">' +
+      '<h1>Historial de casos</h1><p>Qué pasó cerca de un punto o de una botella</p>' +
+      '<input id="clave" type="password" autocomplete="current-password" placeholder="Contraseña" required>' +
+      '<button class="btn prim" type="submit">Entrar</button><div class="err" id="err">' + esc(msg || '') + '</div></form>';
+    document.getElementById('fl').onsubmit = function (ev) {
+      ev.preventDefault();
+      var b = ev.target.querySelector('button'); b.disabled = true; b.textContent = 'Entrando…';
+      entrar(document.getElementById('clave').value).then(pantallaPrincipal).catch(function () {
+        b.disabled = false; b.textContent = 'Entrar';
+        document.getElementById('err').textContent = 'Contraseña incorrecta o sin conexión.';
+      });
+    };
+  }
+
+  // ---------------- pantalla principal
+  var mapa, capa, ultimo = null, radio = +(ls('hc_radio') || 300), dias = +(ls('hc_dias') || 90);
+  function pantallaPrincipal() {
+    app.innerHTML =
+      '<div class="barra">' +
+        '<form class="busca" id="fb"><input id="q" type="search" enterkeyhint="search" autocomplete="off" ' +
+          'placeholder="Botella, coordenadas o link de Maps"><button class="btn prim" type="submit">Buscar</button></form>' +
+        '<div class="opciones"><button class="chip" id="gps" type="button">📍 Dónde estoy</button><span class="sep"></span>' +
+          [100, 300, 500, 1000].map(function (r) { return '<button class="chip rad" data-r="' + r + '" type="button">' + (r >= 1000 ? r / 1000 + ' km' : r + ' m') + '</button>'; }).join('') +
+          '<span class="sep"></span>' +
+          [30, 90, 0].map(function (d) { return '<button class="chip dia" data-d="' + d + '" type="button">' + (d ? d + ' días' : 'Todo') + '</button>'; }).join('') +
+        '</div>' +
+      '</div>' +
+      '<div class="cuerpo"><div id="mapa"></div><div class="hint" id="hint">Tocá el mapa, usá el GPS o buscá arriba</div>' +
+        '<div class="hoja" id="hoja"><div class="asa" id="asa"><i></i></div><div class="res" id="res">' +
+          '<div class="vacio">Tocá un punto del mapa, usá 📍 Dónde estoy, o pegá arriba un ID de botella, unas coordenadas, ' +
+          'un link de Google Maps o una ubicación compartida por WhatsApp.</div></div></div></div>';
+    marcarChips();
+    mapa = L.map('mapa', {zoomControl: false, attributionControl: true}).setView([-34.60, -58.45], 11);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {maxZoom: 19, attribution: '© OpenStreetMap'}).addTo(mapa);
+    capa = L.featureGroup().addTo(mapa);
+    mapa.on('click', function (e) { consultarPunto(e.latlng.lat, e.latlng.lng, 'Punto tocado'); });
+    document.getElementById('fb').onsubmit = function (ev) { ev.preventDefault(); buscar(document.getElementById('q').value); document.getElementById('q').blur(); };
+    document.getElementById('gps').onclick = dondeEstoy;
+    Array.prototype.forEach.call(document.querySelectorAll('.rad'), function (b) { b.onclick = function () { radio = +b.dataset.r; ls('hc_radio', radio); marcarChips(); repetir(); }; });
+    Array.prototype.forEach.call(document.querySelectorAll('.dia'), function (b) { b.onclick = function () { dias = +b.dataset.d; ls('hc_dias', dias); marcarChips(); repetir(); }; });
+    hojaArrastrable();
+    // link con consulta: historial.html#q=PIL_090-1442  o  #q=-34.6,-58.5
+    if (/^#q=/.test(location.hash)) {
+      var h = location.hash.slice(3); try { h = decodeURIComponent(h); } catch (e) {}
+      document.getElementById('q').value = h; buscar(h);
+    }
+  }
+  function marcarChips() {
+    Array.prototype.forEach.call(document.querySelectorAll('.rad'), function (b) { b.classList.toggle('on', +b.dataset.r === radio); });
+    Array.prototype.forEach.call(document.querySelectorAll('.dia'), function (b) { b.classList.toggle('on', +b.dataset.d === dias); });
+  }
+  function hojaArrastrable() {
+    var hoja = document.getElementById('hoja'), asa = document.getElementById('asa'), y0 = null, h0 = 0;
+    asa.addEventListener('pointerdown', function (e) { y0 = e.clientY; h0 = hoja.getBoundingClientRect().height; asa.setPointerCapture(e.pointerId); hoja.style.transition = 'none'; });
+    asa.addEventListener('pointermove', function (e) {
+      if (y0 == null) return;
+      var alto = hoja.parentNode.getBoundingClientRect().height;
+      var h = Math.max(70, Math.min(alto * .9, h0 + (y0 - e.clientY)));
+      hoja.style.setProperty('--h', h + 'px');
+    });
+    function soltar() { y0 = null; hoja.style.transition = ''; }
+    asa.addEventListener('pointerup', soltar); asa.addEventListener('pointercancel', soltar);
+  }
+  function repetir() { if (ultimo) ultimo(); }
+
+  // coordenadas o links: "-34.6, -58.5", "34°35'10\"S 58°30'W", google maps (q=, @, ll=), ubicación de WhatsApp
+  function coordenadas(txt) {
+    var t = txt; try { t = decodeURIComponent(txt); } catch (e) {}
+    t = t.replace(/\+/g, ' ');
+    var m = t.match(/(-?\d{1,2}\.\d{3,})\s*[, ;]\s*(-?\d{1,3}\.\d{3,})/);
+    if (m) { var a = +m[1], b = +m[2]; if (Math.abs(a) <= 90 && Math.abs(b) <= 180) return [a, b]; }
+    var dms = /(\d{1,3})\s*°\s*(\d{1,2})\s*['’′]\s*(\d{1,2}(?:[.,]\d+)?)?\s*(?:["”″]|'')?\s*([NSOWE])/gi, partes = [], x;
+    while ((x = dms.exec(t))) {
+      var v = +x[1] + (+x[2]) / 60 + (x[3] ? parseFloat(x[3].replace(',', '.')) / 3600 : 0);
+      if (/[SOW]/i.test(x[4])) v = -v;
+      partes.push({v: v, lat: /[NS]/i.test(x[4])});
+    }
+    if (partes.length >= 2) {
+      var la = partes.filter(function (p) { return p.lat; })[0], lo = partes.filter(function (p) { return !p.lat; })[0];
+      if (la && lo) return [la.v, lo.v];
+    }
+    return null;
+  }
+  function buscar(txt) {
+    txt = (txt || '').trim();
+    if (!txt) return;
+    var c = coordenadas(txt);
+    if (c) { consultarPunto(c[0], c[1], 'Punto ' + c[0].toFixed(5) + ', ' + c[1].toFixed(5)); return; }
+    if (/goo\.gl|maps\.app|https?:\/\//i.test(txt)) {
+      aviso('Ese link no trae las coordenadas a la vista (los links cortos de Google no se pueden leer desde acá). ' +
+            'Abrilo, mantené apretado el punto y copiá las coordenadas que aparecen arriba.'); return;
+    }
+    consultarBT(txt.toUpperCase());
+  }
+  function dondeEstoy() {
+    if (!navigator.geolocation) { aviso('Este celular no permite usar la ubicación.'); return; }
+    var b = document.getElementById('gps'); b.textContent = '📍 Buscando…';
+    navigator.geolocation.getCurrentPosition(function (p) {
+      b.textContent = '📍 Dónde estoy';
+      L.marker([p.coords.latitude, p.coords.longitude], {icon: L.divIcon({className: 'yo', iconSize: [16, 16]})}).addTo(capa);
+      consultarPunto(p.coords.latitude, p.coords.longitude, 'Mi ubicación');
+    }, function () { b.textContent = '📍 Dónde estoy'; aviso('No pude obtener la ubicación. Revisá que el GPS esté prendido y que el navegador tenga permiso.'); },
+    {enableHighAccuracy: true, timeout: 15000, maximumAge: 30000});
+  }
+  function aviso(t) { document.getElementById('res').innerHTML = '<div class="vacio">' + esc(t) + '</div>'; }
+  function cargando(si) { document.getElementById('res').classList.toggle('cargando', si); }
+  function fallo(e) {
+    cargando(false);
+    if (e && e.login) { pantallaLogin('La sesión venció. Volvé a entrar.'); return; }
+    aviso('No pude consultar la base: ' + (e && e.message || 'sin conexión') + '.');
+  }
+
+  function consultarPunto(lat, lon, titulo) {
+    ultimo = function () { consultarPunto(lat, lon, titulo); };
+    document.getElementById('hint').hidden = true;
+    cargando(true);
+    rpc('hc_eventos_cerca', {p_lat: lat, p_lon: lon, p_radio: radio, p_dias: dias}).then(function (ev) {
+      cargando(false); mostrar(ev || [], titulo, [lat, lon]);
+    }).catch(fallo);
+  }
+  function consultarBT(bt) {
+    ultimo = function () { consultarBT(bt); };
+    document.getElementById('hint').hidden = true;
+    cargando(true);
+    rpc('hc_eventos_bt', {p_bt: bt, p_dias: dias, p_radio: radio}).then(function (ev) {
+      cargando(false);
+      if (!ev || !ev.length) { aviso('No hay eventos de la botella ' + bt + ' en la ventana elegida. Probá con "Todo" o tocando el punto en el mapa.'); capa.clearLayers(); return; }
+      mostrar(ev, 'Botella ' + bt, null);
+    }).catch(fallo);
+  }
+
+  // ---------------- resultado
+  var menciones = false, datos = null;
+  function mostrar(crudos, titulo, centro) {
+    datos = {crudos: crudos, titulo: titulo, centro: centro};
+    var ag = agrupar(crudos, menciones), ev = ag.filas, r = resumen(ev, radio, dias);
+    var icono = {rojo: '⚠', naranja: '●', amarillo: '●', verde: '✓'}[r.nivel];
+    var h = '<div class="alerta ' + r.nivel + '"><span class="tit">' + icono + ' ' + esc(titulo) + '</span>' + r.html + '</div>';
+    h += '<div class="sub"><span>' + (ev.length ? 'EVENTOS POR WO' : '') + '</span>' +
+         (ag.ocultas || menciones ? '<label><input type="checkbox" id="men"' + (menciones ? ' checked' : '') + '> Menciones' +
+          (ag.ocultas ? ' (' + ag.ocultas + ' ocultas)' : '') + '</label>' : '') + '</div>';
+    h += listaPorWO(ev);
+    h += '<div class="pie">Tocá un evento para verlo en el mapa · <a href="#" id="salir">Salir</a></div>';
+    var res = document.getElementById('res'); res.innerHTML = h; res.scrollTop = 0;
+    var men = document.getElementById('men'); if (men) men.onchange = function () { menciones = men.checked; mostrar(datos.crudos, datos.titulo, datos.centro); };
+    document.getElementById('salir').onclick = function (e) { e.preventDefault(); ls('hc_refresh', null); ses.access = null; pantallaLogin(); };
+    Array.prototype.forEach.call(res.querySelectorAll('.ev'), function (el) {
+      el.onclick = function () { var e = ev[+el.dataset.i]; if (e && e.lat != null) mapa.setView([+e.lat, +e.lon], Math.max(mapa.getZoom(), 17)); };
+    });
+    // mapa
+    capa.clearLayers();
+    var pts = [], circulo = null;
+    if (centro) {
+      circulo = L.circle(centro, {radius: radio, color: '#1d5bd8', weight: 1.5, fillOpacity: .06}).addTo(capa);
+      L.marker(centro, {icon: L.divIcon({className: 'cruz', html: '+', iconSize: [26, 26]})}).addTo(capa);
+      pts.push(centro);
+    }
+    ev.forEach(function (e) {
+      if (e.lat == null) return;
+      L.circleMarker([+e.lat, +e.lon], {radius: 7, color: '#fff', weight: 2, fillColor: COLORES[e.categoria] || '#999', fillOpacity: 1})
+        .bindTooltip(esc(e.categoria) + ' · ' + esc(e.wo) + (e.bt ? ' · ' + esc(e.bt) : '')).addTo(capa);
+      pts.push([+e.lat, +e.lon]);
+    });
+    var hoja = document.getElementById('hoja'), abajo = hoja ? hoja.getBoundingClientRect().height : 0;
+    var caja = circulo ? circulo.getBounds() : L.latLngBounds(pts);
+    pts.forEach(function (p) { caja.extend(p); });
+    if (pts.length) mapa.fitBounds(caja, {paddingTopLeft: [20, 20], paddingBottomRight: [20, 20 + abajo], maxZoom: 17});
+  }
+
+  function listaPorWO(ev) {
+    if (!ev.length) return '';
+    var padre = {};
+    function raiz(w) { if (!(w in padre)) padre[w] = w; while (padre[w] !== w) { padre[w] = padre[padre[w]]; w = padre[w]; } return w; }
+    ev.forEach(function (e) { var ws = wosDe(e); ws.slice(1).forEach(function (w) { padre[raiz(w)] = raiz(ws[0]); }); });
+    var grupos = {};
+    ev.forEach(function (e, i) { var ws = wosDe(e), k = ws.length ? raiz(ws[0]) : ''; (grupos[k] = grupos[k] || []).push(i); });
+    function ultima(idx) { return idx.reduce(function (m, i) { return (ev[i].fecha || '') > m ? ev[i].fecha : m; }, ''); }
+    return Object.keys(grupos).sort(function (a, b) { return ultima(grupos[b]).localeCompare(ultima(grupos[a])); }).map(function (k) {
+      var idx = grupos[k], lista = idx.map(function (i) { return ev[i]; });
+      var wos = {}; lista.forEach(function (e) { wosDe(e).forEach(function (w) { wos[w] = 1; }); });
+      var ds = {}; lista.forEach(function (e) { ds[dia(e.fecha)] = 1; }); ds = Object.keys(ds).sort();
+      var rc = resumenCats(lista), dmin = Math.min.apply(null, lista.map(function (e) { return e.distancia_m || 0; }));
+      var cuando = ds.length > 1 ? diaTitulo(ds[0]).slice(4, 9) + ' → ' + diaTitulo(ds[ds.length - 1]).slice(4, 9) : diaTitulo(ds[0]);
+      var enl = {}, cau = {};
+      lista.forEach(function (e) { String(e.enlace || '').split(' / ').forEach(function (x) { if (x) enl[x] = 1; }); if (e.causa) cau[e.causa] = 1; });
+      var h = '<details class="wo"><summary>' +
+        '<div class="l1"><b>' + esc(Object.keys(wos).sort().join(' + ') || 'Sin WO') + '</b><span>' + esc(cuando) + ' · ' + dmin + ' m</span></div>' +
+        '<div class="l2"><span class="dot" style="background:' + (COLORES[rc.principal] || '#999') + '"></span>' + esc(rc.texto) + '</div>' +
+        ((Object.keys(enl).length || Object.keys(cau).length) ? '<div class="l3">' + esc(Object.keys(enl).join(', ')) +
+          (Object.keys(cau).length ? ' · ' + esc(Object.keys(cau).join(', ')) : '') + '</div>' : '') +
+        '</summary>';
+      ds.slice().reverse().forEach(function (d) {
+        var di = idx.filter(function (i) { return dia(ev[i].fecha) === d; });
+        var rd = resumenCats(di.map(function (i) { return ev[i]; }));
+        var evs = di.sort(function (a, b) { return (ev[b].fecha || '').localeCompare(ev[a].fecha || ''); }).map(function (i) {
+          var e = ev[i];
+          return '<div class="ev" data-i="' + i + '"><div class="a"><span class="dot" style="background:' + (COLORES[e.categoria] || '#999') + '"></span>' +
+            '<b>' + esc(e.categoria) + (e.n > 1 ? ' (x' + e.n + ')' : '') + '</b><em>' + hora(e.fecha) + ' · ' + (e.distancia_m || 0) + ' m</em></div>' +
+            '<div class="d">' + [e.bt ? 'BT <code>' + esc(e.bt) + '</code>' : '', e.estado ? esc(e.estado) : '',
+              (e.causa || e.id_cierre) ? esc([e.causa, e.id_cierre].filter(Boolean).join(' / ')) : ''].filter(Boolean).join(' · ') + '</div>' +
+            (e.detalle ? '<div class="d">' + esc(String(e.detalle).slice(0, 220)) + '</div>' : '') + '</div>';
+        }).join('');
+        if (ds.length > 1) h += '<details class="dia"><summary><b>' + esc(diaTitulo(d)) + '</b><span>' + esc(rd.texto) + '</span></summary>' + evs + '</details>';
+        else h += evs;
+      });
+      return h + '</details>';
+    }).join('');
+  }
+
+  // ---------------- arranque
+  if (ls('hc_refresh')) token().then(pantallaPrincipal).catch(function () { pantallaLogin(); });
+  else pantallaLogin();
+})();
+</script>
+</body>
+</html>
