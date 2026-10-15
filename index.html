@@ -5,7 +5,9 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="robots" content="noindex, nofollow">
 <meta name="referrer" content="no-referrer">
-<title>Recorrido</title>
+<title>Recorrido de fibra</title>
+<meta property="og:title" content="Recorrido de fibra">
+<meta property="og:description" content="Tocá para ver el mapa con el cable y las botellas.">
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="">
 <style>
 :root {
@@ -246,7 +248,7 @@ h1 { margin: 0; font-size: 16px; line-height: 1.25; overflow-wrap: anywhere; }
     } else if (nc > 1) h += '<span class="chip">' + nc + ' caminos ópticos</span>';
     h += '<span class="chip">' + bots.length + (bots.length === 1 ? ' botella' : ' botellas') + '</span>';
     h += '<span class="chip" id="largo"></span>';
-    h += '<span class="chip vence">Vence en ' + horas + ' h</span></div></header>';
+    h += '<span class="chip vence">Válido por ' + horas + ' h</span></div></header>';
     h += '<div class="mapawrap"><div id="mapa" role="region" aria-label="Mapa del recorrido"></div>';
     h += '<div class="regla" id="regla" hidden>' +
          '<div class="fila"><span class="seg"><button type="button" id="mCable" class="on">Cable</button>' +
