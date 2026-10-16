@@ -71,6 +71,16 @@ h1 { margin: 0; font-size: 16px; line-height: 1.25; overflow-wrap: anywhere; }
 .asa .fila b { font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
 .asa .irsel { margin-left: auto; font-size: 13px; font-weight: 700; color: #fff; background: var(--route); border-radius: 9px;
   padding: 8px 11px; text-decoration: none; white-space: nowrap; max-width: 70%; overflow: hidden; text-overflow: ellipsis; }
+.busca { display: flex; align-items: center; gap: 8px; background: var(--bg); border: 1px solid var(--line); border-radius: 11px;
+  padding: 0 6px 0 11px; }
+.busca:focus-within { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+.busca svg { flex: none; color: var(--muted); }
+.busca input { flex: 1; min-width: 0; border: 0; background: transparent; color: var(--ink); font: 16px var(--sans); padding: 9px 0; outline: none; }
+.busca input::-webkit-search-cancel-button { display: none; }
+.busca button { border: 0; background: none; color: var(--muted); font-size: 18px; line-height: 1; padding: 6px 8px; cursor: pointer; }
+.busca .cuenta { font-size: 12px; color: var(--muted); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.bot.oculta { display: none; }
+.sinres { padding: 18px 16px; color: var(--muted); font-size: 14px; text-align: center; }
 .cuerpo { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; -webkit-overflow-scrolling: touch; }
 .leaflet-bottom.leaflet-right { bottom: var(--h); }
 .bot.sel { background: var(--accent-soft); }
@@ -222,7 +232,7 @@ h1 { margin: 0; font-size: 16px; line-height: 1.25; overflow-wrap: anywhere; }
       wrap.style.setProperty('--h', px + 'px');
     }
     asa.addEventListener('pointerdown', function (e) {
-      if (e.target.closest('a')) return;
+      if (e.target.closest('a, .busca')) return;
       activo = true; mov = false; y0 = e.clientY; h0 = hoja.offsetHeight;
       hoja.classList.add('arrastrando'); asa.setPointerCapture(e.pointerId);
     });
@@ -277,12 +287,19 @@ h1 { margin: 0; font-size: 16px; line-height: 1.25; overflow-wrap: anywhere; }
          '<div class="ayuda" id="mAyuda"></div></div>';
     h += '<div class="hoja" id="hoja"><div class="asa" id="asa"><div class="fila"><b>' + bots.length +
          (bots.length === 1 ? ' botella' : ' botellas') + ' · tocá una</b>' +
-         '<a class="irsel" id="irSel" hidden target="_blank" rel="noopener"></a></div></div><div class="cuerpo"><div class="lista">';
+         '<a class="irsel" id="irSel" hidden target="_blank" rel="noopener"></a></div>' +
+         (bots.length > 3 ? '<label class="busca"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" ' +
+           'stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>' +
+           '<input id="buscar" type="search" enterkeyhint="search" autocomplete="off" autocorrect="off" autocapitalize="characters" spellcheck="false" ' +
+           'placeholder="Buscar botella (nombre o número)" aria-label="Buscar botella">' +
+           '<span class="cuenta" id="cuenta"></span><button type="button" id="borrarBusca" aria-label="Borrar búsqueda" hidden>✕</button></label>' : '') +
+         '</div><div class="cuerpo"><div class="lista">';
     bots.forEach(function (b, i) {
       h += '<div class="bot" id="b' + i + '"><button class="num" type="button" data-i="' + i + '" aria-label="Elegir botella ' + (i + 1) + '">' + (i + 1) + '</button>' +
            '<span class="t" data-i="' + i + '"><b>' + esc(b.nombre) + '</b>' + (b.sub ? '<small>' + esc(b.sub) + '</small>' : '') + '</span>' +
            '<a class="ir" href="' + ruta(b.lat, b.lon) + '" target="_blank" rel="noopener">Ir ↗</a></div>';
     });
+    h += '<div class="sinres" id="sinRes" hidden>Ninguna botella coincide</div>';
     if (!bots.length) h += '<div class="bot"><span></span><span class="t"><small>Este recorrido no tiene botellas.</small></span><span></span></div>';
     h += '</div><div class="pie">';
     h += '<a class="btn" href="' + BASE + id + '.kml?download=' + encodeURIComponent((d.archivo || 'recorrido') + '.kml') + '">Descargar KML (para Google Earth)</a>';
@@ -533,6 +550,41 @@ h1 { margin: 0; font-size: 16px; line-height: 1.25; overflow-wrap: anywhere; }
     app.querySelectorAll('[data-i]').forEach(function (el) {
       el.addEventListener('click', function () { elegir(+el.getAttribute('data-i'), true); });
     });
+
+    // ---- buscador de botellas: filtra la lista mientras escribís (sin importar mayúsculas ni acentos) ----
+    var inBus = document.getElementById('buscar');
+    if (inBus) {
+      var norm = function (t) { return String(t || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase().replace(/[\s_\-.]+/g, ''); };
+      var textos = bots.map(function (b, i) { return norm(b.nombre) + '|' + norm(b.sub); });
+      var visibles = [];
+      var filtrar = function () {
+        var q = norm(inBus.value);
+        visibles = [];
+        bots.forEach(function (b, i) {
+          var ok = !q || textos[i].indexOf(q) >= 0 || String(i + 1) === q;
+          document.getElementById('b' + i).classList.toggle('oculta', !ok);
+          if (ok) visibles.push(i);
+        });
+        document.getElementById('cuenta').textContent = q ? visibles.length + ' de ' + bots.length : '';
+        document.getElementById('sinRes').hidden = visibles.length > 0;
+        document.getElementById('borrarBusca').hidden = !inBus.value;
+        document.querySelector('.cuerpo').scrollTop = 0;
+      };
+      inBus.addEventListener('input', filtrar);
+      inBus.addEventListener('focus', function () {   // con el teclado abierto, que la lista tenga lugar
+        var hoja = document.getElementById('hoja'), wrap = hoja.parentNode;
+        if (hoja.offsetHeight < wrap.clientHeight * 0.6) wrap.style.setProperty('--h', (wrap.clientHeight * 0.6) + 'px');
+      });
+      inBus.addEventListener('keydown', function (e) {
+        if (e.key !== 'Enter') return;
+        e.preventDefault();
+        if (!visibles.length) return;
+        var q = norm(inBus.value), exacto = visibles.filter(function (i) { return String(i + 1) === q; })[0];
+        inBus.blur();
+        elegir(exacto !== undefined ? exacto : visibles[0], true);
+      });
+      document.getElementById('borrarBusca').addEventListener('click', function () { inBus.value = ''; filtrar(); inBus.focus(); });
+    }
 
     function mm(m) { return Math.round(m).toLocaleString('es-AR') + ' m'; }
     // ---- regla: por el cable (varios puntos), en linea recta, y punto de corte ----
