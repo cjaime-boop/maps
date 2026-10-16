@@ -290,39 +290,65 @@ h1 { margin: 0; font-size: 16px; line-height: 1.25; overflow-wrap: anywhere; }
 
     // ---- red del cable (para medir por el cable) ----
     var nodos = [], ady = [], largoTotal = 0;
-    function nodo(ll) { nodos.push(L.latLng(ll[0], ll[1])); ady.push([]); return nodos.length - 1; }
+    var porClave = {};
+    function nodo(ll) {   // el mismo punto en dos tramos es un solo nodo (cruces y empalmes exactos)
+      var k = (+ll[0]).toFixed(7) + ',' + (+ll[1]).toFixed(7);
+      if (k in porClave) return porClave[k];
+      nodos.push(L.latLng(ll[0], ll[1])); ady.push([]); return (porClave[k] = nodos.length - 1);
+    }
     function unir(a, b, w) { ady[a].push([b, w]); ady[b].push([a, w]); }
-    var tramos = [];
+    var tramos = [], puntas = [], esPunta = {}, vistos = {};
+    function clave(t) { return t.map(function (p) { return (+p[0]).toFixed(7) + ',' + (+p[1]).toFixed(7); }).join(';'); }
     (d.caminos || []).forEach(function (c) {
       (c.tramos || []).forEach(function (t) {
+        if (!t || t.length < 2) return;
+        var k1 = clave(t), k2 = clave(t.slice().reverse());
+        if (vistos[k1] || vistos[k2]) return;   // tramo repetido: no se cuenta dos veces
+        vistos[k1] = 1;
         L.polyline(t, {color: colRuta, weight: 5, opacity: .9}).bindTooltip(c.nombre || '').addTo(grupo);
         var ids = t.map(nodo);
         for (var k = 1; k < ids.length; k++) {
           var w = nodos[ids[k - 1]].distanceTo(nodos[ids[k]]);
+          if (ids[k - 1] === ids[k]) continue;
           unir(ids[k - 1], ids[k], w); largoTotal += w;
           tramos.push([ids[k - 1], ids[k]]);
         }
+        [ids[0], ids[ids.length - 1]].forEach(function (k) { if (!esPunta[k]) { esPunta[k] = 1; puntas.push(k); } });
       });
     });
-    // empalmes: puntos de tramos distintos a menos de 15 m se consideran unidos (grilla: anda con miles de puntos)
-    function cercanos(maxM, fn) {
-      var cel = maxM / 111000, g = {};
-      nodos.forEach(function (n, k) {
-        var key = Math.floor(n.lat / cel) + ',' + Math.floor(n.lng / cel);
+    // pares de puntas a menos de maxM (grilla: anda con miles de puntos), ordenados por distancia
+    function pares(lista, maxM) {
+      var cel = maxM / 111000, g = {}, out = [];
+      lista.forEach(function (k) {
+        var n = nodos[k], key = Math.floor(n.lat / cel) + ',' + Math.floor(n.lng / cel);
         (g[key] = g[key] || []).push(k);
       });
-      nodos.forEach(function (n, k) {
-        var i = Math.floor(n.lat / cel), j = Math.floor(n.lng / cel);
+      lista.forEach(function (k) {
+        var n = nodos[k], i = Math.floor(n.lat / cel), j = Math.floor(n.lng / cel);
         for (var di = -1; di <= 1; di++) for (var dj = -2; dj <= 2; dj++) {
           (g[(i + di) + ',' + (j + dj)] || []).forEach(function (o) {
-            if (o > k) { var dd = n.distanceTo(nodos[o]); if (dd < maxM) fn(k, o, dd); }
+            if (o > k) { var dd = n.distanceTo(nodos[o]); if (dd < maxM) out.push([dd, k, o]); }
           });
         }
       });
+      return out.sort(function (x, y) { return x[0] - y[0]; });
     }
-    cercanos(15, function (a, b, dd) { if (!ady[a].some(function (e) { return e[0] === b; })) unir(a, b, dd); });
+    function unidos(a, b) { return ady[a].some(function (e) { return e[0] === b; }); }
+    // empalmes: solo entre puntas de tramos. Las que se tocan (<1 m) se unen; después cada punta
+    // que quedó suelta se une con la suelta más cercana (<15 m). Así no se cruza entre la ida y
+    // la vuelta de un cable que va y viene por el mismo camino.
+    var cerca = pares(puntas, 15);
+    cerca.forEach(function (p) { if (p[0] < 1 && !unidos(p[1], p[2])) unir(p[1], p[2], p[0]); });
+    var suelta = {}; puntas.forEach(function (k) { if (ady[k].length <= 1) suelta[k] = 1; });
+    var mejor = {};
+    cerca.forEach(function (p) {
+      if (p[0] < 1 || !suelta[p[1]] || !suelta[p[2]]) return;
+      if (!(p[1] in mejor)) mejor[p[1]] = p;
+      if (!(p[2] in mejor)) mejor[p[2]] = p;
+    });
+    Object.keys(mejor).forEach(function (k) { var p = mejor[k]; if (!unidos(p[1], p[2])) unir(p[1], p[2], p[0]); });
     // si el cable quedó partido en pedazos (huecos de dibujo de más de 15 m), se unen los pedazos
-    // por los puntos más cercanos, hasta 60 m. Solo une pedazos separados: no agrega atajos.
+    // por las puntas más cercanas, hasta 60 m. Solo une pedazos separados: no agrega atajos.
     (function () {
       var comp = new Array(nodos.length).fill(-1), nc = 0;
       for (var s = 0; s < nodos.length; s++) {
@@ -332,12 +358,9 @@ h1 { margin: 0; font-size: 16px; line-height: 1.25; overflow-wrap: anywhere; }
         nc++;
       }
       if (nc < 2) return;
-      var pares = [];
-      cercanos(60, function (a, b, dd) { if (comp[a] !== comp[b]) pares.push([dd, a, b]); });
-      pares.sort(function (x, y) { return x[0] - y[0]; });
       var padre = []; for (var c = 0; c < nc; c++) padre.push(c);
       function raiz(x) { while (padre[x] !== x) { padre[x] = padre[padre[x]]; x = padre[x]; } return x; }
-      pares.forEach(function (p) {
+      pares(puntas, 60.001).forEach(function (p) {
         var ra = raiz(comp[p[1]]), rb = raiz(comp[p[2]]);
         if (ra !== rb) { padre[ra] = rb; unir(p[1], p[2], p[0]); }
       });
