@@ -100,6 +100,12 @@ h1 { margin: 0; font-size: 16px; line-height: 1.25; overflow-wrap: anywhere; }
   background: rgba(255,255,255,.9); padding: 2px 4px; border-radius: 4px; }
 .regla .dist small { display: block; font-size: 13px; font-weight: 600; color: var(--muted); margin-top: 2px; }
 .regla .dist .gan { color: var(--warn); }
+.regla .ramas { display: grid; gap: 6px; margin-top: 8px; }
+.regla .rama { font: 700 14px/1.2 var(--sans); text-align: left; padding: 10px 12px; border-radius: 10px; background: var(--surface);
+  border: 2px solid currentColor; cursor: pointer; }
+.regla .rama small { display: inline; margin: 0 0 0 4px; font-weight: 600; color: var(--muted); }
+.regla .rama.todas { color: var(--muted); border-width: 1px; font-weight: 600; font-size: 13px; padding: 7px 12px; }
+.bificon { background: #f59e0b; border: 2px solid #fff; border-radius: 4px; box-shadow: 0 1px 4px rgba(0,0,0,.35); }
 .campo { font-size: 12.5px; color: var(--muted); display: inline-flex; align-items: center; gap: 6px; }
 .campo input { font: inherit; font-size: 15px; width: 110px; padding: 6px 8px; border: 1px solid var(--line); border-radius: 8px;
   background: var(--surface); color: var(--ink); }
@@ -413,6 +419,42 @@ h1 { margin: 0; font-size: 16px; line-height: 1.25; overflow-wrap: anywhere; }
         return {m: r.dist[ids[1]], linea: r.dist[ids[1]] < Infinity ? linea(r.prev, ids[1]) : []};
       });
     }
+    // primera bifurcación: posiciones que salen para el mismo lado y se separan más adelante (null si no hay)
+    function bifurcacion(cands) {
+      var porSalida = {}, mejor = null;
+      cands.forEach(function (c, i) { var k = c.ids.length > 1 ? c.ids[1] : -1; (porSalida[k] = porSalida[k] || []).push(i); });
+      Object.keys(porSalida).forEach(function (k) {
+        var g = porSalida[k];
+        if (g.length < 2) return;
+        var p = 0;
+        while (g.every(function (i) { return cands[i].ids.length > p && cands[i].ids[p] === cands[g[0]].ids[p]; })) p++;
+        if (p === 0 || !g.every(function (i) { return cands[i].ids.length > p; })) return;
+        var ramas = {}, orden = [];
+        g.forEach(function (i) { var r = cands[i].ids[p]; if (!ramas[r]) { ramas[r] = []; orden.push(r); } ramas[r].push(i); });
+        if (orden.length < 2) return;
+        var comun = cands[g[0]].linea.slice(0, p), m = 0;
+        for (var j = 1; j < comun.length; j++) m += comun[j - 1].distanceTo(comun[j]);
+        if (!mejor || m < mejor.metros)
+          mejor = {punto: comun[comun.length - 1], metros: m, comun: comun, desde: p - 1, grupo: g,
+                   ramas: orden.map(function (r) { return {nodo: +r, cands: ramas[r], vista: recorrer(cands[g[0]].ids[p - 1], +r)}; })};
+      });
+      return mejor;
+    }
+    // hacia dónde va una rama: desde el nodo de la bifurcación, entrando por sig, hasta que el cable se abra (máx 3 km)
+    function recorrer(desde, sig) {
+      var vistos = {}, pila = [desde]; vistos[desde] = 1;
+      while (pila.length) { var u = pila.pop(); ady[u].forEach(function (e) { if (e[1] < 1 && !vistos[e[0]]) { vistos[e[0]] = 1; pila.push(e[0]); } }); }
+      vistos[sig] = 1;
+      var out = [nodos[desde], nodos[sig]], largo = nodos[desde].distanceTo(nodos[sig]), x = sig;
+      while (largo < 3000) {
+        var otros = ady[x].filter(function (e) { return !vistos[e[0]]; });
+        if (otros.length !== 1) break;
+        vistos[otros[0][0]] = 1; largo += otros[0][1]; x = otros[0][0]; out.push(nodos[x]);
+      }
+      return out;
+    }
+    var elegidas = [];   // ramas elegidas en las bifurcaciones (nodo de salida de cada rama)
+    var COL_RAMA = ['#9333ea', '#16a34a', '#db2777', '#0891b2', '#ea580c'], NOM_RAMA = ['violeta', 'verde', 'rosa', 'celeste', 'naranja'];
     // puntos del cable que quedan a D metros (por el cable) del punto p, en cada direccion
     function aDistancia(p, D) {
       return conTemporales([p], function (ids) {
@@ -426,7 +468,9 @@ h1 { margin: 0; font-size: 16px; line-height: 1.25; overflow-wrap: anywhere; }
             var f = (D - dist[u]) / e[1], A = nodos[u], B = nodos[v];
             var q = L.latLng(A.lat + (B.lat - A.lat) * f, A.lng + (B.lng - A.lng) * f);
             if (out.some(function (o) { return o.q.distanceTo(q) < 5; })) return;
-            out.push({q: q, linea: linea(prev, u).concat([q])});
+            var ids = [];
+            for (var x = u; x !== undefined; x = prev[x]) ids.unshift(x);
+            out.push({q: q, linea: linea(prev, u).concat([q]), ids: ids.concat([v])});
           });
         }
         return {puntos: out, maximo: maximo};
@@ -541,6 +585,34 @@ h1 { margin: 0; font-size: 16px; line-height: 1.25; overflow-wrap: anywhere; }
           if (!r2.puntos.length) {
             txt = 'El cable termina antes' + '<small>Desde ese punto hay como máximo ' + mm(r2.maximo) + ' de cable en el mapa</small>';
           } else {
+            var b, cands = r2.puntos, todas = elegidas.indexOf('todas') >= 0;
+            while (!todas && (b = bifurcacion(cands))) {
+              var ya = b.ramas.filter(function (r) { return elegidas.indexOf(r.nodo) >= 0; })[0];
+              if (!ya) break;
+              cands = cands.filter(function (c, i) { return b.grupo.indexOf(i) < 0 || ya.cands.indexOf(i) >= 0; });
+            }
+            if (b && !todas) {
+              L.polyline(b.comun, {color: '#f59e0b', weight: 6, opacity: .85}).addTo(capaMed);
+              var bot = '';
+              b.ramas.forEach(function (r, j) {
+                r.cands.forEach(function (i) {
+                  L.polyline(cands[i].linea.slice(b.desde), {color: COL_RAMA[j % 5], weight: 6, opacity: .9}).addTo(capaMed);
+                });
+                L.polyline(r.vista, {color: COL_RAMA[j % 5], weight: 5, opacity: .55}).addTo(capaMed);
+                var fin = r.vista[r.vista.length - 1], cerca = null, dm = 500;
+                bots.forEach(function (o) { var x = fin.distanceTo([o.lat, o.lon]); if (x < dm) { dm = x; cerca = o; } });
+                bot += '<button type="button" class="rama" data-nodo="' + r.nodo + '" style="color:' + COL_RAMA[j % 5] + '">● Rama ' +
+                       NOM_RAMA[j % 5] + (cerca ? '<small>→ ' + esc(cerca.nombre) + '</small>' : '') + '</button>';
+              });
+              L.marker(b.punto, {icon: L.divIcon({className: 'bificon', iconSize: [16, 16]}), zIndexOffset: 1500, interactive: false}).addTo(capaMed);
+              txt = 'El cable se bifurca · ¿por dónde sigue?<small>A ' + mm(b.metros) + ' del punto tocado (cuadrado naranja) el cable se abre. ' +
+                    'Elegí la rama por la que va el enlace.</small><div class="ramas">' + bot +
+                    '<button type="button" class="rama todas" data-nodo="todas">Mostrar todas</button></div>';
+              out.innerHTML = txt;
+              document.getElementById('mAyuda').hidden = true;
+              return;
+            }
+            r2 = {puntos: cands, maximo: r2.maximo};
             txt = 'Corte a ' + mm(D) + ' sobre el mapa' + '<small>' + mm(med) + ' medidos − ' + gan() + '% de ganancia · ' +
                   r2.puntos.length + (r2.puntos.length === 1 ? ' posición' : ' posiciones (una por cada dirección)') + '</small>';
             r2.puntos.forEach(function (c, n) {
@@ -563,13 +635,13 @@ h1 { margin: 0; font-size: 16px; line-height: 1.25; overflow-wrap: anywhere; }
       if (!tramos.length) return;
       var p = proyectar(ll);
       if (!p) return;
-      if (modo === 'corte') pts = [];
+      if (modo === 'corte') { pts = []; elegidas = []; }
       pts.push({ll: p.q, p: p});
       dibujar();
       if (modo === 'corte' && !inMet.value) inMet.focus();
     }
     function setModo(m) {
-      modo = m; pts = [];
+      modo = m; pts = []; elegidas = [];
       ['cable', 'recta', 'corte'].forEach(function (x) {
         document.getElementById('m' + x.charAt(0).toUpperCase() + x.slice(1)).classList.toggle('on', m === x);
       });
@@ -591,7 +663,14 @@ h1 { margin: 0; font-size: 16px; line-height: 1.25; overflow-wrap: anywhere; }
     document.getElementById('mCable').onclick = function () { setModo('cable'); };
     document.getElementById('mRecta').onclick = function () { setModo('recta'); };
     document.getElementById('mCorte').onclick = function () { setModo('corte'); };
-    document.getElementById('mBorrar').onclick = function () { pts = []; inMet.value = ''; dibujar(); };
+    document.getElementById('mBorrar').onclick = function () { pts = []; elegidas = []; inMet.value = ''; dibujar(); };
+    document.getElementById('mDist').addEventListener('click', function (e) {
+      var bt = e.target.closest && e.target.closest('.rama');
+      if (!bt) return;
+      var n = bt.getAttribute('data-nodo');
+      elegidas.push(n === 'todas' ? 'todas' : +n);
+      dibujar();
+    });
     document.getElementById('mCerrar').onclick = function () { regla_(false); };
     inMet.addEventListener('keydown', function (e) { if (e.key === 'Enter') { e.preventDefault(); inMet.blur(); dibujar(); } });
     document.getElementById('mBuscar').onclick = function () { inMet.blur(); dibujar(); };
