@@ -113,8 +113,12 @@ h1 { margin: 0; font-size: 16px; line-height: 1.25; overflow-wrap: anywhere; }
 .campo input#mMetros { width: 84px; }
 .mini.buscar { background: var(--route); color: #fff; border-color: var(--route); }
 .campo.gan input { width: 52px; font-size: 13px; padding: 4px 6px; }
-.corteicon { background: #dc2626; color: #fff; border: 2px solid #fff; border-radius: 50%; font: 700 13px/20px var(--sans);
-  text-align: center; box-shadow: 0 1px 4px rgba(0,0,0,.4); }
+.corteicon { background: #111827; color: #facc15; border: 2.5px solid #facc15; border-radius: 8px; font: 700 16px/23px var(--sans);
+  text-align: center; box-shadow: 0 0 0 2px #111827, 0 2px 6px rgba(0,0,0,.5); position: relative; }
+.corteicon::after { content: ''; position: absolute; inset: -8px; border: 3px solid #facc15; border-radius: 12px;
+  animation: latido 1.6s ease-out infinite; pointer-events: none; }
+@keyframes latido { from { opacity: .9; transform: scale(.75); } to { opacity: 0; transform: scale(1.35); } }
+@media (prefers-reduced-motion: reduce) { .corteicon::after { animation: none; opacity: .5; } }
 .medpt { background: #f59e0b; border: 2px solid #fff; border-radius: 50%; box-shadow: 0 1px 3px rgba(0,0,0,.4); }
 </style>
 </head>
@@ -548,7 +552,7 @@ h1 { margin: 0; font-size: 16px; line-height: 1.25; overflow-wrap: anywhere; }
       document.getElementById('mAyuda').textContent = t;
     }
     function punto(ll, cls, html) {
-      L.marker(ll, {icon: L.divIcon({className: cls, html: html || '', iconSize: cls === 'corteicon' ? [24, 24] : [14, 14]}),
+      L.marker(ll, {icon: L.divIcon({className: cls, html: html || '', iconSize: cls === 'corteicon' ? [28, 28] : [14, 14]}),
         interactive: cls === 'corteicon'}).addTo(capaMed);
     }
     function botellaCerca(ll) {
@@ -617,7 +621,7 @@ h1 { margin: 0; font-size: 16px; line-height: 1.25; overflow-wrap: anywhere; }
                   r2.puntos.length + (r2.puntos.length === 1 ? ' posición' : ' posiciones (una por cada dirección)') + '</small>';
             r2.puntos.forEach(function (c, n) {
               L.polyline(c.linea, {color: '#f59e0b', weight: 6, opacity: .85}).addTo(capaMed);
-              var mk = L.marker(c.q, {icon: L.divIcon({className: 'corteicon', html: '✂', iconSize: [24, 24]}), zIndexOffset: 2000});
+              var mk = L.marker(c.q, {icon: L.divIcon({className: 'corteicon', html: '✂', iconSize: [28, 28]}), zIndexOffset: 2000});
               mk.bindPopup('<b>Punto de corte ' + (r2.puntos.length > 1 ? (n + 1) : '') + '</b><br>' + botellaCerca(c.q) +
                 '<br>' + c.q.lat.toFixed(6) + ', ' + c.q.lng.toFixed(6) +
                 '<br><a href="' + ruta(c.q.lat.toFixed(6), c.q.lng.toFixed(6)) + '" target="_blank" rel="noopener">Cómo llegar ↗</a>');
