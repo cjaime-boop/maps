@@ -111,6 +111,12 @@ h1 { margin: 0; font-size: 16px; line-height: 1.25; overflow-wrap: anywhere; }
 .mini { font: inherit; font-size: 12.5px; font-weight: 600; border: 1px solid var(--line); background: var(--surface); color: var(--ink);
   border-radius: 9px; padding: 6px 10px; cursor: pointer; }
 #mBorrar { margin-left: auto; }
+.mini.candado { padding: 5px 9px; font-size: 15px; line-height: 1; }
+.mini.candado.on { background: #f59e0b; border-color: #f59e0b; }
+.regla .fijado { font-size: 12.5px; font-weight: 600; color: #9a5a00; background: #fff4e0; border-radius: 8px; padding: 5px 8px; }
+.regla .fijado.sacude { animation: sacude .35s; }
+@keyframes sacude { 25% { transform: translateX(-5px); } 75% { transform: translateX(5px); } }
+.mini.yo { margin-top: 6px; color: #1a73e8; border-color: #1a73e8; font-size: 13.5px; padding: 7px 12px; }
 .sitioicon { background: #16a34a; border: 2px solid #fff; border-radius: 3px; box-shadow: 0 1px 3px rgba(0,0,0,.4); }
 .sitioicon span { position: absolute; left: 18px; top: -3px; white-space: nowrap; font: 700 11px/1 var(--sans); color: #14532d;
   background: rgba(255,255,255,.9); padding: 2px 4px; border-radius: 4px; }
@@ -286,7 +292,9 @@ h1 { margin: 0; font-size: 16px; line-height: 1.25; overflow-wrap: anywhere; }
     h += '<div class="regla" id="regla" hidden>' +
          '<div class="fila"><span class="seg"><button type="button" id="mCable" class="on">Cable</button>' +
          '<button type="button" id="mRecta">Recta</button><button type="button" id="mCorte">Corte</button></span>' +
-         '<button type="button" class="mini" id="mBorrar">Borrar</button><button type="button" class="mini" id="mCerrar">✕</button></div>' +
+         '<button type="button" class="mini" id="mBorrar">Borrar</button><button type="button" class="mini candado" id="mFijar" aria-pressed="false" title="Fijar la medición (los toques en el mapa no la mueven)">🔓</button>' +
+         '<button type="button" class="mini" id="mCerrar">✕</button></div>' +
+         '<div class="fijado" id="mFijado" hidden>🔒 Fijada: tocar el mapa no la mueve</div>' +
          '<div class="fila" id="filaCorte"><label class="campo" hidden>Medidos <input id="mMetros" type="number" inputmode="decimal" enterkeyhint="search" min="0" step="1" placeholder="metros">' +
          '<button type="button" class="mini buscar" id="mBuscar">Buscar</button></label>' +
          '<label class="campo gan">Ganancia <input id="mGan" type="number" inputmode="decimal" min="0" max="60" step="1" value="15">%</label></div>' +
@@ -641,7 +649,8 @@ h1 { margin: 0; font-size: 16px; line-height: 1.25; overflow-wrap: anywhere; }
         txt = 'Tocá el siguiente punto';
       } else if (modo === 'corte') {
         var med = parseFloat(String(inMet.value).replace(',', '.'));
-        if (!pts.length) txt = 'Tocá el punto desde donde se midió';
+        if (!pts.length) txt = 'Tocá el punto desde donde se midió' +
+          '<br><button type="button" class="mini yo" id="mYo">◎ Desde mi ubicación</button>';
         else if (!(med > 0)) txt = 'Escribí los metros medidos';
         else {
           var D = med * (1 - gan() / 100), r2 = aDistancia(pts[0].p, D);
@@ -693,7 +702,19 @@ h1 { margin: 0; font-size: 16px; line-height: 1.25; overflow-wrap: anywhere; }
       out.innerHTML = txt;
       document.getElementById('mAyuda').hidden = pts.length > 0;
     }
-    function agregarPunto(ll) {
+    var fijado = false;
+    function fijar(on) {
+      fijado = on;
+      var b = document.getElementById('mFijar');
+      b.classList.toggle('on', on); b.textContent = on ? '🔒' : '🔓'; b.setAttribute('aria-pressed', on ? 'true' : 'false');
+      document.getElementById('mFijado').hidden = !on;
+    }
+    function agregarPunto(ll, forzar) {
+      if (fijado && !forzar) {            // medición fijada: un toque sin querer no la mueve
+        var f = document.getElementById('mFijado');
+        f.classList.remove('sacude'); void f.offsetWidth; f.classList.add('sacude');
+        return;
+      }
       if (modo === 'recta') { pts.push({ll: ll}); dibujar(); return; }
       if (!tramos.length) return;
       var p = proyectar(ll);
@@ -704,18 +725,19 @@ h1 { margin: 0; font-size: 16px; line-height: 1.25; overflow-wrap: anywhere; }
       if (modo === 'corte' && !inMet.value) inMet.focus();
     }
     function setModo(m) {
+      fijar(false);
       modo = m; pts = []; elegidas = [];
       ['cable', 'recta', 'corte'].forEach(function (x) {
         document.getElementById('m' + x.charAt(0).toUpperCase() + x.slice(1)).classList.toggle('on', m === x);
       });
       document.getElementById('mMetros').parentNode.hidden = m !== 'corte';
-      if (m === 'corte' && sel >= 0) agregarPunto(L.latLng(bots[sel].lat, bots[sel].lon));
+      if (m === 'corte' && sel >= 0) agregarPunto(L.latLng(bots[sel].lat, bots[sel].lon), true);
       ayuda(); dibujar();
     }
     function regla_(on) {
       midiendo = on; regla.hidden = !on; btnRegla.classList.toggle('on', on);
       btnRegla.innerHTML = on ? '<span aria-hidden="true">✕</span> Terminar' : '<span aria-hidden="true">📏</span> Medir';
-      if (!on) { pts = []; capaMed.clearLayers(); }
+      if (!on) { fijar(false); pts = []; capaMed.clearLayers(); }
       else {
         var hoja = document.getElementById('hoja');
         hoja.parentNode.style.setProperty('--h', '62px');
@@ -726,8 +748,27 @@ h1 { margin: 0; font-size: 16px; line-height: 1.25; overflow-wrap: anywhere; }
     document.getElementById('mCable').onclick = function () { setModo('cable'); };
     document.getElementById('mRecta').onclick = function () { setModo('recta'); };
     document.getElementById('mCorte').onclick = function () { setModo('corte'); };
-    document.getElementById('mBorrar').onclick = function () { pts = []; elegidas = []; inMet.value = ''; dibujar(); };
+    document.getElementById('mBorrar').onclick = function () { fijar(false); pts = []; elegidas = []; inMet.value = ''; dibujar(); };
+    document.getElementById('mFijar').onclick = function () { fijar(!fijado); };
+    function desdeMiUbicacion(bt) {
+      if (!navigator.geolocation) { bt.textContent = 'Este celular no comparte la ubicación'; return; }
+      bt.textContent = 'Buscando tu ubicación…'; bt.disabled = true;
+      navigator.geolocation.getCurrentPosition(function (pos) {
+        var ll = L.latLng(pos.coords.latitude, pos.coords.longitude), p = proyectar(ll);
+        if (!p) { bt.disabled = false; bt.textContent = '◎ Desde mi ubicación'; return; }
+        var lejos = ll.distanceTo(p.q);
+        agregarPunto(ll, true);
+        mapa.setView(p.q, Math.max(mapa.getZoom(), 17));
+        document.getElementById('mAyuda').hidden = false;
+        document.getElementById('mAyuda').textContent = 'Tomé tu ubicación (±' + Math.round(pos.coords.accuracy) + ' m)' +
+          (lejos > 15 ? ', a ' + mm(lejos) + ' del cable: usé el punto del cable más cercano.' : '.');
+      }, function () {
+        bt.disabled = false; bt.textContent = 'No pude obtener tu ubicación. Revisá el permiso.';
+      }, {enableHighAccuracy: true, timeout: 15000, maximumAge: 10000});
+    }
     document.getElementById('mDist').addEventListener('click', function (e) {
+      var yb = e.target.closest && e.target.closest('#mYo');
+      if (yb) { desdeMiUbicacion(yb); return; }
       var bt = e.target.closest && e.target.closest('.rama');
       if (!bt) return;
       var n = bt.getAttribute('data-nodo');
