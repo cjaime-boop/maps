@@ -698,7 +698,8 @@ h1 { margin: 0; font-size: 16px; line-height: 1.25; overflow-wrap: anywhere; }
         }
       }
       out.innerHTML = txt;
-      document.getElementById('mAyuda').hidden = pts.length > 0;
+      // en Corte el título ya dice qué hacer: sin texto gris de ayuda
+      document.getElementById('mAyuda').hidden = pts.length > 0 || (modo === 'corte' && tramos.length > 0);
     }
     var fijado = false;
     function fijar(on) {
