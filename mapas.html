@@ -1,0 +1,203 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex, nofollow">
+<meta name="referrer" content="no-referrer">
+<meta name="theme-color" content="#1d5bd8">
+<title>Mapas activos</title>
+<meta property="og:title" content="Mapas activos">
+<meta property="og:description" content="Recorridos vigentes de Mobisond.">
+<style>
+:root {
+  --bg: #eef1f5; --surface: #ffffff; --ink: #172033; --muted: #5d6779; --line: #dbe1ea; --soft: #f4f6fa;
+  --accent: #1d5bd8; --accent-soft: #e6eefc; --warn: #b45309; --rojo: #dc2626;
+  --sans: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) { :root {
+  --bg: #0f141d; --surface: #182030; --ink: #e8edf6; --muted: #9aa5b8; --line: #2a3446; --soft: #1e2739;
+  --accent: #6f9cf5; --accent-soft: #1f2d48; --warn: #f5c27a; --rojo: #e05c5c; color-scheme: dark } }
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+html, body { margin: 0; background: var(--bg); color: var(--ink); font-family: var(--sans); font-size: 15px; }
+.app { max-width: 720px; margin: 0 auto; background: var(--surface); min-height: 100vh; min-height: 100dvh;
+  display: flex; flex-direction: column; }
+button, input { font: inherit; color: inherit; }
+.btn { border: 1px solid var(--line); background: var(--surface); border-radius: 12px; padding: 11px 14px;
+  font-weight: 600; font-size: 15px; cursor: pointer; }
+.btn.prim { background: var(--accent); border-color: var(--accent); color: #fff; }
+
+.login { margin: auto; width: min(340px, 90%); display: grid; gap: 12px; text-align: center; padding: 30px 0; }
+.login img { width: 64px; height: 64px; margin: 0 auto; }
+.login h1 { margin: 0; font-size: 20px; }
+.login p { margin: 0; color: var(--muted); font-size: 14px; }
+.login input { padding: 13px 14px; border-radius: 12px; border: 1px solid var(--line); background: var(--soft); font-size: 16px; }
+.login .err { color: var(--rojo); font-size: 13px; min-height: 1em; }
+
+header { position: sticky; top: 0; z-index: 2; background: var(--surface); border-bottom: 1px solid var(--line);
+  padding: max(12px, env(safe-area-inset-top, 0px)) 14px 10px; display: grid; gap: 9px; }
+.fila { display: flex; align-items: center; gap: 10px; }
+.logo { width: 34px; height: 34px; border-radius: 10px; background: var(--accent); color: #fff; display: grid; place-items: center; flex: none; }
+.logo.grande { width: 64px; height: 64px; border-radius: 18px; margin: 0 auto; }
+.fila h1 { margin: 0; font-size: 18px; flex: 1; }
+.fila small { display: block; font-size: 12.5px; color: var(--muted); font-weight: 500; margin-top: 1px; }
+.recargar { border: 1px solid var(--line); background: var(--surface); border-radius: 99px; width: 38px; height: 38px;
+  font-size: 17px; cursor: pointer; color: var(--muted); }
+.recargar.gira { animation: gira .8s linear infinite; }
+@keyframes gira { to { transform: rotate(360deg); } }
+.busca { display: flex; align-items: center; gap: 8px; background: var(--soft); border: 1px solid var(--line);
+  border-radius: 12px; padding: 0 10px; }
+.busca:focus-within { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+.busca svg { color: var(--muted); flex: none; }
+.busca input { flex: 1; min-width: 0; border: 0; background: transparent; padding: 11px 0; font-size: 16px; outline: none; }
+.busca input::-webkit-search-cancel-button { display: none; }
+
+.lista { padding: 6px 0 calc(16px + env(safe-area-inset-bottom, 0px)); }
+.mapa { display: grid; grid-template-columns: 40px 1fr auto; gap: 12px; align-items: center; padding: 12px 14px;
+  border-bottom: 1px solid var(--line); text-decoration: none; color: inherit; }
+.mapa:active { background: var(--accent-soft); }
+.ic { width: 40px; height: 40px; border-radius: 11px; background: var(--accent-soft); color: var(--accent);
+  display: grid; place-items: center; }
+.tx { min-width: 0; }
+.tx b { display: block; font-size: 15px; overflow-wrap: anywhere; line-height: 1.25; }
+.tx span { display: block; font-size: 12.5px; color: var(--muted); margin-top: 2px; }
+.vence { font-size: 12px; font-weight: 600; color: var(--muted); white-space: nowrap; text-align: right; }
+.vence.pronto { color: var(--warn); }
+.vence i { display: block; font-style: normal; font-size: 18px; color: var(--muted); margin-top: 1px; }
+.vacio { text-align: center; color: var(--muted); padding: 40px 20px; display: grid; gap: 6px; }
+.vacio b { color: var(--ink); font-size: 16px; }
+.salir { margin: 18px auto 8px; display: block; background: none; border: 0; color: var(--muted); font-size: 13px;
+  text-decoration: underline; cursor: pointer; }
+</style>
+</head>
+<body>
+<div class="app" id="app"></div>
+<script>
+(function () {
+  'use strict';
+  var SUPABASE = 'https://gnqvhlpknxtdnzuxfybc.supabase.co';
+  var CLAVE = 'sb_publishable_dUhjyCfRfNtLVLfOYnJ1WA_hfPD3kk9';
+  var EMAIL = 'qgis@mobisond.com';           // mismo usuario y contraseña que el Historial
+  var app = document.getElementById('app');
+
+  function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
+    return {'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[c]; }); }
+  function ls(k, v) { try { if (v === undefined) return localStorage.getItem(k); if (v === null) localStorage.removeItem(k); else localStorage.setItem(k, v); } catch (e) { return null; } }
+
+  // ---------------- sesión (la comparte con historial.html: si ya entraste ahí, acá pasás directo)
+  var ses = {access: null, vence: 0};
+  function pedir(metodo, ruta, cuerpo, token) {
+    return fetch(SUPABASE + ruta, {method: metodo, cache: 'no-store', headers: {'Content-Type': 'application/json', apikey: CLAVE,
+      Authorization: 'Bearer ' + (token || CLAVE)}, body: cuerpo ? JSON.stringify(cuerpo) : undefined})
+      .then(function (r) { return r.text().then(function (t) {
+        var d = null; try { d = t ? JSON.parse(t) : null; } catch (e) {}
+        if (!r.ok) { var err = new Error((d && (d.msg || d.message || d.error_description)) || ('Error ' + r.status)); err.status = r.status; throw err; }
+        return d; }); });
+  }
+  function guardar(d) {
+    if (!d || !d.access_token) throw new Error('No se pudo entrar');
+    ses.access = d.access_token; ses.vence = Date.now() + ((d.expires_in || 3600) - 60) * 1000;
+    ls('hc_refresh', d.refresh_token || '');
+  }
+  function entrar(clave) { return pedir('POST', '/auth/v1/token?grant_type=password', {email: EMAIL, password: clave}).then(guardar); }
+  function token() {
+    if (ses.access && Date.now() < ses.vence) return Promise.resolve(ses.access);
+    var r = ls('hc_refresh');
+    if (!r) return Promise.reject(Object.assign(new Error('login'), {login: true}));
+    return pedir('POST', '/auth/v1/token?grant_type=refresh_token', {refresh_token: r}).then(function (d) { guardar(d); return ses.access; })
+      .catch(function (e) { if (e.status === 400 || e.status === 401) ls('hc_refresh', null);
+        throw Object.assign(new Error('login'), {login: e.status === 400 || e.status === 401, red: !e.status}); });
+  }
+
+  // ---------------- login
+  function pantallaLogin(msg) {
+    app.innerHTML = '<form class="login" id="fl"><span class="logo grande"><svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 4 3 6v14l6-2 6 2 6-2V4l-6 2-6-2z"/><path d="M9 4v14M15 6v14"/></svg></span>' +
+      '<h1>Mapas activos</h1><p>Los recorridos vigentes del equipo</p>' +
+      '<input id="clave" type="password" autocomplete="current-password" placeholder="Contraseña" required>' +
+      '<button class="btn prim" type="submit">Entrar</button><div class="err" id="err">' + esc(msg || '') + '</div></form>';
+    document.getElementById('fl').onsubmit = function (ev) {
+      ev.preventDefault();
+      var b = ev.target.querySelector('button'); b.disabled = true; b.textContent = 'Entrando…';
+      entrar(document.getElementById('clave').value).then(pantallaLista).catch(function () {
+        b.disabled = false; b.textContent = 'Entrar';
+        document.getElementById('err').textContent = 'Contraseña incorrecta o sin conexión.';
+      });
+    };
+  }
+
+  // ---------------- lista
+  var mapas = [];
+  function cuanto(ms) {
+    var m = Math.max(0, Math.round(ms / 60000));
+    if (m < 60) return m + ' min';
+    var h = Math.floor(m / 60);
+    return h < 48 ? h + ' h' : Math.round(h / 24) + ' días';
+  }
+  function hace(ms) {
+    var m = Math.round(ms / 60000);
+    if (m < 1) return 'recién';
+    if (m < 60) return 'hace ' + m + ' min';
+    var h = Math.round(m / 60);
+    return h < 48 ? 'hace ' + h + ' h' : 'hace ' + Math.round(h / 24) + ' días';
+  }
+  function norm(t) { return String(t || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toUpperCase().replace(/[\s_\-.]+/g, ''); }
+
+  function pantallaLista() {
+    app.innerHTML = '<header><div class="fila"><span class="logo"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 4 3 6v14l6-2 6 2 6-2V4l-6 2-6-2z"/><path d="M9 4v14M15 6v14"/></svg></span>' +
+      '<h1>Mapas activos<small id="cuenta">Cargando…</small></h1>' +
+      '<button class="recargar" id="rec" type="button" aria-label="Actualizar">↻</button></div>' +
+      '<label class="busca"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" ' +
+      'stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>' +
+      '<input id="q" type="search" enterkeyhint="search" autocomplete="off" placeholder="Buscar mapa o persona" aria-label="Buscar mapa"></label>' +
+      '</header><div class="lista" id="lista"></div><button class="salir" id="salir" type="button">Salir</button>';
+    document.getElementById('rec').onclick = cargar;
+    document.getElementById('q').oninput = pintar;
+    document.getElementById('salir').onclick = function () { ls('hc_refresh', null); ses.access = null; pantallaLogin(); };
+    cargar();
+  }
+
+  function cargar() {
+    var rec = document.getElementById('rec'); rec.classList.add('gira');
+    var ahora = new Date().toISOString().replace(/\.\d+Z$/, 'Z');
+    // la sesión confirma que entraste con la contraseña; la lista es la misma que ve el plugin
+    token().then(function () {
+      return pedir('GET', '/rest/v1/links_tecnicos?select=codigo,titulo,autor,creado,vence&vence=gt.' + ahora +
+                   '&order=creado.desc&limit=300');
+    }).then(function (filas) {
+      mapas = (filas || []).filter(function (f) { return f.codigo; });
+      pintar();
+    }).catch(function (e) {
+      if (e.login) { pantallaLogin('Tu sesión venció, entrá de nuevo.'); return; }
+      document.getElementById('lista').innerHTML = '<div class="vacio"><b>No pude traer la lista</b>' +
+        '<span>Revisá la conexión y tocá ↻.</span></div>';
+      document.getElementById('cuenta').textContent = 'Sin conexión';
+    }).then(function () { var r = document.getElementById('rec'); if (r) r.classList.remove('gira'); });
+  }
+
+  function pintar() {
+    var q = norm(document.getElementById('q').value), ahora = Date.now();
+    var vis = mapas.filter(function (m) { return !q || norm(m.titulo).indexOf(q) >= 0 || norm(m.autor).indexOf(q) >= 0; });
+    document.getElementById('cuenta').textContent = mapas.length ?
+      (q ? vis.length + ' de ' + mapas.length : mapas.length + (mapas.length === 1 ? ' mapa vigente' : ' mapas vigentes')) : 'Ninguno vigente';
+    var ic = '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" ' +
+             'stroke-linejoin="round" aria-hidden="true"><path d="M9 4 3 6v14l6-2 6 2 6-2V4l-6 2-6-2z"/><path d="M9 4v14M15 6v14"/></svg>';
+    document.getElementById('lista').innerHTML = vis.length ? vis.map(function (m) {
+      var resta = new Date(m.vence).getTime() - ahora, creado = new Date(m.creado).getTime();
+      return '<a class="mapa" href="./#' + encodeURIComponent(m.codigo) + '"><span class="ic">' + ic + '</span>' +
+        '<span class="tx"><b>' + esc(m.titulo || 'Recorrido') + '</b><span>' +
+        esc([m.autor, isNaN(creado) ? '' : hace(ahora - creado)].filter(Boolean).join(' · ')) + '</span></span>' +
+        '<span class="vence' + (resta < 3 * 3600000 ? ' pronto' : '') + '">vence en ' + cuanto(resta) + '<i>›</i></span></a>';
+    }).join('') : '<div class="vacio">' + (mapas.length ? '<b>Ningún mapa coincide</b>' :
+      '<b>No hay mapas vigentes</b><span>Se generan desde QGIS con “📱 Generar mapa”.</span>') + '</div>';
+  }
+
+  token().then(pantallaLista).catch(function (e) {
+    if (e.red) { pantallaLista(); return; }
+    pantallaLogin();
+  });
+})();
+</script>
+</body>
+</html>

@@ -32,6 +32,12 @@ header { padding: 9px max(14px, env(safe-area-inset-right, 0px)) 8px max(14px, e
   display: grid; gap: 5px; border-bottom: 1px solid var(--line); }
 .marca { font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); font-weight: 600; }
 h1 { margin: 0; font-size: 16px; line-height: 1.25; overflow-wrap: anywhere; }
+.tit { display: flex; align-items: flex-start; gap: 10px; }
+.tit h1 { flex: 1; min-width: 0; }
+.amenu { flex: none; display: inline-flex; align-items: center; gap: 5px; margin: -3px -4px 0 0; padding: 5px 10px;
+  border: 1px solid var(--line); border-radius: 99px; font-size: 13px; font-weight: 600; color: var(--muted);
+  text-decoration: none; white-space: nowrap; }
+.amenu:active { background: var(--accent-soft); }
 .meta { display: flex; flex-wrap: wrap; column-gap: 0; row-gap: 2px; font-size: 12.5px; color: var(--muted); }
 .meta span + span::before { content: '·'; margin: 0 6px; color: var(--muted); }
 .chip { white-space: nowrap; }
@@ -268,7 +274,8 @@ h1 { margin: 0; font-size: 16px; line-height: 1.25; overflow-wrap: anywhere; }
     var nc = nombres.length || (d.caminos || []).length;
 
     var h = '';
-    h += '<header><h1>' + esc(d.titulo) + '</h1><div class="meta">';
+    h += '<header><div class="tit"><h1>' + esc(d.titulo) + '</h1>' +
+         '<a class="amenu" href="mapas.html" aria-label="Ver todos los mapas activos">☰ Mapas</a></div><div class="meta">';
     if (cliente) {
       if ((d.sitios || []).length) h += '<span class="chip">' + d.sitios.length + ' sitios</span>';
     } else if (nc > 1) h += '<span class="chip">' + nc + ' caminos ópticos</span>';
