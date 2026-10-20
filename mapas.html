@@ -102,7 +102,7 @@ header { position: sticky; top: 0; z-index: 2; background: var(--surface); borde
   // ---------------- login
   function pantallaLogin(msg) {
     app.innerHTML = '<form class="login" id="fl"><span class="logo grande"><svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 4 3 6v14l6-2 6 2 6-2V4l-6 2-6-2z"/><path d="M9 4v14M15 6v14"/></svg></span>' +
-      '<h1>Mapas activos</h1><p>Los recorridos vigentes del equipo</p>' +
+      '<h1>Mapas activos</h1><p>Mantenimiento - Mobisond</p>' +
       '<input id="clave" type="password" autocomplete="current-password" placeholder="Contraseña" required>' +
       '<button class="btn prim" type="submit">Entrar</button><div class="err" id="err">' + esc(msg || '') + '</div></form>';
     document.getElementById('fl').onsubmit = function (ev) {
