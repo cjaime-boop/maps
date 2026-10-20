@@ -80,6 +80,12 @@ header { position: sticky; top: 0; z-index: 2; background: var(--surface); borde
 .vence i { display: block; font-style: normal; font-size: 18px; color: var(--muted); margin-top: 1px; }
 .vacio { text-align: center; color: var(--muted); padding: 40px 20px; display: grid; gap: 6px; }
 .vacio b { color: var(--ink); font-size: 16px; }
+.instalar { margin: 10px 14px 4px; padding: 12px 14px; border-radius: 14px; background: var(--accent-soft);
+  display: flex; align-items: center; gap: 12px; }
+.instalar img { width: 40px; height: 40px; border-radius: 10px; flex: none; }
+.instalar div { flex: 1; min-width: 0; font-size: 13px; color: var(--muted); }
+.instalar div b { display: block; color: var(--ink); font-size: 14.5px; }
+.instalar .btn { padding: 9px 14px; font-size: 14px; }
 .salir { margin: 18px auto 8px; display: block; background: none; border: 0; color: var(--muted); font-size: 13px;
   text-decoration: underline; cursor: pointer; }
 </style>
@@ -164,7 +170,8 @@ header { position: sticky; top: 0; z-index: 2; background: var(--surface); borde
       '<label class="busca"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" ' +
       'stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>' +
       '<input id="q" type="search" enterkeyhint="search" autocomplete="off" placeholder="Buscar mapa" aria-label="Buscar mapa"></label>' +
-      '</header><div class="lista" id="lista"></div><button class="salir" id="salir" type="button">Salir</button>';
+      '</header><div id="inst"></div><div class="lista" id="lista"></div><button class="salir" id="salir" type="button">Salir</button>';
+    ofrecerInstalar();
     document.getElementById('rec').onclick = cargar;
     document.getElementById('q').oninput = pintar;
     document.getElementById('salir').onclick = function () { ls('mp_ok', null); pantallaLogin(); };
@@ -202,6 +209,30 @@ header { position: sticky; top: 0; z-index: 2; background: var(--surface); borde
     }).join('') : '<div class="vacio">' + (mapas.length ? '<b>Ningún mapa coincide</b>' :
       '<b>No hay mapas vigentes</b><span>Se generan desde QGIS con “📱 Generar mapa”.</span>') + '</div>';
   }
+
+  // ---------------- instalar como app (ícono "Mapas Mobisond" en la pantalla de inicio)
+  var avisoInstalar = null;
+  var instalada = (window.matchMedia && matchMedia('(display-mode: standalone)').matches) || navigator.standalone;
+  var esIOS = /iphone|ipad|ipod/i.test(navigator.userAgent);
+  window.addEventListener('beforeinstallprompt', function (e) { e.preventDefault(); avisoInstalar = e; ofrecerInstalar(); });
+  window.addEventListener('appinstalled', function () { instalada = true; ofrecerInstalar(); });
+  function ofrecerInstalar() {
+    var c = document.getElementById('inst');
+    if (!c) return;
+    if (instalada || ls('mp_no_instalar') || (!avisoInstalar && !esIOS)) { c.innerHTML = ''; return; }
+    c.innerHTML = '<div class="instalar"><img src="app-192.png" alt=""><div><b>Instalar Mapas Mobisond</b>' +
+      (avisoInstalar ? 'Queda el ícono en la pantalla de inicio.' :
+       'Tocá <b style="display:inline">Compartir</b> ⬆︎ y después <b style="display:inline">Agregar a inicio</b>.') + '</div>' +
+      (avisoInstalar ? '<button class="btn prim" id="bInst" type="button">Instalar</button>' : '') +
+      '<button class="ojo" id="bNo" type="button" aria-label="No mostrar más" style="position:static;transform:none">✕</button></div>';
+    var bi = document.getElementById('bInst');
+    if (bi) bi.onclick = function () {
+      avisoInstalar.prompt();
+      avisoInstalar.userChoice.then(function () { avisoInstalar = null; ofrecerInstalar(); });
+    };
+    document.getElementById('bNo').onclick = function () { ls('mp_no_instalar', '1'); ofrecerInstalar(); };
+  }
+  if ('serviceWorker' in navigator) { try { navigator.serviceWorker.register('sw.js'); } catch (e) {} }
 
   if (adentro()) pantallaLista(); else pantallaLogin();
 })();
