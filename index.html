@@ -612,9 +612,9 @@ h1 { margin: 0; font-size: 16px; line-height: 1.25; overflow-wrap: anywhere; }
     function ayuda() {
       var t = {cable: 'Tocá puntos sobre el cable (o botellas). Se suma el recorrido por el cable entre cada uno.',
                recta: 'Tocá puntos en el mapa. Se suma la distancia en línea recta.',
-               corte: 'Tocá desde dónde se midió<br>Doble click para fijar punto'}[modo];
+               corte: 'Tocá desde dónde se midió (una botella o un punto del cable) y escribí los metros medidos.'}[modo];
       if (modo !== 'recta' && !tramos.length) t = 'Este recorrido no tiene cable dibujado.';
-      document.getElementById('mAyuda').innerHTML = t;
+      document.getElementById('mAyuda').textContent = t;
     }
     function punto(ll, cls, html) {
       L.marker(ll, {icon: L.divIcon({className: cls, html: html || '', iconSize: cls === 'corteicon' ? [28, 28] : [14, 14]}),
