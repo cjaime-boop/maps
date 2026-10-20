@@ -291,7 +291,7 @@ h1 { margin: 0; font-size: 16px; line-height: 1.25; overflow-wrap: anywhere; }
     h += '<div class="regla" id="regla" hidden>' +
          '<div class="fila"><span class="seg"><button type="button" id="mCable" class="on">Cable</button>' +
          '<button type="button" id="mRecta">Recta</button><button type="button" id="mCorte">Corte</button></span>' +
-         '<button type="button" class="mini" id="mBorrar">Borrar</button><button type="button" class="mini candado" id="mFijar" aria-pressed="false" title="Fijar la medición (los toques en el mapa no la mueven)">🔓</button>' +
+         '<button type="button" class="mini" id="mBorrar">Borrar</button><button type="button" class="mini candado" id="mFijar" aria-pressed="false" title="Fijar la medición (también con doble toque en el mapa)">🔓</button>' +
          '<button type="button" class="mini" id="mCerrar">✕</button></div>' +
          '<div class="fila" id="filaCorte"><label class="campo" hidden>Medidos <input id="mMetros" type="number" inputmode="decimal" enterkeyhint="search" min="0" step="1" placeholder="metros">' +
          '<button type="button" class="mini buscar" id="mBuscar">Buscar</button></label>' +
@@ -733,6 +733,7 @@ h1 { margin: 0; font-size: 16px; line-height: 1.25; overflow-wrap: anywhere; }
     }
     function regla_(on) {
       midiendo = on; regla.hidden = !on; btnRegla.classList.toggle('on', on);
+      if (on) mapa.doubleClickZoom.disable(); else mapa.doubleClickZoom.enable();
       btnRegla.innerHTML = on ? '<span aria-hidden="true">✕</span> Terminar' : '<span aria-hidden="true">📏</span> Medir';
       if (!on) { fijar(false); pts = []; capaMed.clearLayers(); }
       else {
@@ -741,7 +742,13 @@ h1 { margin: 0; font-size: 16px; line-height: 1.25; overflow-wrap: anywhere; }
         ayuda(); dibujar();
       }
     }
-    mapa.on('click', function (e) { if (midiendo) agregarPunto(e.latlng); });
+    // doble toque en el mapa = fijar / soltar la medición (un toque espera un instante por si viene el segundo)
+    var tToque = null;
+    mapa.on('click', function (e) {
+      if (!midiendo) return;
+      if (tToque) { clearTimeout(tToque); tToque = null; fijar(!fijado); return; }
+      tToque = setTimeout(function () { tToque = null; agregarPunto(e.latlng); }, 260);
+    });
     document.getElementById('mCable').onclick = function () { setModo('cable'); };
     document.getElementById('mRecta').onclick = function () { setModo('recta'); };
     document.getElementById('mCorte').onclick = function () { setModo('corte'); };
