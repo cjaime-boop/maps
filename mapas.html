@@ -79,36 +79,24 @@ header { position: sticky; top: 0; z-index: 2; background: var(--surface); borde
   'use strict';
   var SUPABASE = 'https://gnqvhlpknxtdnzuxfybc.supabase.co';
   var CLAVE = 'sb_publishable_dUhjyCfRfNtLVLfOYnJ1WA_hfPD3kk9';
-  var EMAIL = 'qgis@mobisond.com';           // mismo usuario y contraseña que el Historial
+  // contraseña propia del menú (no es la del Historial). Se guarda solo su huella, no la contraseña.
+  var HUELLA = '7f8fe1ecb33e7de6e379ef7eebd1a9b263828ab8f087479d164498bac1c9302b';
   var app = document.getElementById('app');
 
   function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
     return {'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[c]; }); }
   function ls(k, v) { try { if (v === undefined) return localStorage.getItem(k); if (v === null) localStorage.removeItem(k); else localStorage.setItem(k, v); } catch (e) { return null; } }
 
-  // ---------------- sesión (la comparte con historial.html: si ya entraste ahí, acá pasás directo)
-  var ses = {access: null, vence: 0};
-  function pedir(metodo, ruta, cuerpo, token) {
-    return fetch(SUPABASE + ruta, {method: metodo, cache: 'no-store', headers: {'Content-Type': 'application/json', apikey: CLAVE,
-      Authorization: 'Bearer ' + (token || CLAVE)}, body: cuerpo ? JSON.stringify(cuerpo) : undefined})
-      .then(function (r) { return r.text().then(function (t) {
-        var d = null; try { d = t ? JSON.parse(t) : null; } catch (e) {}
-        if (!r.ok) { var err = new Error((d && (d.msg || d.message || d.error_description)) || ('Error ' + r.status)); err.status = r.status; throw err; }
-        return d; }); });
+  function huella(txt) {
+    var datos = new TextEncoder().encode('mobisond-mapas:' + txt);
+    return crypto.subtle.digest('SHA-256', datos).then(function (h) {
+      return Array.prototype.map.call(new Uint8Array(h), function (b) { return ('0' + b.toString(16)).slice(-2); }).join('');
+    });
   }
-  function guardar(d) {
-    if (!d || !d.access_token) throw new Error('No se pudo entrar');
-    ses.access = d.access_token; ses.vence = Date.now() + ((d.expires_in || 3600) - 60) * 1000;
-    ls('hc_refresh', d.refresh_token || '');
-  }
-  function entrar(clave) { return pedir('POST', '/auth/v1/token?grant_type=password', {email: EMAIL, password: clave}).then(guardar); }
-  function token() {
-    if (ses.access && Date.now() < ses.vence) return Promise.resolve(ses.access);
-    var r = ls('hc_refresh');
-    if (!r) return Promise.reject(Object.assign(new Error('login'), {login: true}));
-    return pedir('POST', '/auth/v1/token?grant_type=refresh_token', {refresh_token: r}).then(function (d) { guardar(d); return ses.access; })
-      .catch(function (e) { if (e.status === 400 || e.status === 401) ls('hc_refresh', null);
-        throw Object.assign(new Error('login'), {login: e.status === 400 || e.status === 401, red: !e.status}); });
+  function adentro() { return ls('mp_ok') === HUELLA; }
+  function pedir(ruta) {
+    return fetch(SUPABASE + ruta, {cache: 'no-store', headers: {apikey: CLAVE, Authorization: 'Bearer ' + CLAVE}})
+      .then(function (r) { if (!r.ok) throw new Error('Error ' + r.status); return r.json(); });
   }
 
   // ---------------- login
@@ -120,9 +108,12 @@ header { position: sticky; top: 0; z-index: 2; background: var(--surface); borde
     document.getElementById('fl').onsubmit = function (ev) {
       ev.preventDefault();
       var b = ev.target.querySelector('button'); b.disabled = true; b.textContent = 'Entrando…';
-      entrar(document.getElementById('clave').value).then(pantallaLista).catch(function () {
+      huella(document.getElementById('clave').value).then(function (h) {
+        if (h !== HUELLA) throw new Error('mal');
+        ls('mp_ok', h); pantallaLista();
+      }).catch(function () {
         b.disabled = false; b.textContent = 'Entrar';
-        document.getElementById('err').textContent = 'Contraseña incorrecta o sin conexión.';
+        document.getElementById('err').textContent = 'Contraseña incorrecta.';
       });
     };
   }
@@ -154,22 +145,19 @@ header { position: sticky; top: 0; z-index: 2; background: var(--surface); borde
       '</header><div class="lista" id="lista"></div><button class="salir" id="salir" type="button">Salir</button>';
     document.getElementById('rec').onclick = cargar;
     document.getElementById('q').oninput = pintar;
-    document.getElementById('salir').onclick = function () { ls('hc_refresh', null); ses.access = null; pantallaLogin(); };
+    document.getElementById('salir').onclick = function () { ls('mp_ok', null); pantallaLogin(); };
     cargar();
   }
 
   function cargar() {
     var rec = document.getElementById('rec'); rec.classList.add('gira');
     var ahora = new Date().toISOString().replace(/\.\d+Z$/, 'Z');
-    // la sesión confirma que entraste con la contraseña; la lista es la misma que ve el plugin
-    token().then(function () {
-      return pedir('GET', '/rest/v1/links_tecnicos?select=codigo,titulo,autor,creado,vence&vence=gt.' + ahora +
-                   '&order=creado.desc&limit=300');
-    }).then(function (filas) {
+    // la lista es la misma que ve el plugin en "Links activos"
+    pedir('/rest/v1/links_tecnicos?select=codigo,titulo,autor,creado,vence&vence=gt.' + ahora +
+          '&order=creado.desc&limit=300').then(function (filas) {
       mapas = (filas || []).filter(function (f) { return f.codigo; });
       pintar();
-    }).catch(function (e) {
-      if (e.login) { pantallaLogin('Tu sesión venció, entrá de nuevo.'); return; }
+    }).catch(function () {
       document.getElementById('lista').innerHTML = '<div class="vacio"><b>No pude traer la lista</b>' +
         '<span>Revisá la conexión y tocá ↻.</span></div>';
       document.getElementById('cuenta').textContent = 'Sin conexión';
@@ -193,10 +181,7 @@ header { position: sticky; top: 0; z-index: 2; background: var(--surface); borde
       '<b>No hay mapas vigentes</b><span>Se generan desde QGIS con “📱 Generar mapa”.</span>') + '</div>';
   }
 
-  token().then(pantallaLista).catch(function (e) {
-    if (e.red) { pantallaLista(); return; }
-    pantallaLogin();
-  });
+  if (adentro()) pantallaLista(); else pantallaLogin();
 })();
 </script>
 </body>
