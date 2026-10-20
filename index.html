@@ -113,8 +113,7 @@ h1 { margin: 0; font-size: 16px; line-height: 1.25; overflow-wrap: anywhere; }
 #mBorrar { margin-left: auto; }
 .mini.candado { padding: 5px 9px; font-size: 15px; line-height: 1; }
 .mini.candado.on { background: #f59e0b; border-color: #f59e0b; }
-.regla .fijado { font-size: 12.5px; font-weight: 600; color: #9a5a00; background: #fff4e0; border-radius: 8px; padding: 5px 8px; }
-.regla .fijado.sacude { animation: sacude .35s; }
+.mini.candado.sacude { animation: sacude .35s; }
 @keyframes sacude { 25% { transform: translateX(-5px); } 75% { transform: translateX(5px); } }
 .mini.yo { margin-top: 6px; color: #1a73e8; border-color: #1a73e8; font-size: 13.5px; padding: 7px 12px; }
 .sitioicon { background: #16a34a; border: 2px solid #fff; border-radius: 3px; box-shadow: 0 1px 3px rgba(0,0,0,.4); }
@@ -294,7 +293,6 @@ h1 { margin: 0; font-size: 16px; line-height: 1.25; overflow-wrap: anywhere; }
          '<button type="button" id="mRecta">Recta</button><button type="button" id="mCorte">Corte</button></span>' +
          '<button type="button" class="mini" id="mBorrar">Borrar</button><button type="button" class="mini candado" id="mFijar" aria-pressed="false" title="Fijar la medición (los toques en el mapa no la mueven)">🔓</button>' +
          '<button type="button" class="mini" id="mCerrar">✕</button></div>' +
-         '<div class="fijado" id="mFijado" hidden>🔒 Fijada: tocar el mapa no la mueve</div>' +
          '<div class="fila" id="filaCorte"><label class="campo" hidden>Medidos <input id="mMetros" type="number" inputmode="decimal" enterkeyhint="search" min="0" step="1" placeholder="metros">' +
          '<button type="button" class="mini buscar" id="mBuscar">Buscar</button></label>' +
          '<label class="campo gan">Ganancia <input id="mGan" type="number" inputmode="decimal" min="0" max="60" step="1" value="15">%</label></div>' +
@@ -707,11 +705,10 @@ h1 { margin: 0; font-size: 16px; line-height: 1.25; overflow-wrap: anywhere; }
       fijado = on;
       var b = document.getElementById('mFijar');
       b.classList.toggle('on', on); b.textContent = on ? '🔒' : '🔓'; b.setAttribute('aria-pressed', on ? 'true' : 'false');
-      document.getElementById('mFijado').hidden = !on;
     }
     function agregarPunto(ll, forzar) {
       if (fijado && !forzar) {            // medición fijada: un toque sin querer no la mueve
-        var f = document.getElementById('mFijado');
+        var f = document.getElementById('mFijar');
         f.classList.remove('sacude'); void f.offsetWidth; f.classList.add('sacude');
         return;
       }
