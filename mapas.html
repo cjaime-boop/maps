@@ -41,6 +41,11 @@ button, input { font: inherit; color: inherit; }
 .login h1 { margin: 0; font-size: 20px; }
 .login p { margin: 0; color: var(--muted); font-size: 14px; }
 .login input { padding: 13px 14px; border-radius: 12px; border: 1px solid var(--line); background: var(--soft); font-size: 16px; }
+.pass { position: relative; display: flex; }
+.pass input { flex: 1; min-width: 0; padding-right: 50px; }
+.ojo { position: absolute; right: 4px; top: 50%; transform: translateY(-50%); width: 42px; height: 42px; border: 0;
+  background: none; color: var(--muted); border-radius: 10px; cursor: pointer; display: grid; place-items: center; }
+.ojo:active { background: var(--accent-soft); }
 .login .err { color: var(--rojo); font-size: 13px; min-height: 1em; }
 
 header { position: sticky; top: 0; z-index: 2; background: var(--surface); border-bottom: 1px solid var(--line);
@@ -89,6 +94,8 @@ header { position: sticky; top: 0; z-index: 2; background: var(--surface); borde
   // contraseña propia del menú (no es la del Historial). Se guarda solo su huella, no la contraseña.
   var HUELLA = '7f8fe1ecb33e7de6e379ef7eebd1a9b263828ab8f087479d164498bac1c9302b';
   var app = document.getElementById('app');
+  var OJO = '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg>';
+  var OJO_TACHADO = '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 3l18 18"/><path d="M10.6 5.1A10.8 10.8 0 0 1 12 5c6.4 0 10 7 10 7a17.6 17.6 0 0 1-3.2 4.2M6.6 6.6C3.8 8.4 2 12 2 12s3.6 7 10 7a9.9 9.9 0 0 0 5.4-1.6"/><path d="M9.9 9.9a3 3 0 0 0 4.2 4.2"/></svg>';
 
   function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
     return {'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[c]; }); }
@@ -110,8 +117,16 @@ header { position: sticky; top: 0; z-index: 2; background: var(--surface); borde
   function pantallaLogin(msg) {
     app.innerHTML = '<form class="login" id="fl"><span class="logo grande"><svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 4 3 6v14l6-2 6 2 6-2V4l-6 2-6-2z"/><path d="M9 4v14M15 6v14"/></svg></span>' +
       '<h1>Mapas activos</h1><p>Mantenimiento - Mobisond</p>' +
-      '<input id="clave" type="password" autocomplete="current-password" placeholder="Contraseña" required>' +
+      '<div class="pass"><input id="clave" type="password" autocomplete="current-password" placeholder="Contraseña" required>' +
+      '<button class="ojo" id="ojo" type="button" aria-label="Mostrar contraseña">' + OJO + '</button></div>' +
       '<button class="btn prim" type="submit">Entrar</button><div class="err" id="err">' + esc(msg || '') + '</div></form>';
+    document.getElementById('ojo').onclick = function () {
+      var c = document.getElementById('clave'), ver = c.type === 'password';
+      c.type = ver ? 'text' : 'password';
+      this.innerHTML = ver ? OJO_TACHADO : OJO;
+      this.setAttribute('aria-label', ver ? 'Ocultar contraseña' : 'Mostrar contraseña');
+      c.focus();
+    };
     document.getElementById('fl').onsubmit = function (ev) {
       ev.preventDefault();
       var b = ev.target.querySelector('button'); b.disabled = true; b.textContent = 'Entrando…';
