@@ -42,7 +42,6 @@ h1 { margin: 0; font-size: 16px; line-height: 1.25; overflow-wrap: anywhere; }
 .meta span + span::before { content: '·'; margin: 0 6px; color: var(--muted); }
 .chip { white-space: nowrap; }
 .chip.vence { color: var(--warn); font-weight: 600; }
-.chip.corte { color: var(--ink); font-weight: 700; }
 #mapa { position: absolute; inset: 0; background: #e5e3df; }
 .bot { display: grid; grid-template-columns: 26px 1fr auto; gap: 10px; align-items: center;
   padding: 10px max(16px, env(safe-area-inset-right, 0px)) 10px max(16px, env(safe-area-inset-left, 0px)); border-bottom: 1px solid var(--line); }
@@ -280,9 +279,6 @@ h1 { margin: 0; font-size: 16px; line-height: 1.25; overflow-wrap: anywhere; }
     if (cliente) {
       if ((d.sitios || []).length) h += '<span class="chip">' + d.sitios.length + ' sitios</span>';
     } else if (nc > 1) h += '<span class="chip">' + nc + ' caminos ópticos</span>';
-    var corte = d.corte && (d.corte.puntos || []).length ? d.corte : null;
-    if (corte) h += '<span class="chip corte">✂ Corte a ' + Math.round(corte.metros).toLocaleString('es-AR') + ' m' +
-                    (corte.puntos.length > 1 ? ' (' + corte.puntos.length + ' posiciones)' : '') + '</span>';
     h += '<span class="chip">' + bots.length + (bots.length === 1 ? ' botella' : ' botellas') + '</span>';
     h += '<span class="chip" id="largo"></span>';
     h += '<span class="chip vence">Válido por ' + horas + ' h</span></div></header>';
@@ -324,12 +320,6 @@ h1 { margin: 0; font-size: 16px; line-height: 1.25; overflow-wrap: anywhere; }
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
       maxZoom: 19, attribution: '&copy; OpenStreetMap'
     }).addTo(mapa);
-    // otros cables de la zona (solo de referencia: no se usan para medir)
-    (d.cables_zona || []).forEach(function (c) {
-      (c.tramos || []).forEach(function (t) {
-        L.polyline(t, {color: '#8a94a6', weight: 3, opacity: .75, dashArray: '6 5'}).bindTooltip(c.nombre || 'Otro cable').addTo(mapa);
-      });
-    });
     var grupo = L.featureGroup().addTo(mapa);
 
     // ---- red del cable (para medir por el cable) ----
@@ -546,36 +536,6 @@ h1 { margin: 0; font-size: 16px; line-height: 1.25; overflow-wrap: anywhere; }
     if (grupo.getLayers().length) mapa.fitBounds(grupo.getBounds(), {paddingTopLeft: [24, 24],
       paddingBottomRight: [24, document.getElementById('hoja').offsetHeight + 24]});
     else mapa.setView([-34.6, -58.45], 11);
-
-    // ---- punto de corte mandado desde Ricardito ----
-    if (corte) {
-      var capaCorte = L.layerGroup().addTo(mapa);
-      corte.puntos.forEach(function (c) {
-        if ((c.linea || []).length > 1) L.polyline(c.linea, {color: '#f59e0b', weight: 7, opacity: .9}).addTo(capaCorte);
-      });
-      if (corte.desde) L.marker(corte.desde, {icon: L.divIcon({className: 'medpt', iconSize: [14, 14]}), interactive: false}).addTo(capaCorte);
-      var cortes = corte.puntos.map(function (c, n) {
-        var ll = L.latLng(c.lat, c.lon);
-        var mk = L.marker(ll, {icon: L.divIcon({className: 'corteicon', html: '✂', iconSize: [28, 28]}), zIndexOffset: 2000});
-        mk.bindPopup('<b>Punto de corte' + (corte.puntos.length > 1 ? ' ' + (n + 1) : '') + '</b><br>' +
-          Math.round(corte.metros).toLocaleString('es-AR') + ' m por el cable (' + Math.round(corte.medidos).toLocaleString('es-AR') +
-          ' m medidos − ' + corte.ganancia + '% de ganancia)<br>' + c.lat.toFixed(6) + ', ' + c.lon.toFixed(6) +
-          '<br><a href="' + ruta(c.lat.toFixed(6), c.lon.toFixed(6)) + '" target="_blank" rel="noopener">Cómo llegar ↗</a>');
-        mk.addTo(capaCorte);
-        return ll;
-      });
-      var hh0 = document.getElementById('hoja').offsetHeight;
-      if (cortes.length === 1) {
-        mapa.setView(cortes[0], 17, {animate: false});
-        mapa.panBy([0, hh0 / 2], {animate: false});
-      } else {
-        mapa.fitBounds(L.latLngBounds(cortes), {paddingTopLeft: [40, 40], paddingBottomRight: [40, hh0 + 40], maxZoom: 17});
-      }
-      var bc = document.getElementById('irSel');
-      bc.href = ruta(cortes[0].lat.toFixed(6), cortes[0].lng.toFixed(6));
-      bc.textContent = 'Cómo llegar al corte' + (cortes.length > 1 ? ' 1' : '') + ' ↗';
-      bc.hidden = false;
-    }
 
     function elegir(i, centrar) {
       if (sel >= 0) { document.getElementById('b' + sel).classList.remove('sel'); L.DomUtil.removeClass(marcas[sel].getElement(), 'sel'); }
