@@ -207,7 +207,7 @@ header { position: sticky; top: 0; z-index: 2; background: var(--surface); borde
         esc([m.autor, isNaN(creado) ? '' : hace(ahora - creado)].filter(Boolean).join(' · ')) + '</span></span>' +
         '<span class="vence' + (resta < 3 * 3600000 ? ' pronto' : '') + '">vence en ' + cuanto(resta) + '<i>›</i></span></a>';
     }).join('') : '<div class="vacio">' + (mapas.length ? '<b>Ningún mapa coincide</b>' :
-      '<b>No hay mapas vigentes</b><span>Se generan desde QGIS con “📱 Generar mapa”.</span>') + '</div>';
+      '<b>No hay mapas vigentes</b><span>Pedile a un dispatcher que lo genere.</span>') + '</div>';
   }
 
   // ---------------- instalar como app (ícono "Mapas Mobisond" en la pantalla de inicio)
