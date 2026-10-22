@@ -63,6 +63,9 @@ h1 { margin: 0; font-size: 16px; line-height: 1.25; overflow-wrap: anywhere; }
 .msg { font-size: 13px; color: var(--muted); text-align: center; min-height: 1em; }
 .pinicon { background: var(--pin); color: #fff; border: 2px solid #fff; border-radius: 50%; font: 700 12px/22px var(--sans);
   text-align: center; width: 26px !important; height: 26px !important; box-shadow: 0 1px 4px rgba(0,0,0,.35); }
+.cableicon { pointer-events: none; }
+.cableicon span { position: absolute; left: 0; top: 0; white-space: nowrap; font: 700 11px/1 var(--sans); color: #374151;
+  text-shadow: 0 0 2px #fff, 0 0 2px #fff, 0 0 3px #fff, 0 0 3px #fff; }
 .yoicon { background: #1a73e8; border: 3px solid #fff; border-radius: 50%; box-shadow: 0 0 0 6px rgba(26,115,232,.25); }
 .leaflet-container { font-family: var(--sans); }
 .mapawrap { position: relative; flex: 1; min-height: 0; --h: 40%; }
@@ -539,9 +542,40 @@ h1 { margin: 0; font-size: 16px; line-height: 1.25; overflow-wrap: anywhere; }
       m.addTo(grupo);
       return m;
     });
+    // ---- nombre de cada cable escrito sobre la línea (como las etiquetas de QGIS); se ven de cerca ----
+    var capaCables = L.layerGroup(), ZOOM_CABLES = 15;
+    (d.cables || []).forEach(function (c) {
+      (c.tramos || []).forEach(function (t) {
+        if (!t || t.length < 2) return;
+        var lls = t.map(function (p) { return L.latLng(p[0], p[1]); }), acum = [0];
+        for (var i = 1; i < lls.length; i++) acum.push(acum[i - 1] + lls[i - 1].distanceTo(lls[i]));
+        var largo = acum[acum.length - 1];
+        if (largo < 25) return;
+        var n = Math.max(1, Math.floor(largo / 450));          // una etiqueta cada ~450 m
+        for (var k = 0; k < n; k++) {
+          var m = largo * (k + .5) / n, j = 1;
+          while (j < acum.length - 1 && acum[j] < m) j++;
+          var a = lls[j - 1], b = lls[j], f = (m - acum[j - 1]) / ((acum[j] - acum[j - 1]) || 1);
+          var p = L.latLng(a.lat + (b.lat - a.lat) * f, a.lng + (b.lng - a.lng) * f);
+          var dx = (b.lng - a.lng) * Math.cos(a.lat * Math.PI / 180), dy = b.lat - a.lat;
+          var ang = -Math.atan2(dy, dx) * 180 / Math.PI;
+          if (ang > 90) ang -= 180; else if (ang < -90) ang += 180;   // que el texto no quede al revés
+          L.marker(p, {icon: L.divIcon({className: 'cableicon', iconSize: [0, 0],
+            html: '<span style="transform:translate(-50%,-50%) rotate(' + ang.toFixed(1) + 'deg) translateY(-9px)">' + esc(c.nombre) + '</span>'}),
+            interactive: false, keyboard: false}).addTo(capaCables);
+        }
+      });
+    });
+    function verCables() {
+      if (mapa.getZoom() >= ZOOM_CABLES) { if (!mapa.hasLayer(capaCables)) capaCables.addTo(mapa); }
+      else if (mapa.hasLayer(capaCables)) mapa.removeLayer(capaCables);
+    }
+    mapa.on('zoomend', verCables);
+
     if (grupo.getLayers().length) mapa.fitBounds(grupo.getBounds(), {paddingTopLeft: [24, 24],
       paddingBottomRight: [24, document.getElementById('hoja').offsetHeight + 24]});
     else mapa.setView([-34.6, -58.45], 11);
+    verCables();
 
     function elegir(i, centrar) {
       if (sel >= 0) { document.getElementById('b' + sel).classList.remove('sel'); L.DomUtil.removeClass(marcas[sel].getElement(), 'sel'); }
