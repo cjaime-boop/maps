@@ -39,7 +39,7 @@
     <div class="sub">Suena fuerte en esta PC cada vez que entra un caso. Dejá esta pestaña abierta y no la recargues.</div>
     <div class="campana" id="campana">🔔</div>
     <div class="estado apagada" id="estado">Apagada</div>
-    <button class="grande" id="activar">Activar campana</button>
+    <button class="grande" id="activar">Habilitar sonido</button>
   </div>
 
   <div class="card">
@@ -54,7 +54,7 @@
     <b>Últimos avisos</b>
     <ul id="log"><li class="nota">Todavía nada.</li></ul>
   </div>
-  <p class="nota">Si recargás o cerrás esta pestaña, volvé a tocar "Activar campana": Chrome solo deja sonar a una página que tocaste.</p>
+  <p class="nota">Se activa sola al abrirse. Si arriba dice "tocá la página una vez", es Chrome pidiendo un clic antes de dejarla sonar: tocá en cualquier lado y listo.</p>
 </main>
 <script>
 (function () {
@@ -71,7 +71,7 @@
   $('canal').value = deLink || guardado('canal', '');
   $('vol').value = guardado('vol', '100'); $('volTxt').textContent = $('vol').value + ' %';
   $('vol').oninput = function () { $('volTxt').textContent = this.value + ' %'; guardar('vol', this.value); };
-  $('canal').onchange = function () { guardar('canal', this.value.trim()); if (activa) conectar(); };
+  $('canal').onchange = function () { guardar('canal', this.value.trim()); conectar(); };
 
   function estado(txt, clase) { var e = $('estado'); e.textContent = txt; e.className = 'estado ' + clase; }
 
@@ -119,7 +119,7 @@
     if (!canal) { estado('Falta tu canal (abajo)', 'mal'); return; }
     estado('Conectando…', 'apagada');
     fuente = new EventSource('https://ntfy.sh/' + encodeURIComponent(canal) + '/sse');
-    fuente.onopen = function () { estado('Activa · escuchando ' + canal, 'ok'); };
+    fuente.onopen = function () { pintarEstado(); };
     fuente.onerror = function () { estado('Sin conexión, reintentando…', 'mal'); };   // EventSource reintenta solo
     fuente.onmessage = function (ev) {
       var m; try { m = JSON.parse(ev.data); } catch (e) { return; }
@@ -128,15 +128,43 @@
       var titulo = m.title || 'Aviso';
       anotar(titulo, m.message);
       sonar();
+      if (!sonido()) titilar(titulo);      // si Chrome todavía no deja sonar, que por lo menos se vea
     };
   }
 
-  $('activar').onclick = function () {
-    try { ctx = ctx || new (window.AudioContext || window.webkitAudioContext)(); ctx.resume(); } catch (e) {}
-    activa = true; guardar('canal', $('canal').value.trim());
-    this.textContent = 'Campana activada'; this.disabled = true;
-    conectar(); campanada();   // suena una vez para confirmar, sin voz
-  };
+  // ---- arranca sola: se conecta apenas abre. El sonido lo habilita Chrome: si ya dejó sonar antes a esta
+  // página arranca sonando; si no, alcanza con tocar una vez cualquier parte de la página.
+  function audio() { try { ctx = ctx || new (window.AudioContext || window.webkitAudioContext)(); } catch (e) {} return ctx; }
+  function sonido() { return !!(ctx && ctx.state === 'running'); }
+  function pintarEstado() {
+    var canal = $('canal').value.trim();
+    if (!canal) { estado('Falta tu canal (abajo)', 'mal'); return; }
+    if (!fuente || fuente.readyState !== 1) return;
+    if (sonido()) {
+      estado('Activa · escuchando ' + canal, 'ok');
+      $('activar').textContent = 'Campana activada'; $('activar').disabled = true;
+    } else {
+      estado('Escuchando · tocá la página una vez para que suene', 'mal');
+      $('activar').textContent = 'Habilitar sonido'; $('activar').disabled = false;
+    }
+  }
+  var titulando = null, tituloBase = document.title;
+  function titilar(t) {
+    clearInterval(titulando); var n = 0;
+    titulando = setInterval(function () { document.title = (n++ % 2) ? '🔔 ' + t : tituloBase; if (n > 40) { clearInterval(titulando); document.title = tituloBase; } }, 700);
+  }
+  function habilitar() {
+    var a = audio(); if (!a) return;
+    var antes = sonido();
+    a.resume().then(function () { if (!antes && sonido()) campanada(); pintarEstado(); }, function () {});
+  }
+  document.addEventListener('pointerdown', habilitar, true);
+  document.addEventListener('keydown', habilitar, true);
+  $('activar').onclick = function () { guardar('canal', $('canal').value.trim()); if (!fuente) conectar(); habilitar(); };
+  setInterval(pintarEstado, 2000);
+  activa = true;
+  audio(); if (ctx) ctx.resume().then(pintarEstado, function () {});
+  conectar();
   $('probar').onclick = function () {
     try { ctx = ctx || new (window.AudioContext || window.webkitAudioContext)(); ctx.resume(); } catch (e) {}
     sonar();
