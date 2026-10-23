@@ -997,18 +997,45 @@ h1 { margin: 0; font-size: 16px; line-height: 1.25; overflow-wrap: anywhere; }
       if (bt) bt.addEventListener('click', function () { abrirPDF(i, bt); });
     }
 
+    // el iPhone solo deja abrir/compartir un archivo si se hace en el mismo toque: por eso jsPDF se carga
+    // antes (apenas el mapa tiene botellas con PDF) y el PDF se arma sin esperas dentro del toque.
+    var esIOS = /iPhone|iPad|iPod/i.test(navigator.userAgent) || (/Macintosh/.test(navigator.userAgent) && navigator.maxTouchPoints > 1);
+    if (bots.some(function (b) { return b.h || (b.f && b.f.length); })) cargarJsPDF().catch(function () {});
+    function entregarPDF(b) {
+      var doc = hacerPDF(b), nombre = 'Enlaces_' + String(b.nombre).replace(/[^\w.-]+/g, '_') + '.pdf';
+      var blob = doc.output('blob');
+      if (esIOS) {
+        var f = null;
+        try { f = new File([blob], nombre, {type: 'application/pdf'}); } catch (e) {}
+        if (f && navigator.canShare && navigator.canShare({files: [f]})) {
+          navigator.share({files: [f], title: nombre}).catch(function () {});   // cancelar no es error
+          return;
+        }
+      }
+      var url = URL.createObjectURL(blob);
+      var a = document.createElement('a'); a.href = url; a.rel = 'noopener';
+      if (esIOS || /Android/i.test(navigator.userAgent)) a.download = nombre; else a.target = '_blank';
+      document.body.appendChild(a); a.click(); document.body.removeChild(a);
+      setTimeout(function () { URL.revokeObjectURL(url); }, 60000);
+    }
     function abrirPDF(i, boton) {
-      var b = bots[i], txt = boton.textContent;
+      var b = bots[i];
+      if (!boton.dataset.txt) boton.dataset.txt = boton.textContent;
+      if (window.jspdf) {
+        try { entregarPDF(b); } catch (e) { alert('No pude armar el PDF.'); }
+        boton.textContent = boton.dataset.txt;
+        return;
+      }
       boton.textContent = '…'; boton.disabled = true;
       cargarJsPDF().then(function () {
-        var doc = hacerPDF(b), nombre = 'Enlaces_' + String(b.nombre).replace(/[^\w.-]+/g, '_') + '.pdf';
-        var blob = doc.output('blob'), url = URL.createObjectURL(blob);
-        var a = document.createElement('a'); a.href = url; a.target = '_blank'; a.rel = 'noopener';
-        if (/Android/i.test(navigator.userAgent)) a.download = nombre;   // Android lo abre desde descargas
-        document.body.appendChild(a); a.click(); document.body.removeChild(a);
-        setTimeout(function () { URL.revokeObjectURL(url); }, 60000);
-      }).catch(function () { alert('No pude armar el PDF (¿sin conexión?).'); })
-        .then(function () { boton.textContent = txt; boton.disabled = false; });
+        boton.disabled = false;
+        if (esIOS) { boton.textContent = 'Tocá de nuevo'; return; }   // en iPhone el toque ya se perdió
+        boton.textContent = boton.dataset.txt;
+        entregarPDF(b);
+      }).catch(function () {
+        boton.disabled = false; boton.textContent = boton.dataset.txt;
+        alert('No pude armar el PDF (¿sin conexión?).');
+      });
     }
     document.querySelector('.lista').addEventListener('click', function (e) {
       var bt = e.target.closest && e.target.closest('[data-fus]');
