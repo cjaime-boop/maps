@@ -91,29 +91,7 @@ h1 { margin: 0; font-size: 16px; line-height: 1.25; overflow-wrap: anywhere; }
 .bot.oculta { display: none; }
 .bot .acc { display: flex; gap: 6px; align-items: center; }
 .bot .ir.pdf { background: #fef2f2; color: #b91c1c; border: 0; font-family: inherit; cursor: pointer; }
-/* hoja de fusiones (como el PDF de Enlaces por Botella) */
-.fus { position: fixed; inset: 0; z-index: 3000; background: #fff; color: #111827; overflow: auto; -webkit-overflow-scrolling: touch;
-  font-family: var(--sans); }
-.fus .banda { background: #14213D; color: #fff; padding: 14px 16px 12px; border-bottom: 3px solid #F59E0B; position: sticky; top: 0; z-index: 2; }
-.fus .banda h2 { margin: 0; font-size: 21px; font-weight: 800; letter-spacing: .2px; }
-.fus .banda .sub { font-size: 12px; opacity: .75; margin-top: 2px; }
-.fus .pills { display: flex; gap: 6px; margin-top: 8px; flex-wrap: wrap; }
-.fus .pills span { background: rgba(255,255,255,.16); border-radius: 9px; padding: 3px 9px; font-size: 12px; font-weight: 700; }
-.fus .acciones { position: absolute; right: 10px; top: 10px; display: flex; gap: 6px; }
-.fus .acciones button { font: 700 13px/1 var(--sans); border: 0; border-radius: 9px; padding: 8px 11px; cursor: pointer;
-  background: rgba(255,255,255,.16); color: #fff; }
-.fus .cuerpo-f { padding: 6px 12px 30px; }
-.fus .grp { margin-top: 12px; background: #eef2fb; border-radius: 7px; padding: 7px 10px 7px 12px; border-left: 4px solid #2563EB;
-  font-size: 14px; font-weight: 800; display: flex; justify-content: space-between; gap: 8px; }
-.fus .grp.sin { border-left-color: #9CA3AF; color: #6b7280; font-style: italic; }
-.fus .grp small { font-weight: 500; color: #6b7280; font-style: normal; white-space: nowrap; }
-.fus .par { font-size: 11px; font-weight: 700; color: #6b7280; margin: 8px 2px 3px; letter-spacing: .2px; }
-.fus .fila { display: grid; grid-template-columns: 1fr 1fr 16px 1fr 1fr; gap: 5px; align-items: center; padding: 3px 0;
-  border-bottom: 1px solid #f1f5f9; }
-.fus .chip { font: 700 11.5px/1 var(--sans); text-align: center; border-radius: 10px; padding: 5px 4px; white-space: nowrap; overflow: hidden; }
-.fus .flecha { color: #9ca3af; text-align: center; font-size: 12px; }
-@media print { body > *:not(.fus) { display: none !important; } .fus { position: static; overflow: visible; }
-  .fus .acciones { display: none; } .fus .banda { position: static; } * { -webkit-print-color-adjust: exact; print-color-adjust: exact; } }
+
 .lugar { display: block; width: 100%; text-align: left; font: 600 14px/1.3 var(--sans); color: #6d28d9; background: #f5f3ff;
   border: 0; border-bottom: 1px solid var(--line); padding: 12px 16px; cursor: pointer; }
 .lugar small { display: block; font-weight: 500; color: var(--muted); margin-top: 2px; }
@@ -342,7 +320,7 @@ h1 { margin: 0; font-size: 16px; line-height: 1.25; overflow-wrap: anywhere; }
     bots.forEach(function (b, i) {
       h += '<div class="bot" id="b' + i + '"><button class="num" type="button" data-i="' + i + '" aria-label="Elegir botella ' + (i + 1) + '">' + (i + 1) + '</button>' +
            '<span class="t" data-i="' + i + '"><b>' + esc(b.nombre) + '</b>' + (b.sub ? '<small>' + esc(b.sub) + '</small>' : '') + '</span>' +
-           '<span class="acc">' + (b.f && b.f.length ? '<button type="button" class="ir pdf" data-fus="' + i +
+           '<span class="acc">' + ((b.h || (b.f && b.f.length)) ? '<button type="button" class="ir pdf" data-fus="' + i +
              '" title="Fusiones de la botella">PDF</button>' : '') +
            '<a class="ir" href="' + ruta(b.lat, b.lon) + '" target="_blank" rel="noopener">Ir ↗</a></span></div>';
     });
@@ -744,53 +722,225 @@ h1 { margin: 0; font-size: 16px; line-height: 1.25; overflow-wrap: anywhere; }
       }
     }
 
-    // ---- hoja de fusiones de una botella (sale del campo fusiones de la capa; se arma acá, no se sube nada) ----
-    var COLORES = [['Azul', '#1F4E9C', '#fff'], ['Naranja', '#F07F2A', '#fff'], ['Verde', '#0E6B3A', '#fff'], ['Marrón', '#5C3A1A', '#fff'],
-      ['Gris', '#7A7A7A', '#fff'], ['Blanco', '#FFFFFF', '#000'], ['Rojo', '#B5202B', '#fff'], ['Negro', '#000000', '#fff'],
-      ['Amarillo', '#F7E52A', '#000'], ['Violeta', '#6A2C8E', '#fff'], ['Rosa', '#E77AB0', '#fff'], ['Celeste', '#12A49A', '#fff']];
-    function chipsFibra(n) {
-      if (!n) return '<span class="chip" style="background:#f3f4f6">—</span><span class="chip" style="background:#f3f4f6">—</span>';
-      var bfi = Math.floor((n - 1) / 12), cb = COLORES[bfi % 12], cf = COLORES[(n - 1) % 12];
-      var est = function (c) { return 'background:' + c[1] + ';color:' + c[2] + (c[1] === '#FFFFFF' ? ';box-shadow:inset 0 0 0 1px #d1d5db' : ''); };
-      return '<span class="chip" style="' + est(cb) + '">BF' + (bfi + 1) + ' · ' + cb[0] + '</span>' +
-             '<span class="chip" style="' + est(cf) + '">' + ((n - 1) % 12 + 1) + ' · ' + cf[0] + '</span>';
+    // ---- PDF de fusiones de una botella: el MISMO PDF de Enlaces por Botella, dibujado acá (no se sube nada) ----
+    var COLORES = [['Azul', '#1F4E9C', '#ffffff'], ['Naranja', '#F07F2A', '#ffffff'], ['Verde', '#0E6B3A', '#ffffff'],
+      ['Marrón', '#5C3A1A', '#ffffff'], ['Gris', '#7A7A7A', '#ffffff'], ['Blanco', '#FFFFFF', '#000000'],
+      ['Rojo', '#B5202B', '#ffffff'], ['Negro', '#000000', '#ffffff'], ['Amarillo', '#F7E52A', '#000000'],
+      ['Violeta', '#6A2C8E', '#ffffff'], ['Rosa', '#E77AB0', '#ffffff'], ['Celeste', '#12A49A', '#ffffff']];
+    var SIN_ENLACE = 'Sin enlace asignado';
+    function celdasFibra(v) {          // como pintar() del panel: buffer y pelo con sus colores
+      var n = typeof v === 'number' ? v : parseInt(String(v || '').replace(/\D+/g, ''), 10);
+      if (!n) return [[String(v || ''), null, null], ['', null, null]];
+      var b = Math.floor((n - 1) / 12) + 1, cb = COLORES[(b - 1) % 12], cf = COLORES[(n - 1) % 12];
+      return [['BF' + b + ' · ' + cb[0], cb[1], cb[2]], [((n - 1) % 12 + 1) + ' · ' + cf[0], cf[1], cf[2]]];
     }
-    function verFusiones(i) {
-      var b = bots[i], fc = b.fc || [], fs = (b.f || []).slice();
-      fs.sort(function (x, y) {
-        return (!x[0]) - (!y[0]) || String(x[0]).localeCompare(String(y[0])) ||
-               String(fc[x[1]]).localeCompare(String(fc[y[1]])) || x[2] - y[2];
+    function puerto(v) {
+      var t = String(v || '').trim().toUpperCase(), n = parseInt(t.replace(/\D+/g, ''), 10);
+      if (t.indexOf('IN') === 0) return ['Entrada', '#5B21B6', '#FFFFFF'];
+      return [n ? 'Salida ' + n : t, '#EDE9FE', '#5B21B6'];
+    }
+    function hojaDe(b) {                // b.h (de la base, igual que Enlaces por Botella) o, si no, el campo fusiones
+      if (b.h) {
+        var T = b.h.t;
+        return {ne: b.h.ne, nf: b.h.nf, grupos: b.h.g.map(function (g) {
+          return [g[0], g[1].map(function (r) {
+            var A = celdasFibra(r[2]), B = r[6] ? [['', null, null], puerto(r[4])] : celdasFibra(r[4]);
+            return [[T[r[0]], null, null], [T[r[1]], null, null], A[0], A[1], ['→', null, null], [T[r[3]], null, null],
+                    B[0], B[1], [r[6] ? '' : T[r[5]], null, null]];
+          })];
+        })};
+      }
+      var fc = b.fc || [], vis = {}, filas = [];
+      (b.f || []).forEach(function (x) {           // el campo trae cada fusión en los dos sentidos: una sola
+        var k1 = x[1] + ':' + x[2] + '|' + x[3] + ':' + x[4], k2 = x[3] + ':' + x[4] + '|' + x[1] + ':' + x[2];
+        if (vis[k1] || vis[k2]) return; vis[k1] = 1; filas.push(x);
       });
-      var enlaces = {}, h = '';
-      fs.forEach(function (x) { enlaces[x[0] || ''] = (enlaces[x[0] || ''] || 0) + 1; });
-      var ant = null, antPar = null;
-      fs.forEach(function (x) {
-        var e = x[0] || '';
-        if (e !== ant) {
-          h += '<div class="grp' + (e ? '' : ' sin') + '"><span>' + esc(e || 'Sin enlace asignado') + '</span><small>' +
-               enlaces[e] + (enlaces[e] === 1 ? ' fusión' : ' fusiones') + '</small></div>';
-          ant = e; antPar = null;
+      filas.sort(function (p, q) {
+        var ep = p[0] || SIN_ENLACE, eq = q[0] || SIN_ENLACE;
+        return (ep === SIN_ENLACE) - (eq === SIN_ENLACE) || ep.localeCompare(eq) || String(fc[p[1]]).localeCompare(String(fc[q[1]])) || p[2] - q[2];
+      });
+      var grupos = [];
+      filas.forEach(function (x) {
+        var e = x[0] || SIN_ENLACE, A = celdasFibra(x[2]), B = celdasFibra(x[4]);
+        if (!grupos.length || grupos[grupos.length - 1][0] !== e) grupos.push([e, []]);
+        grupos[grupos.length - 1][1].push([['—', null, null], [fc[x[1]], null, null], A[0], A[1], ['→', null, null],
+                                           [fc[x[3]], null, null], B[0], B[1], ['—', null, null]]);
+      });
+      return {ne: grupos.length, nf: filas.length, grupos: grupos};
+    }
+    var jspdfCargado = null;
+    function cargarJsPDF() {
+      if (window.jspdf) return Promise.resolve();
+      if (!jspdfCargado) jspdfCargado = new Promise(function (ok, mal) {
+        var sc = document.createElement('script');
+        sc.src = 'https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js';
+        sc.onload = ok; sc.onerror = function () { jspdfCargado = null; mal(); };
+        document.head.appendChild(sc);
+      });
+      return jspdfCargado;
+    }
+    function hex(c) { c = String(c || '#000').replace('#', ''); if (c.length === 3) c = c.replace(/(.)/g, '$1$1');
+      return [parseInt(c.slice(0, 2), 16), parseInt(c.slice(2, 4), 16), parseInt(c.slice(4, 6), 16)]; }
+    function mezcla(a, b, t) { a = hex(a); b = hex(b); return a.map(function (v, i) { return Math.round(v + (b[i] - v) * t); }); }
+    function claridad(c) { c = hex(c); return (Math.max.apply(null, c) + Math.min.apply(null, c)) / 2; }
+    function aclarar(c, f) { return hex(c).map(function (v) { return Math.min(255, Math.round(v * f)); }); }
+    function hacerPDF(b) {
+      var est = d.pdf || {}, BAND = est.banda || '#14213D', ACC = est.detalle || '#F59E0B', PRI = est.principal || '#2563EB';
+      var hoja = hojaDe(b), grupos = hoja.grupos;
+      var doc = new window.jspdf.jsPDF({unit: 'pt', format: [540, 960], orientation: 'portrait'});
+      var W = 540, H = 960, M = 14, util = W - 2 * M;
+      var INK = '#1F2937', MUTED = '#6B7280', LINE = '#E5E7EB', ZEBRA = '#F9FAFB', NOLINK = '#9CA3AF';
+      var GROUP_BG = mezcla(PRI, '#FFFFFF', 0.91), PRI_SUAVE = mezcla(PRI, '#FFFFFF', 0.93), PRI_LINEA = mezcla(PRI, '#FFFFFF', 0.7);
+      var PRI_OSC = hex(PRI).map(function (v) { return Math.round(v / 1.7); });
+      var PILL = claridad(BAND) < 60 ? aclarar(BAND, 1.5) : aclarar(BAND, 0.8);
+      var TXT_BANDA = claridad(BAND) < 150 ? '#FFFFFF' : '#111827', SUB_BANDA = mezcla(TXT_BANDA, BAND, 0.4);
+      function col(c) { return typeof c === 'string' ? hex(c) : c; }
+      function rect(x, y, w, h, fill, r, borde) {
+        if (fill) doc.setFillColor.apply(doc, col(fill));
+        if (borde) { doc.setDrawColor.apply(doc, col(borde)); doc.setLineWidth(0.6); }
+        var modo = fill && borde ? 'FD' : (borde ? 'S' : 'F');
+        if (r) doc.roundedRect(x, y, w, h, r, r, modo); else doc.rect(x, y, w, h, modo);
+      }
+      function fuente(size, bold, italic) { doc.setFont('helvetica', bold ? (italic ? 'bolditalic' : 'bold') : (italic ? 'italic' : 'normal')); doc.setFontSize(size); }
+      function corta(s, w, izq) {
+        s = String(s); if (doc.getTextWidth(s) <= w) return s;
+        while (s.length > 1 && doc.getTextWidth('…' + s) > w && izq) s = s.slice(1);
+        while (s.length > 1 && doc.getTextWidth(s + '…') > w && !izq) s = s.slice(0, -1);
+        return izq ? '…' + s : s + '…';
+      }
+      function texto(x, y, w, h, s, size, bold, color, centro, opt) {
+        opt = opt || {}; fuente(size, bold, opt.italic);
+        doc.setTextColor.apply(doc, col(color || INK));
+        s = opt.entero ? String(s) : corta(s, w, opt.izq);
+        var o = {baseline: 'middle'}; if (opt.letra) o.charSpace = opt.letra;
+        if (centro) { o.align = 'center'; doc.text(s, x + w / 2, y + h / 2, o); }
+        else if (opt.derecha) { o.align = 'right'; doc.text(s, x + w, y + h / 2, o); }
+        else doc.text(s, x, y + h / 2, o);
+      }
+      function hline(x1, x2, y, c, w) { doc.setDrawColor.apply(doc, col(c)); doc.setLineWidth(w || 0.6); doc.line(x1, y, x2, y); }
+      var HEAD_FIRST = 104, HEAD_NEXT = 44, COLH = 26, BOTTOM = H - 14, GRP_H = 22, ROW_H = 16;
+      var titulos = ['ORIGEN', 'CABLE', 'BUFFER', 'PELO', '', 'CABLE', 'BUFFER', 'PELO', 'DESTINO'], txtc = [0, 1, 5, 8];
+      function medir(FS) {
+        var need = [0, 0, 0, 0, 0, 0, 0, 0, 0];
+        grupos.forEach(function (g) { g[1].forEach(function (f) { f.forEach(function (c, i) {
+          fuente(c[1] ? FS - 0.5 : FS, !!c[1] || i === 1 || i === 5);
+          need[i] = Math.max(need[i], doc.getTextWidth(String(c[0])) * 1.06 + (c[1] ? 10 : 9));
+        }); }); });
+        need[4] = 11;
+        [2, 3, 6, 7].forEach(function (i) { need[i] = Math.min(Math.max(need[i], 30), 70); });
+        txtc.forEach(function (i) { need[i] = Math.max(need[i], 36); });
+        return need;
+      }
+      var FS = 7.0, need = medir(FS);
+      var suma = function (a) { return a.reduce(function (x, y) { return x + y; }, 0); };
+      while (suma(need) > util && FS > 6.0) { FS -= 0.25; need = medir(FS); }
+      var fijo = suma(need.filter(function (v, i) { return txtc.indexOf(i) < 0; })), libre = util - fijo;
+      var totTxt = suma(txtc.map(function (i) { return need[i]; })), widths = need.slice();
+      if (totTxt <= libre) txtc.forEach(function (i) { widths[i] = need[i] * libre / totTxt; });
+      else {
+        var lo = 0, hi = Math.max.apply(null, txtc.map(function (i) { return need[i]; }));
+        for (var it = 0; it < 40; it++) { var c = (lo + hi) / 2;
+          if (suma(txtc.map(function (i) { return Math.min(need[i], c); })) > libre) hi = c; else lo = c; }
+        txtc.forEach(function (i) { widths[i] = Math.min(need[i], lo); });
+      }
+      var xs = [M]; for (var k = 0; k < 8; k++) xs.push(xs[k] + widths[k]);
+      // paginación
+      var paginas = [], cur = [], y = HEAD_FIRST + COLH;
+      function nueva() { paginas.push(cur); cur = []; y = HEAD_NEXT + COLH; }
+      grupos.forEach(function (g) {
+        var alto = GRP_H + ROW_H * g[1].length + 6;
+        if (y + alto > BOTTOM && (BOTTOM - HEAD_NEXT - COLH) >= alto && cur.length) nueva();
+        if (y + GRP_H + ROW_H > BOTTOM) nueva();
+        cur.push(['grp', g[0], g[1].length, false]); y += GRP_H;
+        g[1].forEach(function (f, i) {
+          if (y + ROW_H > BOTTOM) { nueva(); cur.push(['grp', g[0], g[1].length, true]); y += GRP_H; }
+          cur.push(['row', f, i % 2 === 1]); y += ROW_H;
+        });
+        cur.push(['gap']); y += 6;
+      });
+      paginas.push(cur);
+      var ahora = new Date(), dd = function (n) { return (n < 10 ? '0' : '') + n; };
+      var fecha = dd(ahora.getDate()) + '/' + dd(ahora.getMonth() + 1) + '/' + ahora.getFullYear() + ' ' + dd(ahora.getHours()) + ':' + dd(ahora.getMinutes());
+      var link = 'https://www.google.com/maps?q=' + (+b.lat).toFixed(6) + ',' + (+b.lon).toFixed(6);
+      paginas.forEach(function (items, np) {
+        if (np) doc.addPage([540, 960], 'portrait');
+        var top;
+        if (np === 0) {
+          var bh = 60; rect(0, 0, W, bh, BAND); rect(0, bh, W, 3, ACC);
+          texto(M, 0, util * 0.62, bh, b.nombre, 21, true, TXT_BANDA);
+          var px = W - M;
+          [hoja.nf + ' fusiones', hoja.ne + ' enlaces'].forEach(function (et) {
+            fuente(8, true); var wpx = doc.getTextWidth(et) + 16; px -= wpx;
+            rect(px, 12, wpx, 17, PILL, 8.5); texto(px, 12, wpx, 17, et, 8, true, TXT_BANDA, true, {entero: true}); px -= 6;
+          });
+          texto(W - M - 150, 34, 150, 14, fecha, 7.5, false, SUB_BANDA, false, {derecha: true});
+          var yy = bh + 9;
+          rect(M, yy, util, 22, PRI_SUAVE, 6);
+          texto(M + 10, yy + 4, 60, 14, 'Ubicación', 8, true, PRI_OSC, false, {entero: true});
+          fuente(8, false); doc.setTextColor.apply(doc, hex(PRI));
+          doc.textWithLink(link, M + 66, yy + 11, {url: link, baseline: 'middle'});
+          doc.setDrawColor.apply(doc, hex(PRI)); doc.setLineWidth(0.5); doc.line(M + 66, yy + 15.5, M + 66 + doc.getTextWidth(link), yy + 15.5);
+          top = HEAD_FIRST;
+        } else {
+          rect(0, 0, W, 32, BAND); rect(0, 32, W, 2, ACC);
+          texto(M, 0, util, 32, b.nombre, 12, true, TXT_BANDA); top = HEAD_NEXT;
         }
-        var par = fc[x[1]] + ' → ' + fc[x[3]];
-        if (par !== antPar) { h += '<div class="par">' + esc(par) + '</div>'; antPar = par; }
-        h += '<div class="fila">' + chipsFibra(x[2]) + '<span class="flecha">→</span>' + chipsFibra(x[4]) + '</div>';
+        var xa = xs[1], wa = widths[1] + widths[2] + widths[3], xb = xs[5], wb = widths[5] + widths[6] + widths[7];
+        texto(xa, top, wa, 10, 'LADO A', 6, true, PRI, true, {letra: 1, entero: true});
+        texto(xb, top, wb, 10, 'LADO B', 6, true, PRI, true, {letra: 1, entero: true});
+        hline(xa + 3, xa + wa - 3, top + 10.5, PRI_LINEA, 1.1); hline(xb + 3, xb + wb - 3, top + 10.5, PRI_LINEA, 1.1);
+        titulos.forEach(function (t, i) {
+          if (widths[i] < 5) return;
+          var cen = [2, 3, 4, 6, 7].indexOf(i) >= 0;
+          texto(xs[i] + (cen ? 0 : 4), top + 12, widths[i] - 4, 12, t, 6, true, MUTED, cen, {letra: 0.5, entero: true});
+        });
+        hline(M, W - M, top + COLH - 1, '#CBD5E1', 0.9);
+        var y = top + COLH;
+        items.forEach(function (it) {
+          if (it[0] === 'gap') { y += 6; return; }
+          if (it[0] === 'grp') {
+            var sin = it[1] === SIN_ENLACE;
+            rect(M, y + 3, util, GRP_H - 5, GROUP_BG, 5); rect(M, y + 3, 4, GRP_H - 5, sin ? NOLINK : PRI, 2);
+            texto(M + 11, y + 3, util - 90, GRP_H - 5, it[1] + (it[3] ? '  (cont.)' : ''), 9, true, sin ? MUTED : INK, false, {italic: sin});
+            texto(W - M - 80, y + 3, 72, GRP_H - 5, it[2] + (it[2] === 1 ? ' fusión' : ' fusiones'), 7, false, MUTED, false, {derecha: true});
+            y += GRP_H; return;
+          }
+          if (it[2]) rect(M, y, util, ROW_H, ZEBRA);
+          it[1].forEach(function (c, i) {
+            var x = xs[i], w = widths[i]; if (w < 5) return;
+            if (i === 4) {               // flecha dibujada (la letra Helvetica del PDF no tiene →)
+              var cx = x + w / 2, cy = y + ROW_H / 2;
+              doc.setDrawColor(156, 163, 175); doc.setFillColor(156, 163, 175); doc.setLineWidth(0.7);
+              doc.line(cx - 4, cy, cx + 2, cy); doc.triangle(cx + 1.5, cy - 2, cx + 4.5, cy, cx + 1.5, cy + 2, 'F');
+            }
+            else if ([2, 3, 6, 7].indexOf(i) >= 0) {
+              if (!c[1]) texto(x + 2, y + 2.5, w - 4, ROW_H - 5, c[0], FS, false, INK, true);
+              else { var hh = ROW_H - 5; rect(x + 2, y + 2.5, w - 4, hh, c[1], hh / 2, claridad(c[1]) > 235 ? '#D1D5DB' : null);
+                     texto(x + 2, y + 2.5, w - 4, hh, c[0], FS - 0.5, true, c[2] || '#000000', true, {entero: true}); }
+            } else if (i === 0 || i === 8) texto(x + 3, y, w - 4, ROW_H, c[0], FS, false, c[0] && c[0] !== '—' ? PRI : MUTED, false, {izq: true});
+            else texto(x + 3, y, w - 4, ROW_H, c[0], FS, true, INK, false, {izq: true});
+          });
+          y += ROW_H; hline(M, W - M, y, LINE, 0.4);
+        });
       });
-      var div = document.createElement('div');
-      div.className = 'fus';
-      div.innerHTML = '<div class="banda"><h2>' + esc(b.nombre) + '</h2>' + (b.sub ? '<div class="sub">' + esc(b.sub) + '</div>' : '') +
-        '<div class="pills"><span>' + Object.keys(enlaces).filter(Boolean).length + ' enlaces</span><span>' + fs.length + ' fusiones</span></div>' +
-        '<div class="acciones"><button type="button" data-a="pdf">Guardar PDF</button><button type="button" data-a="x" aria-label="Cerrar">✕</button></div></div>' +
-        '<div class="cuerpo-f">' + h + '</div>';
-      div.addEventListener('click', function (e) {
-        var a = e.target.getAttribute && e.target.getAttribute('data-a');
-        if (a === 'x') document.body.removeChild(div);
-        else if (a === 'pdf') window.print();
-      });
-      document.body.appendChild(div);
+      return doc;
+    }
+    function abrirPDF(i, boton) {
+      var b = bots[i], txt = boton.textContent;
+      boton.textContent = '…'; boton.disabled = true;
+      cargarJsPDF().then(function () {
+        var doc = hacerPDF(b), nombre = 'Enlaces_' + String(b.nombre).replace(/[^\w.-]+/g, '_') + '.pdf';
+        var blob = doc.output('blob'), url = URL.createObjectURL(blob);
+        var a = document.createElement('a'); a.href = url; a.target = '_blank'; a.rel = 'noopener';
+        if (/Android/i.test(navigator.userAgent)) a.download = nombre;   // Android lo abre desde descargas
+        document.body.appendChild(a); a.click(); document.body.removeChild(a);
+        setTimeout(function () { URL.revokeObjectURL(url); }, 60000);
+      }).catch(function () { alert('No pude armar el PDF (¿sin conexión?).'); })
+        .then(function () { boton.textContent = txt; boton.disabled = false; });
     }
     document.querySelector('.lista').addEventListener('click', function (e) {
       var bt = e.target.closest && e.target.closest('[data-fus]');
-      if (bt) { e.stopPropagation(); verFusiones(+bt.getAttribute('data-fus')); }
+      if (bt) { e.stopPropagation(); abrirPDF(+bt.getAttribute('data-fus'), bt); }
     });
 
     function mm(m) { return Math.round(m).toLocaleString('es-AR') + ' m'; }
