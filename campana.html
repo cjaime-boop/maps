@@ -43,9 +43,8 @@
   </div>
 
   <div class="card">
-    <label for="canal">Tu canal (el mismo de "Mi canal del celular" en Tampermonkey)</label>
-    <input type="text" id="canal" placeholder="mobisond-casos-…" autocomplete="off" spellcheck="false">
-    <label for="vol">Volumen</label>
+    <input type="hidden" id="canal">
+    <label for="vol" style="margin-top:0">Volumen</label>
     <div class="fila"><input type="range" id="vol" min="10" max="100" value="100"><span id="volTxt">100 %</span></div>
     <div class="fila" style="margin-top:12px"><button id="probar">Probar</button><span class="nota">Probá con el botón o con "Mandar aviso de prueba" de Tampermonkey.</span></div>
   </div>
@@ -116,7 +115,7 @@
   function conectar() {
     var canal = $('canal').value.trim().replace(/[^\w-]/g, '');
     if (fuente) { fuente.close(); fuente = null; }
-    if (!canal) { estado('Falta tu canal (abajo)', 'mal'); return; }
+    if (!canal) { estado('Abrila desde Tampermonkey: "Abrir la campana de la PC"', 'mal'); return; }
     estado('Conectando…', 'apagada');
     fuente = new EventSource('https://ntfy.sh/' + encodeURIComponent(canal) + '/sse');
     fuente.onopen = function () { pintarEstado(); };
@@ -138,13 +137,13 @@
   function sonido() { return !!(ctx && ctx.state === 'running'); }
   function pintarEstado() {
     var canal = $('canal').value.trim();
-    if (!canal) { estado('Falta tu canal (abajo)', 'mal'); return; }
+    if (!canal) { estado('Abrila desde Tampermonkey: "Abrir la campana de la PC"', 'mal'); return; }
     if (!fuente || fuente.readyState !== 1) return;
     if (sonido()) {
-      estado('Activa · escuchando ' + canal, 'ok');
+      estado('Activa', 'ok');
       $('activar').textContent = 'Campana activada'; $('activar').disabled = true;
     } else {
-      estado('Escuchando · tocá la página una vez para que suene', 'mal');
+      estado('Tocá la página una vez para que suene', 'mal');
       $('activar').textContent = 'Habilitar sonido'; $('activar').disabled = false;
     }
   }
