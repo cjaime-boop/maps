@@ -945,7 +945,7 @@ h1 { margin: 0; font-size: 16px; line-height: 1.25; overflow-wrap: anywhere; }
     }
     // ---- cartelito al tocar una botella: por qué fibra pasa el enlace del link, PDF e Ir ----
     var normEnl = function (t) { return String(t || '').toUpperCase().replace(/[\s_\-.]+/g, ''); };
-    var enlaceLink = (!cliente && nombres.length === 1) ? normEnl(nombres[0]) : '';
+    var enlaceLink = cliente ? normEnl(d.enlace || '') : (nombres.length === 1 ? normEnl(nombres[0]) : '');   // KML externo: el enlace lo elige QGIS
     function filasDelEnlace(b) {      // [[A celdas, B celdas, cable A, cable B], ...] o null si no hay datos
       if (!enlaceLink) return null;
       var out = [];
