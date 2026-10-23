@@ -341,7 +341,6 @@ h1 { margin: 0; font-size: 16px; line-height: 1.25; overflow-wrap: anywhere; }
     h += '<div class="sinres" id="sinRes" hidden>Ninguna botella coincide</div>';
     if (!bots.length) h += '<div class="bot"><span></span><span class="t"><small>Este recorrido no tiene botellas.</small></span><span></span></div>';
     h += '</div><div class="pie">';
-    h += '<a class="btn" href="' + BASE + id + '.kml?download=' + encodeURIComponent((d.archivo || 'recorrido') + '.kml') + '">Descargar KML (para Google Earth)</a>';
     h += '<div class="msg" id="msg"></div></div></div></div></div>';
     app.innerHTML = h;
     hojaArrastrable();
