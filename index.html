@@ -89,6 +89,18 @@ h1 { margin: 0; font-size: 16px; line-height: 1.25; overflow-wrap: anywhere; }
 .busca button { border: 0; background: none; color: var(--muted); font-size: 18px; line-height: 1; padding: 6px 8px; cursor: pointer; }
 .busca .cuenta { font-size: 12px; color: var(--muted); white-space: nowrap; font-variant-numeric: tabular-nums; }
 .bot.oculta { display: none; }
+.flot { min-width: 230px; font-family: var(--sans); }
+.flot .fn { display: block; font-size: 14px; font-weight: 800; color: #111827; }
+.flot .fl { font-size: 11px; font-weight: 600; color: #6b7280; margin: 6px 0 4px; }
+.flot .fg { display: grid; grid-template-columns: auto auto 14px auto auto; gap: 4px; align-items: center; justify-content: start; }
+.flot .pf { display: inline-block; white-space: nowrap; font: 700 10.5px/1 var(--sans); padding: 4px 6px; border-radius: 9px; text-align: center; }
+.flot .pf.vacio { color: #6b7280; padding: 4px 2px; }
+.flot .fa { color: #9ca3af; text-align: center; font-size: 12px; }
+.flot .fcab { font-size: 11px; color: #6b7280; margin-top: 5px; }
+.flot .fb { display: flex; gap: 8px; margin-top: 10px; }
+.flot .fb > * { flex: 1; text-align: center; font: 700 13px/1 var(--sans); border: 0; border-radius: 9px; padding: 9px 0; cursor: pointer; text-decoration: none; }
+.flot .fpdf { background: #fef2f2; color: #b91c1c; }
+.flot .fir { background: #eef2ff; color: #1d4ed8 !important; }
 .bot.destello { animation: destello 1.2s ease-out; }
 @keyframes destello { 0%, 30% { background: #fde68a; } 100% { background: transparent; } }
 .bot .acc { display: flex; gap: 6px; align-items: center; }
@@ -549,7 +561,7 @@ h1 { margin: 0; font-size: 16px; line-height: 1.25; overflow-wrap: anywhere; }
     });
     var marcas = bots.map(function (b, i) {
       var m = L.marker([b.lat, b.lon], {icon: L.divIcon({className: 'pinicon', html: String(i + 1), iconSize: [26, 26]})});
-      m.on('click', function () { if (midiendo) agregarPunto(L.latLng(b.lat, b.lon)); else elegir(i, false); });
+      m.on('click', function () { if (midiendo) agregarPunto(L.latLng(b.lat, b.lon)); else { elegir(i, false); flotante(i); } });
       m.addTo(grupo);
       return m;
     });
@@ -934,6 +946,60 @@ h1 { margin: 0; font-size: 16px; line-height: 1.25; overflow-wrap: anywhere; }
       });
       return doc;
     }
+    // ---- cartelito al tocar una botella: por qué fibra pasa el enlace del link, PDF e Ir ----
+    var normEnl = function (t) { return String(t || '').toUpperCase().replace(/[\s_\-.]+/g, ''); };
+    var enlaceLink = (!cliente && nombres.length === 1) ? normEnl(nombres[0]) : '';
+    function filasDelEnlace(b) {      // [[A celdas, B celdas, cable A, cable B], ...] o null si no hay datos
+      if (!enlaceLink) return null;
+      var out = [];
+      if (b.h) {
+        var T = b.h.t;
+        b.h.g.forEach(function (g) {
+          if (normEnl(g[0]) !== enlaceLink) return;
+          g[1].forEach(function (r) {
+            out.push([celdasFibra(r[2]), r[6] ? [['', null, null], puerto(r[4])] : celdasFibra(r[4]), T[r[1]], T[r[3]]]);
+          });
+        });
+        return out;
+      }
+      if (b.f && b.f.length) {
+        var fc = b.fc || [], vis = {};
+        b.f.forEach(function (x) {
+          if (normEnl(x[0]) !== enlaceLink) return;
+          var k1 = x[1] + ':' + x[2] + '|' + x[3] + ':' + x[4], k2 = x[3] + ':' + x[4] + '|' + x[1] + ':' + x[2];
+          if (vis[k1] || vis[k2]) return; vis[k1] = 1;
+          out.push([celdasFibra(x[2]), celdasFibra(x[4]), fc[x[1]], fc[x[3]]]);
+        });
+        out.sort(function (p, q) { return String(p[0][1][0]).localeCompare(String(q[0][1][0]), 'es', {numeric: true}); });
+        return out;
+      }
+      return null;
+    }
+    function pastilla(c) {
+      if (!c[1]) return '<span class="pf vacio">' + esc(c[0]) + '</span>';
+      var blanco = /^#?f{6}$/i.test(c[1]);
+      return '<span class="pf" style="background:' + c[1] + ';color:' + (c[2] || '#000') + (blanco ? ';box-shadow:inset 0 0 0 1px #d1d5db' : '') + '">' + esc(c[0]) + '</span>';
+    }
+    var popBot = null;
+    function flotante(i) {
+      var b = bots[i], filas = filasDelEnlace(b), h = '<div class="flot"><b class="fn">' + esc(b.nombre) + '</b>';
+      if (filas && filas.length) {
+        h += '<div class="fl">Fibra del enlace</div><div class="fg">';
+        var cables = {};
+        filas.forEach(function (f) {
+          h += pastilla(f[0][0]) + pastilla(f[0][1]) + '<span class="fa">→</span>' + pastilla(f[1][0]) + pastilla(f[1][1]);
+          cables[f[2] + ' → ' + f[3]] = 1;
+        });
+        h += '</div><div class="fcab">' + Object.keys(cables).map(esc).join('<br>') + '</div>';
+      } else if (filas) h += '<div class="fl">El enlace pasa sin fusión</div>';
+      h += '<div class="fb">' + ((b.h || (b.f && b.f.length)) ? '<button type="button" class="fpdf">PDF</button>' : '') +
+           '<a class="fir" href="' + ruta(b.lat, b.lon) + '" target="_blank" rel="noopener">Ir ↗</a></div></div>';
+      popBot = L.popup({maxWidth: 320, autoPanPaddingTopLeft: [10, 70], autoPanPaddingBottomRight: [10, 20]})
+        .setLatLng([b.lat, b.lon]).setContent(h).openOn(mapa);
+      var bt = popBot.getElement().querySelector('.fpdf');
+      if (bt) bt.addEventListener('click', function () { abrirPDF(i, bt); });
+    }
+
     function abrirPDF(i, boton) {
       var b = bots[i], txt = boton.textContent;
       boton.textContent = '…'; boton.disabled = true;
