@@ -991,7 +991,7 @@ h1 { margin: 0; font-size: 16px; line-height: 1.25; overflow-wrap: anywhere; }
           cables[f[2] + ' → ' + f[3]] = 1;
         });
         h += '</div><div class="fcab">' + Object.keys(cables).map(esc).join('<br>') + '</div>';
-      } else if (filas) h += '<div class="fl">El enlace pasa sin fusión</div>';
+      } else if (filas) h += '<div class="fl">Sin información</div>';
       h += '<div class="fb">' + ((b.h || (b.f && b.f.length)) ? '<button type="button" class="fpdf">PDF</button>' : '') +
            '<a class="fir" href="' + ruta(b.lat, b.lon) + '" target="_blank" rel="noopener">Ir ↗</a></div></div>';
       popBot = L.popup({maxWidth: 320, autoPanPaddingTopLeft: [10, 70], autoPanPaddingBottomRight: [10, 20]})
