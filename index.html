@@ -594,10 +594,6 @@ h1 { margin: 0; font-size: 16px; line-height: 1.25; overflow-wrap: anywhere; }
       var b = bots[i];
       document.getElementById('b' + i).classList.add('sel');
       L.DomUtil.addClass(marcas[i].getElement(), 'sel');
-      var bt = document.getElementById('irSel');
-      bt.href = ruta(b.lat, b.lon);
-      bt.textContent = 'Cómo llegar a la ' + (i + 1) + ' ↗';
-      bt.hidden = false;
       if (!centrar) {                 // tocada en el mapa: la lista va a esa botella (para el PDF y "Ir")
         var fila = document.getElementById('b' + i), cu = document.querySelector('.cuerpo');
         var ib = document.getElementById('buscar');
