@@ -1,0 +1,162 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Campana Mobisond</title>
+<style>
+  :root { --bg:#f4f6f8; --card:#fff; --txt:#1c2430; --mut:#6b7684; --acc:#1f6f8b; --ok:#2b7a52; --warn:#c0392b; --borde:#dfe3e8; }
+  @media (prefers-color-scheme: dark) { :root { --bg:#14181d; --card:#1d232b; --txt:#e8ecf0; --mut:#9aa5b1; --acc:#4fb3d6; --ok:#5cc28e; --warn:#ef6b5b; --borde:#2c343e; } }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--txt); font:15px/1.45 "Segoe UI", system-ui, -apple-system, Arial, sans-serif; }
+  main { max-width:520px; margin:0 auto; padding:24px 16px 40px; }
+  .card { background:var(--card); border:1px solid var(--borde); border-radius:14px; padding:18px; margin-bottom:14px; }
+  h1 { font-size:20px; margin:0 0 2px; }
+  .sub { color:var(--mut); font-size:13px; }
+  .campana { font-size:96px; text-align:center; line-height:1.1; margin:6px 0 4px; transition:transform .1s; user-select:none; }
+  .campana.suena { animation: hamaca .25s ease-in-out 10 alternate; }
+  @keyframes hamaca { from { transform:rotate(-18deg); } to { transform:rotate(18deg); } }
+  .estado { text-align:center; font-weight:600; }
+  .estado.ok { color:var(--ok); } .estado.mal { color:var(--warn); } .estado.apagada { color:var(--mut); }
+  button { font:inherit; border-radius:9px; border:1px solid var(--borde); background:var(--card); color:var(--txt); padding:9px 14px; cursor:pointer; }
+  button.grande { display:block; width:100%; background:var(--acc); color:#fff; border-color:var(--acc); font-size:17px; font-weight:700; padding:13px; margin-top:12px; }
+  label { display:block; font-size:13px; color:var(--mut); margin:10px 0 4px; }
+  input[type=text] { width:100%; font:inherit; padding:9px 10px; border-radius:9px; border:1px solid var(--borde); background:var(--bg); color:var(--txt); }
+  .fila { display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
+  .fila input[type=range] { flex:1; }
+  ul { list-style:none; padding:0; margin:0; }
+  li { padding:8px 0; border-top:1px solid var(--borde); font-size:14px; }
+  li:first-child { border-top:0; }
+  li small { color:var(--mut); }
+  .nota { color:var(--mut); font-size:12.5px; }
+</style>
+</head>
+<body>
+<main>
+  <div class="card">
+    <h1>Campana Mobisond</h1>
+    <div class="sub">Suena fuerte en esta PC cada vez que entra un caso. Dejá esta pestaña abierta y no la recargues.</div>
+    <div class="campana" id="campana">🔔</div>
+    <div class="estado apagada" id="estado">Apagada</div>
+    <button class="grande" id="activar">Activar campana</button>
+  </div>
+
+  <div class="card">
+    <label for="canal">Tu canal (el mismo de "Mi canal del celular" en Tampermonkey)</label>
+    <input type="text" id="canal" placeholder="mobisond-casos-…" autocomplete="off" spellcheck="false">
+    <label for="vol">Volumen</label>
+    <div class="fila"><input type="range" id="vol" min="10" max="100" value="100"><span id="volTxt">100 %</span></div>
+    <label><input type="checkbox" id="voz" checked> Decir en voz alta "Entró un caso nuevo"</label>
+    <div class="fila" style="margin-top:12px"><button id="probar">Probar</button><span class="nota">Probá con el botón o con "Mandar aviso de prueba" de Tampermonkey.</span></div>
+  </div>
+
+  <div class="card">
+    <b>Últimos avisos</b>
+    <ul id="log"><li class="nota">Todavía nada.</li></ul>
+  </div>
+  <p class="nota">Si recargás o cerrás esta pestaña, volvé a tocar "Activar campana": Chrome solo deja sonar a una página que tocaste.</p>
+</main>
+<script>
+(function () {
+  'use strict';
+  var $ = function (id) { return document.getElementById(id); };
+  var ctx = null, fuente = null, activa = false, vistos = {};
+
+  function guardado(k, d) { try { var v = localStorage.getItem('campana_' + k); return v === null ? d : v; } catch (e) { return d; } }
+  function guardar(k, v) { try { localStorage.setItem('campana_' + k, v); } catch (e) {} }
+
+  // El avisador de Tampermonkey abre esta página con el canal en la dirección (#c=mobisond-casos-…)
+  var deLink = (location.hash.match(/[#&]c=([\w-]+)/) || [])[1];
+  if (deLink) { guardar('canal', deLink); history.replaceState(null, '', location.pathname); }
+  $('canal').value = deLink || guardado('canal', '');
+  $('vol').value = guardado('vol', '100'); $('volTxt').textContent = $('vol').value + ' %';
+  $('voz').checked = guardado('voz', '1') === '1';
+  $('vol').oninput = function () { $('volTxt').textContent = this.value + ' %'; guardar('vol', this.value); };
+  $('voz').onchange = function () { guardar('voz', this.checked ? '1' : '0'); };
+  $('canal').onchange = function () { guardar('canal', this.value.trim()); if (activa) conectar(); };
+
+  function estado(txt, clase) { var e = $('estado'); e.textContent = txt; e.className = 'estado ' + clase; }
+
+  // ---- el sonido: una campana fuerte de 3 notas, 3 veces
+  function campanada() {
+    if (!ctx) return;
+    if (ctx.state === 'suspended') ctx.resume();
+    var vol = $('vol').value / 100, t = ctx.currentTime + 0.05;
+    var maestro = ctx.createGain(); maestro.gain.value = vol;
+    var comp = ctx.createDynamicsCompressor(); maestro.connect(comp); comp.connect(ctx.destination);
+    for (var r = 0; r < 3; r++) {
+      [988, 1319, 1760].forEach(function (f, i) {
+        var t0 = t + r * 0.9 + i * 0.17;
+        [1, 2.01].forEach(function (arm, j) {            // la nota y un armónico, para que suene a campana
+          var o = ctx.createOscillator(), g = ctx.createGain();
+          o.type = j ? 'sine' : 'triangle'; o.frequency.value = f * arm;
+          g.gain.setValueAtTime(0.0001, t0);
+          g.gain.exponentialRampToValueAtTime(j ? 0.25 : 0.9, t0 + 0.01);
+          g.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.6);
+          o.connect(g); g.connect(maestro); o.start(t0); o.stop(t0 + 0.62);
+        });
+      });
+    }
+    var c = $('campana'); c.classList.remove('suena'); void c.offsetWidth; c.classList.add('suena');
+    return 3 * 0.9;
+  }
+  function decir(frase, demora) {
+    if (!$('voz').checked || !window.speechSynthesis) return;
+    setTimeout(function () {
+      var u = new SpeechSynthesisUtterance(frase);
+      u.lang = 'es-AR'; u.rate = 1; u.volume = $('vol').value / 100;
+      var v = speechSynthesis.getVoices().filter(function (x) { return /^es/i.test(x.lang); });
+      if (v.length) u.voice = v.filter(function (x) { return /AR|419|US|MX/.test(x.lang); })[0] || v[0];
+      speechSynthesis.cancel(); speechSynthesis.speak(u);
+    }, (demora || 0) * 1000);
+  }
+  function sonar(frase) { var d = campanada(); decir(frase, d); }
+
+  function anotar(titulo, texto) {
+    var log = $('log');
+    if (log.firstElementChild && log.firstElementChild.classList.contains('nota')) log.innerHTML = '';
+    var li = document.createElement('li');
+    var h = new Date().toLocaleTimeString('es-AR', {hour: '2-digit', minute: '2-digit'});
+    li.innerHTML = '<b></b><br><small></small>';
+    li.firstChild.textContent = h + ' · ' + titulo;
+    li.lastChild.textContent = String(texto || '').split('\n')[0].slice(0, 120);
+    log.insertBefore(li, log.firstChild);
+    while (log.children.length > 15) log.removeChild(log.lastChild);
+  }
+
+  // ---- escucha el mismo canal de ntfy que el celular
+  function conectar() {
+    var canal = $('canal').value.trim().replace(/[^\w-]/g, '');
+    if (fuente) { fuente.close(); fuente = null; }
+    if (!canal) { estado('Falta tu canal (abajo)', 'mal'); return; }
+    estado('Conectando…', 'apagada');
+    fuente = new EventSource('https://ntfy.sh/' + encodeURIComponent(canal) + '/sse');
+    fuente.onopen = function () { estado('Activa · escuchando ' + canal, 'ok'); };
+    fuente.onerror = function () { estado('Sin conexión, reintentando…', 'mal'); };   // EventSource reintenta solo
+    fuente.onmessage = function (ev) {
+      var m; try { m = JSON.parse(ev.data); } catch (e) { return; }
+      if (m.event !== 'message' || vistos[m.id]) return;
+      vistos[m.id] = 1;
+      var titulo = m.title || 'Aviso', prueba = /prueba/i.test(titulo);
+      anotar(titulo, m.message);
+      var varios = /^Entraron (\d+)/.exec(titulo);
+      sonar(prueba ? 'Prueba de la campana' : varios ? 'Entraron ' + varios[1] + ' casos nuevos' : 'Entró un caso nuevo');
+    };
+  }
+
+  $('activar').onclick = function () {
+    try { ctx = ctx || new (window.AudioContext || window.webkitAudioContext)(); ctx.resume(); } catch (e) {}
+    activa = true; guardar('canal', $('canal').value.trim());
+    this.textContent = 'Campana activada'; this.disabled = true;
+    conectar(); campanada();   // suena una vez para confirmar, sin voz
+  };
+  $('probar').onclick = function () {
+    try { ctx = ctx || new (window.AudioContext || window.webkitAudioContext)(); ctx.resume(); } catch (e) {}
+    sonar('Entró un caso nuevo');
+  };
+  if (window.speechSynthesis) speechSynthesis.getVoices();
+})();
+</script>
+</body>
+</html>
