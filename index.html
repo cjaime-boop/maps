@@ -669,7 +669,6 @@ h1 { margin: 0; font-size: 16px; line-height: 1.25; overflow-wrap: anywhere; }
         var d = dms(t);
         return d && valida(d.lat, d.lon) ? d : null;
       }
-      function linkCorto(t) { return /(maps\.app\.goo\.gl|goo\.gl\/maps)/i.test(t); }
       function pareceDireccion(t) { t = String(t || '').trim(); return t.length >= 5 && /[a-záéíóúñ]/i.test(t) && /\s/.test(t) && !/^https?:/i.test(t); }
       function verLugar() {
         var t = inBus.value, ub = leerUbicacion(t);
@@ -677,8 +676,6 @@ h1 { margin: 0; font-size: 16px; line-height: 1.25; overflow-wrap: anywhere; }
         if (ub) {
           lugar.innerHTML = '📍 Ir a ' + ub.lat.toFixed(6) + ', ' + ub.lon.toFixed(6) + '<small>Tocá para verlo en el mapa</small>';
           lugar.onclick = function () { inBus.blur(); irA(ub.lat, ub.lon, 'Ubicación buscada'); };
-        } else if (linkCorto(t)) {
-          lugar.innerHTML = 'Link corto de Maps<small>Este tipo de link no se puede leer desde acá: abrilo en Maps, tocá el punto y copiá las coordenadas.</small>';
         } else if (pareceDireccion(t)) {
           lugar.innerHTML = '🔎 Buscar la dirección «' + esc(t.trim()) + '»<small>Tocá para buscarla (o Enter)</small>';
           lugar.onclick = function () { buscarDireccion(t); };
