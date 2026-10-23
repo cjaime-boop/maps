@@ -47,7 +47,6 @@
     <input type="text" id="canal" placeholder="mobisond-casos-…" autocomplete="off" spellcheck="false">
     <label for="vol">Volumen</label>
     <div class="fila"><input type="range" id="vol" min="10" max="100" value="100"><span id="volTxt">100 %</span></div>
-    <label><input type="checkbox" id="voz" checked> Decir en voz alta "Entró un caso nuevo"</label>
     <div class="fila" style="margin-top:12px"><button id="probar">Probar</button><span class="nota">Probá con el botón o con "Mandar aviso de prueba" de Tampermonkey.</span></div>
   </div>
 
@@ -71,9 +70,7 @@
   if (deLink) { guardar('canal', deLink); history.replaceState(null, '', location.pathname); }
   $('canal').value = deLink || guardado('canal', '');
   $('vol').value = guardado('vol', '100'); $('volTxt').textContent = $('vol').value + ' %';
-  $('voz').checked = guardado('voz', '1') === '1';
   $('vol').oninput = function () { $('volTxt').textContent = this.value + ' %'; guardar('vol', this.value); };
-  $('voz').onchange = function () { guardar('voz', this.checked ? '1' : '0'); };
   $('canal').onchange = function () { guardar('canal', this.value.trim()); if (activa) conectar(); };
 
   function estado(txt, clase) { var e = $('estado'); e.textContent = txt; e.className = 'estado ' + clase; }
@@ -101,17 +98,7 @@
     var c = $('campana'); c.classList.remove('suena'); void c.offsetWidth; c.classList.add('suena');
     return 3 * 0.9;
   }
-  function decir(frase, demora) {
-    if (!$('voz').checked || !window.speechSynthesis) return;
-    setTimeout(function () {
-      var u = new SpeechSynthesisUtterance(frase);
-      u.lang = 'es-AR'; u.rate = 1; u.volume = $('vol').value / 100;
-      var v = speechSynthesis.getVoices().filter(function (x) { return /^es/i.test(x.lang); });
-      if (v.length) u.voice = v.filter(function (x) { return /AR|419|US|MX/.test(x.lang); })[0] || v[0];
-      speechSynthesis.cancel(); speechSynthesis.speak(u);
-    }, (demora || 0) * 1000);
-  }
-  function sonar(frase) { var d = campanada(); decir(frase, d); }
+  function sonar() { campanada(); }
 
   function anotar(titulo, texto) {
     var log = $('log');
@@ -138,10 +125,9 @@
       var m; try { m = JSON.parse(ev.data); } catch (e) { return; }
       if (m.event !== 'message' || vistos[m.id]) return;
       vistos[m.id] = 1;
-      var titulo = m.title || 'Aviso', prueba = /prueba/i.test(titulo);
+      var titulo = m.title || 'Aviso';
       anotar(titulo, m.message);
-      var varios = /^Entraron (\d+)/.exec(titulo);
-      sonar(prueba ? 'Prueba de la campana' : varios ? 'Entraron ' + varios[1] + ' casos nuevos' : 'Entró un caso nuevo');
+      sonar();
     };
   }
 
@@ -153,9 +139,8 @@
   };
   $('probar').onclick = function () {
     try { ctx = ctx || new (window.AudioContext || window.webkitAudioContext)(); ctx.resume(); } catch (e) {}
-    sonar('Entró un caso nuevo');
+    sonar();
   };
-  if (window.speechSynthesis) speechSynthesis.getVoices();
 })();
 </script>
 </body>
