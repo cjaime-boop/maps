@@ -89,6 +89,8 @@ h1 { margin: 0; font-size: 16px; line-height: 1.25; overflow-wrap: anywhere; }
 .busca button { border: 0; background: none; color: var(--muted); font-size: 18px; line-height: 1; padding: 6px 8px; cursor: pointer; }
 .busca .cuenta { font-size: 12px; color: var(--muted); white-space: nowrap; font-variant-numeric: tabular-nums; }
 .bot.oculta { display: none; }
+.bot.destello { animation: destello 1.2s ease-out; }
+@keyframes destello { 0%, 30% { background: #fde68a; } 100% { background: transparent; } }
 .bot .acc { display: flex; gap: 6px; align-items: center; }
 .bot .ir.pdf { background: #fef2f2; color: #b91c1c; border: 0; font-family: inherit; cursor: pointer; }
 
@@ -596,6 +598,17 @@ h1 { margin: 0; font-size: 16px; line-height: 1.25; overflow-wrap: anywhere; }
       bt.href = ruta(b.lat, b.lon);
       bt.textContent = 'Cómo llegar a la ' + (i + 1) + ' ↗';
       bt.hidden = false;
+      if (!centrar) {                 // tocada en el mapa: la lista va a esa botella (para el PDF y "Ir")
+        var fila = document.getElementById('b' + i), cu = document.querySelector('.cuerpo');
+        var ib = document.getElementById('buscar');
+        if (fila.classList.contains('oculta') && ib) { ib.value = ''; ib.dispatchEvent(new Event('input')); }
+        var hj = document.getElementById('hoja'), wr = hj.parentNode;
+        if (hj.offsetHeight < wr.clientHeight * 0.3) wr.style.setProperty('--h', (wr.clientHeight * 0.35) + 'px');
+        setTimeout(function () {
+          cu.scrollTop += fila.getBoundingClientRect().top - cu.getBoundingClientRect().top - 6;
+          fila.classList.remove('destello'); void fila.offsetWidth; fila.classList.add('destello');
+        }, 60);
+      }
       if (centrar) {
         var hoja = document.getElementById('hoja'), wrap = hoja.parentNode, hh = hoja.offsetHeight;
         if (hh > wrap.clientHeight * 0.5) { hh = wrap.clientHeight * 0.4; wrap.style.setProperty('--h', hh + 'px'); }
