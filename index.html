@@ -606,12 +606,10 @@ h1 { margin: 0; font-size: 16px; line-height: 1.25; overflow-wrap: anywhere; }
       var b = bots[i];
       document.getElementById('b' + i).classList.add('sel');
       L.DomUtil.addClass(marcas[i].getElement(), 'sel');
-      if (!centrar) {                 // tocada en el mapa: la lista va a esa botella (para el PDF y "Ir")
+      if (!centrar) {                 // tocada en el mapa: la lista va a esa botella, sin abrirla si está cerrada
         var fila = document.getElementById('b' + i), cu = document.querySelector('.cuerpo');
         var ib = document.getElementById('buscar');
         if (fila.classList.contains('oculta') && ib) { ib.value = ''; ib.dispatchEvent(new Event('input')); }
-        var hj = document.getElementById('hoja'), wr = hj.parentNode;
-        if (hj.offsetHeight < wr.clientHeight * 0.3) wr.style.setProperty('--h', (wr.clientHeight * 0.35) + 'px');
         setTimeout(function () {
           cu.scrollTop += fila.getBoundingClientRect().top - cu.getBoundingClientRect().top - 6;
           fila.classList.remove('destello'); void fila.offsetWidth; fila.classList.add('destello');
