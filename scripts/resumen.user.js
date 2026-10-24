@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Mobisond · Resumen de turno (WhatsApp)
 // @namespace    mobisond
-// @version      1.1
+// @version      1.2
 // @description  Arma el mensaje de fin de turno (Lineales y GPON) con los números del día, listo para pegar en WhatsApp.
 // @match        https://*.service-now.com/*
 // @grant        GM_registerMenuCommand
@@ -85,10 +85,12 @@
       // SLA vencido hoy: puede estar en la WOT o en su WO padre
       var ids = [], dePadre = {};
       casos.forEach(function (r) {
+        if (!esHoy(val(r, 'opened_at'))) return;   // vencidos: solo los casos creados hoy (no los de arrastre)
         ids.push(val(r, 'sys_id'));
         var p = val(r, 'parent'); if (p) { ids.push(p); dePadre[p] = dv(r, 'number'); }
       });
-      var qs = 'taskIN' + ids.join(',') + '^has_breached=true^planned_end_timeON' + 'Today' + HOY;
+      if (!ids.length) return {casos: casos, vencidos: {}};
+      var qs = 'taskIN' + ids.join(',') + '^has_breached=true';
       return api('task_sla', qs, 'task,has_breached,planned_end_time').then(function (slas) {
         var porId = {};
         casos.forEach(function (r) { porId[val(r, 'sys_id')] = dv(r, 'number'); });
@@ -111,7 +113,7 @@
         if (/^[12]\b/.test(dv(c, 'priority')) || /^[12]$/.test(val(c, 'priority'))) r.emergencia = true;
       }
       if (!abierto && val(c, 'closed_at') && esHoy(val(c, 'closed_at')) && !/cancel/i.test(dv(c, 'state'))) r.resueltos++;
-      if (venc && venc[n]) r.vencidos++;
+      if (venc && venc[n] && esHoy(val(c, 'opened_at'))) r.vencidos++;
       if (!abierto) return;
       r.acumulados++;
       var pausa = dv(c, 'u_pause_reason').trim();
