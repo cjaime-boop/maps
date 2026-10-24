@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Mobisond · Avisador
 // @namespace    mobisond
-// @version      2.43
+// @version      2.44
 // @description  Avisa los casos nuevos (celular, campana y grupo de Telegram), los casos Lineales sin notas de trabajo hace 25 min y los SLA a 1 hora de vencer.
 // @match        https://*.service-now.com/*
 // @grant        GM_xmlhttpRequest
@@ -92,11 +92,6 @@
   }
 
   function hayGrupo() { return GM_getValue('tg_token', '') && GM_getValue('tg_chat', ''); }
-  function canalGrupo() {          // canal ntfy compartido por todas las PCs del mismo grupo (para no repetir)
-    var t = String(GM_getValue('tg_chat', '')) + GM_getValue('tg_token', '').split(':')[0], h = 0;
-    for (var i = 0; i < t.length; i++) h = (h * 31 + t.charCodeAt(i)) >>> 0;
-    return 'https://ntfy.sh/mobisond-grupo-' + h.toString(36);
-  }
   function esc(t) { return String(t).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
   function colorPrio(p) { return /^1/.test(p) ? '🔴' : /^2/.test(p) ? '🟠' : /^3/.test(p) ? '🟡' : '⚪'; }
   // bloque común de los avisos: WO en negrita, CI, descripción en cursiva, (extra) y link
@@ -117,7 +112,6 @@
   // Manda al grupo una sola vez por "clave", aunque varias PCs lo detecten (se anota en un canal ntfy compartido).
   function unaVezAlGrupo(clave, html, responderA, chatId, alTerminar) {   // chatId: para contestar por privado (si no, al grupo)
     if (!hayGrupo()) return;
-    var canalG = canalGrupo();
     var datos = {chat_id: chatId || GM_getValue('tg_chat'), text: html, parse_mode: 'HTML', disable_web_page_preview: true};
     if (responderA) datos.reply_to_message_id = responderA;
     var fin = alTerminar || function () {};
@@ -125,21 +119,17 @@
     var mandar = function (por) {
       if (decidido) return; decidido = true;
       tg('sendMessage', datos, function () {
-        GM_xmlhttpRequest({method: 'POST', url: canalG, data: clave, timeout: 10000});   // anotado como mandado
         botLog('mandado ' + clave.slice(0, 30) + (por ? ' (' + por + ')' : '')); fin(true);
       }, function (e) { botLog('Telegram no dejó mandar (' + clave.slice(0, 30) + '): ' + e); fin(false); });
     };
-    // los comandos los lee una sola PC (Telegram se los da a una): se contestan directo
+    // los comandos los lee una sola PC (Supabase o Telegram se los da a una): se contestan directo
     if (/^cmd:/.test(clave)) { mandar(); return; }
-    // casos y alertas: se fija si otra PC ya lo mandó; si ntfy no contesta en 6 s, se manda igual
-    setTimeout(function () { mandar('ntfy no contestó'); }, 6000);
-    GM_xmlhttpRequest({method: 'GET', url: canalG + '/json?poll=1&since=12h', timeout: 8000,
-      onload: function (r) {
-        if (decidido) return;
-        if ((r.responseText || '').indexOf('"message":"' + clave + '"') >= 0) { decidido = true; botLog('ya lo mandó otra PC: ' + clave.slice(0, 30)); fin(true); return; }
-        mandar();
-      },
-      onerror: function () { mandar('ntfy con error'); }, ontimeout: function () { mandar('ntfy tardó'); }});
+    // casos y alertas: Supabase hace de árbitro, solo la primera PC que lo pide lo manda.
+    // Si Supabase no responde, se manda igual (mejor repetido que perdido).
+    sbRpc('bot_reclamar', {p_aviso: clave, p_pc: pcId()}).then(function (gano) {
+      if (gano === false) { decidido = true; botLog('ya lo mandó otra PC: ' + clave.slice(0, 30)); fin(true); return; }
+      mandar();
+    }, function (e) { mandar('Supabase no respondió: ' + e.message); });
   }
   function alGrupo(f) { botLog('caso nuevo ' + f.numero); unaVezAlGrupo(f.id, mensajeGrupo(f)); }
   function configurarGrupo() {
@@ -279,7 +269,7 @@
   });
   GM_registerMenuCommand('⚙️ Configuración', configuracion);
   GM_registerMenuCommand('🔧 Revisar bot', function () {          // diagnóstico temporal de /bandeja
-    var info = ['Versión 2.43', 'Pestaña vigilada: ' + (vigilada() ? 'SÍ' : 'NO'), 'Grupo guardado: ' + (GM_getValue('tg_chat', '') || 'ninguno'),
+    var info = ['Versión 2.44', 'Pestaña vigilada: ' + (vigilada() ? 'SÍ' : 'NO'), 'Grupo guardado: ' + (GM_getValue('tg_chat', '') || 'ninguno'),
                 'Token: ' + (GM_getValue('tg_token', '') ? 'cargado' : 'falta'), 'Último leído: ' + GM_getValue('tg_offset', 0)];
     tg('getWebhookInfo', {}, function (w) {
       info.push('Webhook: ' + (w.url ? w.url : 'no') + (w.last_error_message ? '\nÚltimo error de Telegram: ' + w.last_error_message : '') +
