@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Mobisond · Aviso de casos nuevos (ServiceNow → celular)
 // @namespace    mobisond
-// @version      2.11
+// @version      2.12
 // @description  Cuando entra un caso nuevo en la lista que vigilás de ServiceNow, te llega una notificación al celular (app ntfy) y a la PC. (Alexa va en otro script.)
 // @match        https://*.service-now.com/*
 // @grant        GM_xmlhttpRequest
@@ -225,9 +225,6 @@
     }
   });
   GM_registerMenuCommand('Abrir la campana de la PC', abrirCampana);
-  GM_registerMenuCommand('Mandar aviso de prueba', function () {
-    aviso('Prueba Mobisond', 'Si te llegó esto, los avisos de casos nuevos funcionan.', location.href, 3);
-  });
   GM_registerMenuCommand('¿Qué lista vigilo?', function () {
     var k = GM_getValue('lista', ''), tit = GM_getValue('lista_titulo', '');
     if (!k) { alert('No estoy vigilando ninguna lista. Abrí la de Pending Dispatch y elegí "Vigilar esta lista".'); return; }
@@ -249,12 +246,6 @@
   });
   GM_registerMenuCommand('Contraseña del equipo', function () { pedirClave(true); });
   GM_registerMenuCommand('Grupo de Telegram', configurarGrupo);
-  GM_registerMenuCommand('Mandar prueba al grupo', function () {
-    if (!hayGrupo()) { alert('Primero configurá el grupo (menú "Grupo de Telegram").'); return; }
-    var f = (filas() || [])[0] || {numero: 'WO0000000', datos: {short_description: 'Caso de prueba'}, link: location.href};
-    tg('sendMessage', {chat_id: GM_getValue('tg_chat'), text: mensajeGrupo(f, true), parse_mode: 'HTML', disable_web_page_preview: true},
-       function () { alert('Prueba mandada al grupo.'); }, function (e) { alert('No se pudo: ' + e); });
-  });
   GM_registerMenuCommand('Dejar de vigilar', function () { GM_setValue('lista', ''); alert('Ya no vigilo ninguna lista.'); });
 
   // ---------------------------------------------------------------- cuándo revisar
