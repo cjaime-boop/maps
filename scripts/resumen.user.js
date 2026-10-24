@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Mobisond · Resumen de turno (WhatsApp)
 // @namespace    mobisond
-// @version      1.2
+// @version      1.3
 // @description  Arma el mensaje de fin de turno (Lineales y GPON) con los números del día, listo para pegar en WhatsApp.
 // @match        https://*.service-now.com/*
 // @grant        GM_registerMenuCommand
@@ -106,6 +106,7 @@
              enMano: [], vencidos: 0, emergencia: false};
     casos.forEach(function (c) {
       if (proyecto(c) !== proy) return;
+      if (/cancel/i.test(dv(c, 'state'))) return;   // los cancelados no cuentan para nada
       var n = dv(c, 'number');
       var abierto = !cerrado(c);
       if (val(c, 'opened_at') && esHoy(val(c, 'opened_at'))) {
