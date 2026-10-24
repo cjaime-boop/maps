@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Mobisond · Avisador
 // @namespace    mobisond
-// @version      2.47
+// @version      2.48
 // @description  Avisa los casos nuevos (celular, campana y grupo de Telegram), los casos Lineales sin notas de trabajo hace 25 min y los SLA a 1 hora de vencer.
 // @match        https://*.service-now.com/*
 // @grant        GM_xmlhttpRequest
@@ -277,7 +277,7 @@
   });
   GM_registerMenuCommand('⚙️ Configuración', configuracion);
   GM_registerMenuCommand('🔧 Revisar bot', function () {          // diagnóstico temporal de /bandeja
-    var info = ['Versión 2.47', 'Pestaña vigilada: ' + (vigilada() ? 'SÍ' : 'NO'), 'Grupo guardado: ' + (GM_getValue('tg_chat', '') || 'ninguno'),
+    var info = ['Versión 2.48', 'Pestaña vigilada: ' + (vigilada() ? 'SÍ' : 'NO'), 'Esta pestaña atiende avisos y bot: ' + (soyLider() ? 'SÍ' : 'NO'), 'Grupo guardado: ' + (GM_getValue('tg_chat', '') || 'ninguno'),
                 'Token: ' + (GM_getValue('tg_token', '') ? 'cargado' : 'falta'), 'Último leído: ' + GM_getValue('tg_offset', 0)];
     tg('getWebhookInfo', {}, function (w) {
       info.push('Webhook: ' + (w.url ? w.url : 'no') + (w.last_error_message ? '\nÚltimo error de Telegram: ' + w.last_error_message : '') +
@@ -408,7 +408,7 @@
   }
 
   function controles() {
-    if (!hayGrupo() || !vigilada()) return;
+    if (!hayGrupo() || !soyLider()) return;
     var ahora = Date.now();
     if (ahora - GM_getValue('ult_control', 0) < CADA_MS) return;      // la pestaña se recarga cada 30 s: se controla cada 2 min
     GM_setValue('ult_control', ahora);
@@ -641,7 +641,7 @@
 
   var leyendo = false;
   function comandos() {
-    if (!hayGrupo() || !vigilada()) return;
+    if (!hayGrupo() || !soyLider()) return;
     atenderPendientes();
     if (GM_getValue('tg_cmds', 0) < 4) {     // menú de comandos del bot (aparece al escribir "/" en el grupo)
       tg('setMyCommands', {commands: [{command: 'bandeja', description: 'Casos abiertos de Lineales y GPON'},
@@ -710,13 +710,33 @@
     document.body.appendChild(p);
   }
 
+  // ---------------------------------------------------------------- una pestaña "atiende" por PC
+  // Los controles (25 min, SLA) y los comandos del bot no necesitan la lista vigilada: alcanza con cualquier
+  // pestaña de ServiceNow abierta. Para no repetir, en cada PC los atiende una sola pestaña (la "líder");
+  // si se cierra, otra toma la posta a los 15 s.
+  function idPestaña() {
+    var id = null;
+    try { id = sessionStorage.getItem('mbs_tab'); } catch (e) {}
+    if (!id) { id = 't' + Math.random().toString(36).slice(2, 9); try { sessionStorage.setItem('mbs_tab', id); } catch (e) {} }
+    return id;
+  }
+  var MI_TAB = idPestaña();
+  function soyLider() {
+    if (window.top !== window.self) return false;      // solo la ventana principal (no los marcos de adentro)
+    if (!token()) return false;                         // y que tenga la sesión de ServiceNow a mano para consultar
+    var l = GM_getValue('lider', null), ahora = Date.now();
+    if (!l || l.id === MI_TAB || ahora - l.t > 15000) { GM_setValue('lider', {id: MI_TAB, t: ahora}); return true; }
+    return false;
+  }
+
   // ---------------------------------------------------------------- cuándo revisar
-  if (!claveLista()) return;
-  revisar();
   setTimeout(controles, 4000);
   setInterval(controles, 30000);
   setTimeout(comandos, 2000);
   setInterval(comandos, 5000);
+  setInterval(soyLider, 5000);            // mantiene el turno de esta pestaña mientras esté abierta
+  if (!claveLista()) return;              // casos nuevos: solo en la lista vigilada
+  revisar();
   var espera = null;
   new MutationObserver(function () {
     clearTimeout(espera);
