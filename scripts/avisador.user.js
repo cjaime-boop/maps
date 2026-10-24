@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Mobisond · Avisador
 // @namespace    mobisond
-// @version      2.48
+// @version      2.49
 // @description  Avisa los casos nuevos (celular, campana y grupo de Telegram), los casos Lineales sin notas de trabajo hace 25 min y los SLA a 1 hora de vencer.
 // @match        https://*.service-now.com/*
 // @grant        GM_xmlhttpRequest
@@ -277,7 +277,7 @@
   });
   GM_registerMenuCommand('⚙️ Configuración', configuracion);
   GM_registerMenuCommand('🔧 Revisar bot', function () {          // diagnóstico temporal de /bandeja
-    var info = ['Versión 2.48', 'Pestaña vigilada: ' + (vigilada() ? 'SÍ' : 'NO'), 'Esta pestaña atiende avisos y bot: ' + (soyLider() ? 'SÍ' : 'NO'), 'Grupo guardado: ' + (GM_getValue('tg_chat', '') || 'ninguno'),
+    var info = ['Versión 2.49', 'Pestaña vigilada: ' + (vigilada() ? 'SÍ' : 'NO'), 'Esta pestaña atiende avisos y bot: ' + (soyLider() ? 'SÍ' : 'NO'), 'Grupo guardado: ' + (GM_getValue('tg_chat', '') || 'ninguno'),
                 'Token: ' + (GM_getValue('tg_token', '') ? 'cargado' : 'falta'), 'Último leído: ' + GM_getValue('tg_offset', 0)];
     tg('getWebhookInfo', {}, function (w) {
       info.push('Webhook: ' + (w.url ? w.url : 'no') + (w.last_error_message ? '\nÚltimo error de Telegram: ' + w.last_error_message : '') +
@@ -710,6 +710,33 @@
     document.body.appendChild(p);
   }
 
+  // ---------------------------------------------------------------- casos nuevos "por detrás" (respaldo)
+  // Si nadie tiene la lista vigilada, igual se avisan al grupo los casos que entran: la pestaña que atiende
+  // le pregunta a ServiceNow cada 30 s por los WOT de Mobisond abiertos en los últimos 15 min.
+  // Usa la misma clave que el aviso de la lista (el sys_id), así Supabase no deja que salga dos veces.
+  function casosPorDetras() {
+    if (!hayGrupo() || !soyLider()) return;
+    var ahora = Date.now();
+    if (ahora - GM_getValue('ult_nuevos', 0) < 25000) return;
+    GM_setValue('ult_nuevos', ahora);
+    var q = 'active=true^opened_at>javascript:gs.minutesAgoStart(15)^assignment_group.nameSTARTSWITH' + GRUPOS.lineales +
+            '^ORassignment_group.nameSTARTSWITH' + GRUPOS.gpon;
+    api('wm_task', q, 'sys_id,number,parent,priority,cmdb_ci,short_description,opened_at').then(function (rs) {
+      var avisados = GM_getValue('nuevos_avisados', {});
+      Object.keys(avisados).forEach(function (k) { if (ahora - avisados[k] > 60 * 60000) delete avisados[k]; });
+      rs.forEach(function (r) {
+        var id = vl(r, 'sys_id');
+        if (avisados[id]) return;
+        avisados[id] = ahora;
+        var f = {id: id, numero: woDe(r), link: linkCaso(r),
+                 datos: {priority: dv(r, 'priority'), cmdb_ci: dv(r, 'cmdb_ci'), short_description: dv(r, 'short_description')}};
+        botLog('caso nuevo (por detrás) ' + f.numero);
+        unaVezAlGrupo(id, mensajeGrupo(f));
+      });
+      GM_setValue('nuevos_avisados', avisados);
+    }, function (e) { console.log('[Mobisond] casos por detrás: ' + e.message); });
+  }
+
   // ---------------------------------------------------------------- una pestaña "atiende" por PC
   // Los controles (25 min, SLA) y los comandos del bot no necesitan la lista vigilada: alcanza con cualquier
   // pestaña de ServiceNow abierta. Para no repetir, en cada PC los atiende una sola pestaña (la "líder");
@@ -735,6 +762,8 @@
   setTimeout(comandos, 2000);
   setInterval(comandos, 5000);
   setInterval(soyLider, 5000);            // mantiene el turno de esta pestaña mientras esté abierta
+  setTimeout(casosPorDetras, 6000);
+  setInterval(casosPorDetras, 30000);
   if (!claveLista()) return;              // casos nuevos: solo en la lista vigilada
   revisar();
   var espera = null;
