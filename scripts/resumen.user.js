@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Mobisond · Resumen de turno (WhatsApp)
 // @namespace    mobisond
-// @version      1.3
+// @version      1.4
 // @description  Arma el mensaje de fin de turno (Lineales y GPON) con los números del día, listo para pegar en WhatsApp.
 // @match        https://*.service-now.com/*
 // @grant        GM_registerMenuCommand
@@ -85,17 +85,23 @@
       // SLA vencido hoy: puede estar en la WOT o en su WO padre
       var ids = [], dePadre = {};
       casos.forEach(function (r) {
-        if (!esHoy(val(r, 'opened_at'))) return;   // vencidos: solo los casos creados hoy (no los de arrastre)
         ids.push(val(r, 'sys_id'));
         var p = val(r, 'parent'); if (p) { ids.push(p); dePadre[p] = dv(r, 'number'); }
       });
       if (!ids.length) return {casos: casos, vencidos: {}};
       var qs = 'taskIN' + ids.join(',') + '^has_breached=true';
-      return api('task_sla', qs, 'task,has_breached,planned_end_time').then(function (slas) {
+      return api('task_sla', qs, 'task,has_breached,planned_end_time,original_breach_time').then(function (slas) {
         var porId = {};
         casos.forEach(function (r) { porId[val(r, 'sys_id')] = dv(r, 'number'); });
         var venc = {};
-        slas.forEach(function (s) { var t = val(s, 'task'); var n = porId[t] || dePadre[t]; if (n) venc[n] = 1; });
+        var ahora = Date.now();
+        slas.forEach(function (s) {
+          // vencido = el SLA se venció HOY (no importa qué día entró el caso).
+          // Se usa el momento original del vencimiento: si el caso estuvo pausado, el otro campo se corre y daba falsos vencidos.
+          var cuando = val(s, 'original_breach_time') || val(s, 'planned_end_time');
+          if (!cuando || !esHoy(cuando) || new Date(cuando.replace(' ', 'T') + 'Z').getTime() > ahora) return;
+          var t = val(s, 'task'); var n = porId[t] || dePadre[t]; if (n) venc[n] = 1;
+        });
         return {casos: casos, vencidos: venc};
       }, function () { return {casos: casos, vencidos: null}; });   // si no deja leer los SLA, se completa a mano
     }).then(function (d) { return texto(d.casos, d.vencidos); });
@@ -114,7 +120,7 @@
         if (/^[12]\b/.test(dv(c, 'priority')) || /^[12]$/.test(val(c, 'priority'))) r.emergencia = true;
       }
       if (!abierto && val(c, 'closed_at') && esHoy(val(c, 'closed_at')) && !/cancel/i.test(dv(c, 'state'))) r.resueltos++;
-      if (venc && venc[n] && esHoy(val(c, 'opened_at'))) r.vencidos++;
+      if (venc && venc[n]) r.vencidos++;
       if (!abierto) return;
       r.acumulados++;
       var pausa = dv(c, 'u_pause_reason').trim();
