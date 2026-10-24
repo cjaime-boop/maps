@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Mobisond · Avisador
 // @namespace    mobisond
-// @version      2.28
+// @version      2.29
 // @description  Avisa los casos nuevos (celular, campana y grupo de Telegram), los casos Lineales sin notas de trabajo hace 25 min y los SLA a 1 hora de vencer.
 // @match        https://*.service-now.com/*
 // @grant        GM_xmlhttpRequest
@@ -109,16 +109,21 @@
     var canalG = canalGrupo();
     var datos = {chat_id: chatId || GM_getValue('tg_chat'), text: html, parse_mode: 'HTML', disable_web_page_preview: true};
     if (responderA) datos.reply_to_message_id = responderA;
-    var mandar = function () { tg('sendMessage', datos, null, function (e) { botLog('Telegram no dejó mandar: ' + e); }); };
+    var mandar = function () {
+      tg('sendMessage', datos, function () {
+        // recién cuando salió bien se anota como mandado (si otra PC lo "agarra" y falla, no queda sin mandar)
+        GM_xmlhttpRequest({method: 'POST', url: canalG, data: clave, timeout: 10000});
+        if (!/^cmd:/.test(clave)) botLog('mandado al grupo: ' + clave.slice(0, 40));
+      }, function (e) { botLog('Telegram no dejó mandar (' + clave.slice(0, 30) + '): ' + e); });
+    };
     GM_xmlhttpRequest({method: 'GET', url: canalG + '/json?poll=1&since=12h', timeout: 10000,
       onload: function (r) {
-        if (r.responseText.indexOf('"message":"' + clave + '"') >= 0) return;      // otra PC ya lo mandó
-        GM_xmlhttpRequest({method: 'POST', url: canalG, data: clave, timeout: 10000});
+        if (r.responseText.indexOf('"message":"' + clave + '"') >= 0) { botLog('ya lo mandó otra PC: ' + clave.slice(0, 40)); return; }
         mandar();
       },
       onerror: mandar, ontimeout: mandar});
   }
-  function alGrupo(f) { unaVezAlGrupo(f.id, mensajeGrupo(f)); }
+  function alGrupo(f) { botLog('caso nuevo ' + f.numero); unaVezAlGrupo(f.id, mensajeGrupo(f)); }
   function configurarGrupo() {
     var tok = prompt('Grupo de Telegram\n\nPegá el token del bot (te lo da @BotFather, es algo como 123456:ABC-xyz).\n' +
                      'Dejalo vacío y Aceptar para desactivar el grupo.', GM_getValue('tg_token', ''));
@@ -256,7 +261,7 @@
   });
   GM_registerMenuCommand('⚙️ Configuración', configuracion);
   GM_registerMenuCommand('🔧 Revisar bot', function () {          // diagnóstico temporal de /bandeja
-    var info = ['Versión 2.28', 'Pestaña vigilada: ' + (vigilada() ? 'SÍ' : 'NO'), 'Grupo guardado: ' + (GM_getValue('tg_chat', '') || 'ninguno'),
+    var info = ['Versión 2.29', 'Pestaña vigilada: ' + (vigilada() ? 'SÍ' : 'NO'), 'Grupo guardado: ' + (GM_getValue('tg_chat', '') || 'ninguno'),
                 'Token: ' + (GM_getValue('tg_token', '') ? 'cargado' : 'falta'), 'Último leído: ' + GM_getValue('tg_offset', 0)];
     tg('getWebhookInfo', {}, function (w) {
       info.push('Webhook: ' + (w.url ? w.url : 'no'));
