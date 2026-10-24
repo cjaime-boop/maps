@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Mobisond · Avisador
 // @namespace    mobisond
-// @version      2.29
+// @version      2.30
 // @description  Avisa los casos nuevos (celular, campana y grupo de Telegram), los casos Lineales sin notas de trabajo hace 25 min y los SLA a 1 hora de vencer.
 // @match        https://*.service-now.com/*
 // @grant        GM_xmlhttpRequest
@@ -104,24 +104,31 @@
       (d.short_description ? '\n' + esc(d.short_description) : '') + '\n<a href="' + esc(f.link) + '">Abrir en ServiceNow</a>';
   }
   // Manda al grupo una sola vez por "clave", aunque varias PCs lo detecten (se anota en un canal ntfy compartido).
-  function unaVezAlGrupo(clave, html, responderA, chatId) {   // chatId: para contestar por privado (si no, al grupo)
+  function unaVezAlGrupo(clave, html, responderA, chatId, alTerminar) {   // chatId: para contestar por privado (si no, al grupo)
     if (!hayGrupo()) return;
     var canalG = canalGrupo();
     var datos = {chat_id: chatId || GM_getValue('tg_chat'), text: html, parse_mode: 'HTML', disable_web_page_preview: true};
     if (responderA) datos.reply_to_message_id = responderA;
-    var mandar = function () {
+    var fin = alTerminar || function () {};
+    var decidido = false;
+    var mandar = function (por) {
+      if (decidido) return; decidido = true;
       tg('sendMessage', datos, function () {
-        // recién cuando salió bien se anota como mandado (si otra PC lo "agarra" y falla, no queda sin mandar)
-        GM_xmlhttpRequest({method: 'POST', url: canalG, data: clave, timeout: 10000});
-        if (!/^cmd:/.test(clave)) botLog('mandado al grupo: ' + clave.slice(0, 40));
-      }, function (e) { botLog('Telegram no dejó mandar (' + clave.slice(0, 30) + '): ' + e); });
+        GM_xmlhttpRequest({method: 'POST', url: canalG, data: clave, timeout: 10000});   // anotado como mandado
+        botLog('mandado ' + clave.slice(0, 30) + (por ? ' (' + por + ')' : '')); fin(true);
+      }, function (e) { botLog('Telegram no dejó mandar (' + clave.slice(0, 30) + '): ' + e); fin(false); });
     };
-    GM_xmlhttpRequest({method: 'GET', url: canalG + '/json?poll=1&since=12h', timeout: 10000,
+    // los comandos los lee una sola PC (Telegram se los da a una): se contestan directo
+    if (/^cmd:/.test(clave)) { mandar(); return; }
+    // casos y alertas: se fija si otra PC ya lo mandó; si ntfy no contesta en 6 s, se manda igual
+    setTimeout(function () { mandar('ntfy no contestó'); }, 6000);
+    GM_xmlhttpRequest({method: 'GET', url: canalG + '/json?poll=1&since=12h', timeout: 8000,
       onload: function (r) {
-        if (r.responseText.indexOf('"message":"' + clave + '"') >= 0) { botLog('ya lo mandó otra PC: ' + clave.slice(0, 40)); return; }
+        if (decidido) return;
+        if ((r.responseText || '').indexOf('"message":"' + clave + '"') >= 0) { decidido = true; botLog('ya lo mandó otra PC: ' + clave.slice(0, 30)); fin(true); return; }
         mandar();
       },
-      onerror: mandar, ontimeout: mandar});
+      onerror: function () { mandar('ntfy con error'); }, ontimeout: function () { mandar('ntfy tardó'); }});
   }
   function alGrupo(f) { botLog('caso nuevo ' + f.numero); unaVezAlGrupo(f.id, mensajeGrupo(f)); }
   function configurarGrupo() {
@@ -261,7 +268,7 @@
   });
   GM_registerMenuCommand('⚙️ Configuración', configuracion);
   GM_registerMenuCommand('🔧 Revisar bot', function () {          // diagnóstico temporal de /bandeja
-    var info = ['Versión 2.29', 'Pestaña vigilada: ' + (vigilada() ? 'SÍ' : 'NO'), 'Grupo guardado: ' + (GM_getValue('tg_chat', '') || 'ninguno'),
+    var info = ['Versión 2.30', 'Pestaña vigilada: ' + (vigilada() ? 'SÍ' : 'NO'), 'Grupo guardado: ' + (GM_getValue('tg_chat', '') || 'ninguno'),
                 'Token: ' + (GM_getValue('tg_token', '') ? 'cargado' : 'falta'), 'Último leído: ' + GM_getValue('tg_offset', 0)];
     tg('getWebhookInfo', {}, function (w) {
       info.push('Webhook: ' + (w.url ? w.url : 'no'));
@@ -497,8 +504,9 @@
       return;
     }
     if (p.cmd === '/bandeja') {
-      textoBandeja().then(function (t) { unaVezAlGrupo('cmd:' + p.id, t, p.msg, p.chat); listo('contestado' + (p.chat ? ' por privado' : '')); },
-        function (e) { unaVezAlGrupo('cmd:' + p.id, 'No pude leer la bandeja de ServiceNow (' + esc(e.message) + ').', p.msg, p.chat); listo('error ServiceNow ' + e.message); });
+      textoBandeja().then(function (t) {
+        unaVezAlGrupo('cmd:' + p.id, t, p.msg, p.chat, function (ok) { listo(ok ? 'contestado' + (p.chat ? ' por privado' : '') : 'no se pudo contestar'); });
+      }, function (e) { unaVezAlGrupo('cmd:' + p.id, 'No pude leer la bandeja de ServiceNow (' + esc(e.message) + ').', p.msg, p.chat); listo('error ServiceNow ' + e.message); });
     } else listo('comando desconocido');
   }
   var leyendo = false;
