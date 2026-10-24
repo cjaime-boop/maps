@@ -22,6 +22,7 @@
   button { font:inherit; border-radius:9px; border:1px solid var(--borde); background:var(--card); color:var(--txt); padding:9px 14px; cursor:pointer; }
   button.grande { display:block; width:100%; background:var(--acc); color:#fff; border-color:var(--acc); font-size:17px; font-weight:700; padding:13px; margin-top:12px; }
   label { display:block; font-size:13px; color:var(--mut); margin:10px 0 4px; }
+  select { width:100%; font:inherit; padding:9px 10px; border-radius:9px; border:1px solid var(--borde); background:var(--bg); color:var(--txt); }
   input[type=text] { width:100%; font:inherit; padding:9px 10px; border-radius:9px; border:1px solid var(--borde); background:var(--bg); color:var(--txt); }
   .fila { display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
   .fila input[type=range] { flex:1; }
@@ -44,7 +45,9 @@
 
   <div class="card">
     <input type="hidden" id="canal">
-    <label for="vol" style="margin-top:0">Volumen</label>
+    <label for="sonido" style="margin-top:0">Sonido</label>
+    <select id="sonido"></select>
+    <label for="vol">Volumen</label>
     <div class="fila"><input type="range" id="vol" min="10" max="100" value="100"><span id="volTxt">100 %</span></div>
     <div class="fila" style="margin-top:12px"><button id="probar">Probar</button><span class="nota">Probá con el botón o con "Mandar aviso de prueba" de Tampermonkey.</span></div>
   </div>
@@ -75,28 +78,58 @@
   function estado(txt, clase) { var e = $('estado'); e.textContent = txt; e.className = 'estado ' + clase; }
 
   // ---- el sonido: una campana fuerte de 3 notas, 3 veces
-  function campanada() {
+  // ---- los sonidos: todos se arman en el momento (no hay archivos de audio)
+  // nota(): un tono con ataque rápido y caída, opcionalmente con armónico para que suene a metal
+  function nota(salida, t0, f, dur, tipo, fuerza, armonico, fHasta) {
+    [1].concat(armonico ? [armonico] : []).forEach(function (arm, j) {
+      var o = ctx.createOscillator(), g = ctx.createGain();
+      o.type = j ? 'sine' : (tipo || 'sine');
+      o.frequency.setValueAtTime(f * arm, t0);
+      if (fHasta) o.frequency.linearRampToValueAtTime(fHasta * arm, t0 + dur);
+      g.gain.setValueAtTime(0.0001, t0);
+      g.gain.exponentialRampToValueAtTime((fuerza || 0.8) * (j ? 0.3 : 1), t0 + 0.01);
+      g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+      o.connect(g); g.connect(salida); o.start(t0); o.stop(t0 + dur + 0.02);
+    });
+  }
+  var SONIDOS = {
+    campana: {nombre: 'Campana', tocar: function (s, t) {          // 3 notas, 3 veces
+      for (var r = 0; r < 3; r++) [988, 1319, 1760].forEach(function (f, i) { nota(s, t + r * 0.9 + i * 0.17, f, 0.6, 'triangle', 0.9, 2.01); });
+      return 2.7; }},
+    timbre: {nombre: 'Timbre (ding-dong)', tocar: function (s, t) {
+      for (var r = 0; r < 2; r++) { nota(s, t + r * 1.4, 1319, 0.9, 'sine', 0.9, 3.01); nota(s, t + r * 1.4 + 0.45, 1047, 1.1, 'sine', 0.9, 3.01); }
+      return 2.8; }},
+    alarma: {nombre: 'Alarma (pip pip pip)', tocar: function (s, t) {
+      for (var r = 0; r < 3; r++) for (var i = 0; i < 4; i++) nota(s, t + r * 0.9 + i * 0.13, 2093, 0.09, 'square', 0.35);
+      return 2.7; }},
+    sirena: {nombre: 'Sirena', tocar: function (s, t) {
+      for (var r = 0; r < 3; r++) { nota(s, t + r * 0.9, 650, 0.45, 'sawtooth', 0.3, 0, 1300); nota(s, t + r * 0.9 + 0.45, 1300, 0.45, 'sawtooth', 0.3, 0, 650); }
+      return 2.7; }},
+    telefono: {nombre: 'Teléfono', tocar: function (s, t) {        // ring ring
+      for (var r = 0; r < 2; r++) for (var i = 0; i < 16; i++) nota(s, t + r * 1.2 + i * 0.05, i % 2 ? 1400 : 1700, 0.05, 'square', 0.25);
+      return 2.0; }},
+    gong: {nombre: 'Gong', tocar: function (s, t) {
+      nota(s, t, 196, 3.2, 'sine', 1, 2.76); nota(s, t, 294, 2.6, 'sine', 0.5, 2.1);
+      return 3.2; }},
+    xilofon: {nombre: 'Xilofón (escala)', tocar: function (s, t) {
+      for (var r = 0; r < 2; r++) [1047, 1175, 1319, 1568, 1760, 2093].forEach(function (f, i) { nota(s, t + r * 1.1 + i * 0.12, f, 0.35, 'sine', 0.8, 4); });
+      return 2.2; }}
+  };
+  function campanada(cual) {
     if (!ctx) return;
     if (ctx.state === 'suspended') ctx.resume();
-    var vol = $('vol').value / 100, t = ctx.currentTime + 0.05;
-    var maestro = ctx.createGain(); maestro.gain.value = vol;
+    var sn = SONIDOS[cual || $('sonido').value] || SONIDOS.campana;
+    var maestro = ctx.createGain(); maestro.gain.value = $('vol').value / 100;
     var comp = ctx.createDynamicsCompressor(); maestro.connect(comp); comp.connect(ctx.destination);
-    for (var r = 0; r < 3; r++) {
-      [988, 1319, 1760].forEach(function (f, i) {
-        var t0 = t + r * 0.9 + i * 0.17;
-        [1, 2.01].forEach(function (arm, j) {            // la nota y un armónico, para que suene a campana
-          var o = ctx.createOscillator(), g = ctx.createGain();
-          o.type = j ? 'sine' : 'triangle'; o.frequency.value = f * arm;
-          g.gain.setValueAtTime(0.0001, t0);
-          g.gain.exponentialRampToValueAtTime(j ? 0.25 : 0.9, t0 + 0.01);
-          g.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.6);
-          o.connect(g); g.connect(maestro); o.start(t0); o.stop(t0 + 0.62);
-        });
-      });
-    }
+    var dur = sn.tocar(maestro, ctx.currentTime + 0.05);
     var c = $('campana'); c.classList.remove('suena'); void c.offsetWidth; c.classList.add('suena');
-    return 3 * 0.9;
+    return dur;
   }
+  Object.keys(SONIDOS).forEach(function (k) {
+    var o = document.createElement('option'); o.value = k; o.textContent = SONIDOS[k].nombre; $('sonido').appendChild(o);
+  });
+  $('sonido').value = SONIDOS[guardado('sonido', 'campana')] ? guardado('sonido', 'campana') : 'campana';
+  $('sonido').onchange = function () { guardar('sonido', this.value); try { audio(); ctx.resume(); } catch (e) {} campanada(); };
   function sonar() { campanada(); }
 
   function anotar(titulo, texto) {
