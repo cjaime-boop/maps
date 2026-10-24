@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Mobisond · Avisador
 // @namespace    mobisond
-// @version      2.49
+// @version      2.50
 // @description  Avisa los casos nuevos (celular, campana y grupo de Telegram), los casos Lineales sin notas de trabajo hace 25 min y los SLA a 1 hora de vencer.
 // @match        https://*.service-now.com/*
 // @grant        GM_xmlhttpRequest
@@ -46,10 +46,9 @@
     } catch (e) {}
   }
 
-  // ---------------------------------------------------------------- grupo de Telegram (opcional)
-  // Si se configura (menú "Grupo de Telegram"), cada caso nuevo se manda también al grupo, UNA sola vez aunque
-  // varias PCs tengan la bandeja abierta: antes de mandar se anota el caso en un canal ntfy compartido y se fija
-  // si otra PC ya lo anotó.
+  // ---------------------------------------------------------------- grupo de Telegram
+  // Con la contraseña del equipo, los avisos van al grupo "Dispensers Mobisond". Aunque varias PCs detecten lo
+  // mismo, sale UNA sola vez: Supabase hace de árbitro (ver unaVezAlGrupo).
   function tg(metodo, datos, ok, mal) {
     GM_xmlhttpRequest({method: 'POST', url: 'https://api.telegram.org/bot' + GM_getValue('tg_token', '') + '/' + metodo,
       headers: {'Content-Type': 'application/json'}, data: JSON.stringify(datos || {}), timeout: 15000,
@@ -116,7 +115,7 @@
     var lineaPrio = prio ? '\n\n' + colorPrio(prio) + ' <b>' + esc(prio) + '</b>' + (/^1/.test(prio) && !prueba ? ' 🔥' : '') : '';
     return titulo + lineaPrio + bloqueCaso(f.numero, d.cmdb_ci, d.short_description, f.link);
   }
-  // Manda al grupo una sola vez por "clave", aunque varias PCs lo detecten (se anota en un canal ntfy compartido).
+  // Manda al grupo una sola vez por "clave", aunque varias PCs lo detecten (Supabase decide quién lo manda).
   function unaVezAlGrupo(clave, html, responderA, chatId, alTerminar) {   // chatId: para contestar por privado (si no, al grupo)
     if (!hayGrupo()) return;
     var datos = {chat_id: chatId || GM_getValue('tg_chat'), text: html, parse_mode: 'HTML', disable_web_page_preview: true};
@@ -277,7 +276,7 @@
   });
   GM_registerMenuCommand('⚙️ Configuración', configuracion);
   GM_registerMenuCommand('🔧 Revisar bot', function () {          // diagnóstico temporal de /bandeja
-    var info = ['Versión 2.49', 'Pestaña vigilada: ' + (vigilada() ? 'SÍ' : 'NO'), 'Esta pestaña atiende avisos y bot: ' + (soyLider() ? 'SÍ' : 'NO'), 'Grupo guardado: ' + (GM_getValue('tg_chat', '') || 'ninguno'),
+    var info = ['Versión ' + (typeof GM_info !== 'undefined' ? GM_info.script.version : '?'), 'Pestaña vigilada: ' + (vigilada() ? 'SÍ' : 'NO'), 'Esta pestaña atiende avisos y bot: ' + (soyLider() ? 'SÍ' : 'NO'), 'Grupo guardado: ' + (GM_getValue('tg_chat', '') || 'ninguno'),
                 'Token: ' + (GM_getValue('tg_token', '') ? 'cargado' : 'falta'), 'Último leído: ' + GM_getValue('tg_offset', 0)];
     tg('getWebhookInfo', {}, function (w) {
       info.push('Webhook: ' + (w.url ? w.url : 'no') + (w.last_error_message ? '\nÚltimo error de Telegram: ' + w.last_error_message : '') +
@@ -297,7 +296,7 @@
   GM_registerMenuCommand('Dejar de vigilar', function () { GM_setValue('lista', ''); alert('Ya no vigilo ninguna lista.'); });
 
   // ---------------------------------------------------------------- controles al grupo de Telegram
-  // Cada 2 minutos (desde la pestaña vigilada) se consulta ServiceNow por detrás:
+  // Cada 2 minutos (desde la pestaña que atiende en cada PC) se consulta ServiceNow por detrás:
   //  1) Lineales en curso, sin pausa, sin notas de trabajo DE MOBISOND hace 25 min -> avisa UNA vez (hasta que haya otra nota).
   //  2) Lineales y GPON en curso, con el SLA NETO corriendo y a 1 hora o menos de vencer -> avisa una vez.
   //  3) Lineales y GPON en curso, cuando se les vence el SLA NETO -> avisa una vez.
@@ -435,7 +434,8 @@
           var base = Math.max(nota.t, utc(vl(r, 'work_start')), v.pausa || 0, nota.t || utc(vl(r, 'work_start')) ? 0 : v.desde);
           var min = (ahora - base) / 60000;
           if (min >= SILENCIO_MIN && min < SILENCIO_MIN + 20) {     // recién cruzó los 25 min (no avisa de golpe los viejos)
-            unaVezAlGrupo('nota:' + id + ':' + base, '⏱️ <b>' + Math.floor(min) + ' min sin notas de Mobisond</b>' +
+            var claveNota = 'nota:' + id + ':' + (nota.t || utc(vl(r, 'work_start')) || 0) + ':' + Math.floor((v.pausa || 0) / 1800000);
+            unaVezAlGrupo(claveNota, '⏱️ <b>' + Math.floor(min) + ' min sin notas de Mobisond</b>' +
                           cuerpo(r, '📝 ' + (nota.t ? 'Última: ' + esc(nota.quien || 'sin nombre') + (nota.foto ? ' (foto)' : '') + ' · ' + hhmm(nota.t) : 'Todavía sin notas')));
           }
         });
@@ -468,7 +468,8 @@
   }
 
   // ---------------------------------------------------------------- comandos del grupo (/bandeja)
-  // La pestaña vigilada lee los mensajes del grupo cada 5 s. Si varias PCs lo leen, contesta una sola.
+  // La pestaña que atiende en cada PC toma los pedidos cada 5 s (de Supabase, o de Telegram si no hay Supabase).
+  // Si varias PCs están prendidas, cada pedido lo contesta una sola.
   function woDe(r) { return dv(r, 'parent') || dv(r, 'number').replace(/^WOT/i, 'WO'); }
   function textoBandeja() {
     var q = 'active=true^assignment_group.nameSTARTSWITH' + GRUPOS.lineales + '^ORassignment_group.nameSTARTSWITH' + GRUPOS.gpon;
