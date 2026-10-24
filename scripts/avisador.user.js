@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Mobisond · Aviso de casos nuevos (ServiceNow → celular)
 // @namespace    mobisond
-// @version      2.5
+// @version      2.6
 // @description  Cuando entra un caso nuevo en la lista que vigilás de ServiceNow, te llega una notificación al celular (app ntfy) y a la PC. (Alexa va en otro script.)
 // @match        https://*.service-now.com/*
 // @grant        GM_xmlhttpRequest
@@ -11,6 +11,7 @@
 // @grant        GM_notification
 // @grant        GM_openInTab
 // @connect      ntfy.sh
+// @connect      api.telegram.org
 // @updateURL    https://cjaime-boop.github.io/maps/scripts/avisador.user.js
 // @downloadURL  https://cjaime-boop.github.io/maps/scripts/avisador.user.js
 // @run-at       document-idle
@@ -41,6 +42,59 @@
       GM_notification({title: titulo, text: texto, timeout: 0, silent: false,
         onclick: function () { if (link) window.open(link, '_blank'); else window.focus(); }});
     } catch (e) {}
+  }
+
+  // ---------------------------------------------------------------- grupo de Telegram (opcional)
+  // Si se configura (menú "Grupo de Telegram"), cada caso nuevo se manda también al grupo, UNA sola vez aunque
+  // varias PCs tengan la bandeja abierta: antes de mandar se anota el caso en un canal ntfy compartido y se fija
+  // si otra PC ya lo anotó.
+  function tg(metodo, datos, ok, mal) {
+    GM_xmlhttpRequest({method: 'POST', url: 'https://api.telegram.org/bot' + GM_getValue('tg_token', '') + '/' + metodo,
+      headers: {'Content-Type': 'application/json'}, data: JSON.stringify(datos || {}), timeout: 15000,
+      onload: function (r) { var j = {}; try { j = JSON.parse(r.responseText); } catch (e) {}
+        if (j.ok) { if (ok) ok(j.result); } else if (mal) mal(j.description || ('error ' + r.status)); },
+      onerror: function () { if (mal) mal('sin conexión'); }});
+  }
+  function hayGrupo() { return GM_getValue('tg_token', '') && GM_getValue('tg_chat', ''); }
+  function canalGrupo() {          // canal ntfy compartido por todas las PCs del mismo grupo (para no repetir)
+    var t = String(GM_getValue('tg_chat', '')) + GM_getValue('tg_token', '').split(':')[0], h = 0;
+    for (var i = 0; i < t.length; i++) h = (h * 31 + t.charCodeAt(i)) >>> 0;
+    return 'https://ntfy.sh/mobisond-grupo-' + h.toString(36);
+  }
+  function esc(t) { return String(t).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
+  function mensajeGrupo(f, prueba) {
+    var d = f.datos;
+    var linea = [d.priority, d.cmdb_ci].filter(Boolean).join(' · ');
+    return '🔔 <b>' + (prueba ? 'Prueba · ' : 'Entró ') + esc(f.numero) + '</b>' + (linea ? '\n' + esc(linea) : '') +
+      (d.short_description ? '\n' + esc(d.short_description) : '') + '\n<a href="' + esc(f.link) + '">Abrir en ServiceNow</a>';
+  }
+  function alGrupo(f) {
+    if (!hayGrupo()) return;
+    var canalG = canalGrupo();
+    GM_xmlhttpRequest({method: 'GET', url: canalG + '/json?poll=1&since=6h', timeout: 10000,
+      onload: function (r) {
+        if (r.responseText.indexOf('"message":"' + f.id + '"') >= 0) return;      // otra PC ya lo mandó
+        GM_xmlhttpRequest({method: 'POST', url: canalG, data: f.id, timeout: 10000});
+        tg('sendMessage', {chat_id: GM_getValue('tg_chat'), text: mensajeGrupo(f), parse_mode: 'HTML', disable_web_page_preview: true});
+      },
+      onerror: function () { tg('sendMessage', {chat_id: GM_getValue('tg_chat'), text: mensajeGrupo(f), parse_mode: 'HTML', disable_web_page_preview: true}); }});
+  }
+  function configurarGrupo() {
+    var tok = prompt('Grupo de Telegram\n\nPegá el token del bot (te lo da @BotFather, es algo como 123456:ABC-xyz).\n' +
+                     'Dejalo vacío y Aceptar para desactivar el grupo.', GM_getValue('tg_token', ''));
+    if (tok === null) return;
+    tok = tok.trim();
+    if (!tok) { GM_setValue('tg_token', ''); GM_setValue('tg_chat', ''); alert('Grupo de Telegram desactivado.'); return; }
+    GM_setValue('tg_token', tok);
+    alert('Ahora, en el grupo de Telegram (con el bot ya agregado), mandá el mensaje:\n\n/avisos\n\nCuando lo mandes, tocá Aceptar.');
+    tg('getUpdates', {allowed_updates: ['message']}, function (ups) {
+      var chat = null;
+      ups.forEach(function (u) { var m = u.message; if (m && m.chat && /group/.test(m.chat.type)) chat = m.chat; });
+      if (!chat) { alert('No encontré el /avisos en ningún grupo. Fijate que el bot esté agregado al grupo y probá de nuevo.'); return; }
+      GM_setValue('tg_chat', String(chat.id));
+      tg('sendMessage', {chat_id: chat.id, text: '✅ Listo: en este grupo van a llegar los casos nuevos de ServiceNow.'});
+      alert('Listo: los casos nuevos van al grupo "' + (chat.title || chat.id) + '".\n\nLas otras PCs del equipo pueden hacer lo mismo con el mismo token: el caso llega una sola vez.');
+    }, function (e) { alert('Telegram no aceptó el token: ' + e); });
   }
 
   // ---------------------------------------------------------------- qué lista se vigila
@@ -103,7 +157,7 @@
     Object.keys(vistos).forEach(function (id) { if (ahora - vistos[id] > OLVIDO_MS) delete vistos[id]; });
     var nuevos = fs.filter(function (f) { return !vistos[f.id]; });
     if (base && nuevos.length) {
-      nuevos.slice(0, 5).forEach(function (f) { aviso('Entró ' + f.numero, texto(f), f.link, 5); });
+      nuevos.slice(0, 5).forEach(function (f) { aviso('Entró ' + f.numero, texto(f), f.link, 5); alGrupo(f); });
       if (nuevos.length > 5) aviso('Entraron ' + nuevos.length + ' casos', 'Y ' + (nuevos.length - 5) + ' más en la lista.', location.href, 4);
     }
     fs.forEach(function (f) { vistos[f.id] = ahora; });
@@ -159,6 +213,13 @@
       alert('NO: esta pestaña no es la vigilada.' + (tit ? '\nVigilo: ' + tit : '') +
             '\n(Tabla ' + k.split('|')[0] + (claveLista() && claveLista().split('|')[0] === k.split('|')[0] ? ', misma tabla pero otro filtro' : '') + ')');
     }
+  });
+  GM_registerMenuCommand('Grupo de Telegram', configurarGrupo);
+  GM_registerMenuCommand('Mandar prueba al grupo', function () {
+    if (!hayGrupo()) { alert('Primero configurá el grupo (menú "Grupo de Telegram").'); return; }
+    var f = (filas() || [])[0] || {numero: 'WO0000000', datos: {short_description: 'Caso de prueba'}, link: location.href};
+    tg('sendMessage', {chat_id: GM_getValue('tg_chat'), text: mensajeGrupo(f, true), parse_mode: 'HTML', disable_web_page_preview: true},
+       function () { alert('Prueba mandada al grupo.'); }, function (e) { alert('No se pudo: ' + e); });
   });
   GM_registerMenuCommand('Dejar de vigilar', function () { GM_setValue('lista', ''); alert('Ya no vigilo ninguna lista.'); });
 
