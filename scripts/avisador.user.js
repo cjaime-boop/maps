@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Mobisond · Avisador
 // @namespace    mobisond
-// @version      2.46
+// @version      2.47
 // @description  Avisa los casos nuevos (celular, campana y grupo de Telegram), los casos Lineales sin notas de trabajo hace 25 min y los SLA a 1 hora de vencer.
 // @match        https://*.service-now.com/*
 // @grant        GM_xmlhttpRequest
@@ -74,15 +74,22 @@
     }).then(function (k) { return sub.decrypt({name: 'AES-GCM', iv: b64(p[1])}, k, b64(p[2])); })
       .then(function (b) { return new TextDecoder().decode(b); });
   }
-  function pedirClave(forzar) {
-    var c = prompt('Contraseña del equipo Mobisond\n\nCon esto se activan los avisos al grupo de Telegram. ' +
+  function pedirClave(intento, alTerminar) {      // intento: 1, 2, 3 (si se equivoca la vuelve a pedir)
+    intento = intento || 1;
+    var fin = alTerminar || function () {};
+    var c = prompt((intento > 1 ? 'Contraseña incorrecta, probá de nuevo.\n\n' : '') +
+                   'Contraseña del equipo Mobisond\n\nCon esto se activan los avisos al grupo de Telegram y el bot. ' +
                    'Se pide una sola vez (si no la sabés, pedísela al Chino).', '');
-    if (!c) return;
+    if (!c) { fin(false); return; }
     abrirToken(c.trim()).then(function (tok) {
       GM_setValue('tg_token', tok);
       if (TG_CHAT_EQUIPO && !GM_getValue('tg_chat', '')) GM_setValue('tg_chat', TG_CHAT_EQUIPO);
       alert('Listo: los casos nuevos también van al grupo de Telegram.');
-    }, function () { alert('Contraseña incorrecta. Probá de nuevo desde el menú "Contraseña del equipo".'); });
+      fin(true);
+    }, function () {
+      if (intento < 3) pedirClave(intento + 1, fin);
+      else { alert('Contraseña incorrecta. Probá de nuevo desde ⚙️ Configuración → Contraseña del equipo.'); fin(false); }
+    });
   }
   if (!GM_getValue('tg_token', '') && !GM_getValue('clave_pedida', false)) {
     GM_setValue('clave_pedida', true);
@@ -237,9 +244,10 @@
     GM_setValue('base', false);
     revisar();                         // los casos que ya están no avisan; solo los que entren desde ahora
     var n = (filas() || []).length;
-    alert('Listo: vigilo esta lista (' + n + ' casos ahora). Te aviso al celular cuando entre uno nuevo.\n\n' +
-          'Ahora se abre la campana: tocá "Activar campana" para que también suene en la PC.');
-    abrirCampana();
+    alert('Listo: vigilo esta lista (' + n + ' casos ahora). Te aviso cuando entre uno nuevo.\n\nAhora se abre la campana de la PC.');
+    // si todavía no cargó la contraseña del equipo, se pide ahora (sin ella no hay grupo de Telegram ni bot)
+    if (!GM_getValue('tg_token', '')) pedirClave(1, function () { abrirCampana(); });
+    else abrirCampana();
   });
   function cambiarCanal() {
     var nuevo = prompt('Este es tu canal. En la app ntfy del celular tocá "+" y suscribite a este nombre ' +
@@ -269,7 +277,7 @@
   });
   GM_registerMenuCommand('⚙️ Configuración', configuracion);
   GM_registerMenuCommand('🔧 Revisar bot', function () {          // diagnóstico temporal de /bandeja
-    var info = ['Versión 2.46', 'Pestaña vigilada: ' + (vigilada() ? 'SÍ' : 'NO'), 'Grupo guardado: ' + (GM_getValue('tg_chat', '') || 'ninguno'),
+    var info = ['Versión 2.47', 'Pestaña vigilada: ' + (vigilada() ? 'SÍ' : 'NO'), 'Grupo guardado: ' + (GM_getValue('tg_chat', '') || 'ninguno'),
                 'Token: ' + (GM_getValue('tg_token', '') ? 'cargado' : 'falta'), 'Último leído: ' + GM_getValue('tg_offset', 0)];
     tg('getWebhookInfo', {}, function (w) {
       info.push('Webhook: ' + (w.url ? w.url : 'no') + (w.last_error_message ? '\nÚltimo error de Telegram: ' + w.last_error_message : '') +
@@ -697,7 +705,7 @@
       var a = e.target.closest('[data-a]'); if (e.target === p) a = {dataset: {a: 'x'}};
       if (!a) return;
       p.remove();
-      ({canal: cambiarCanal, clave: function () { pedirClave(true); }, grupo: configurarGrupo, campana: abrirCampana, x: function () {}})[a.dataset.a]();
+      ({canal: cambiarCanal, clave: function () { pedirClave(1); }, grupo: configurarGrupo, campana: abrirCampana, x: function () {}})[a.dataset.a]();
     };
     document.body.appendChild(p);
   }
