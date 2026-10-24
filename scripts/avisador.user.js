@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Mobisond · Aviso de casos nuevos (ServiceNow → celular)
 // @namespace    mobisond
-// @version      2.6
+// @version      2.7
 // @description  Cuando entra un caso nuevo en la lista que vigilás de ServiceNow, te llega una notificación al celular (app ntfy) y a la PC. (Alexa va en otro script.)
 // @match        https://*.service-now.com/*
 // @grant        GM_xmlhttpRequest
@@ -55,6 +55,35 @@
         if (j.ok) { if (ok) ok(j.result); } else if (mal) mal(j.description || ('error ' + r.status)); },
       onerror: function () { if (mal) mal('sin conexión'); }});
   }
+  // Token del bot del equipo, cerrado con la contraseña del equipo (AES). Sin la contraseña no sirve.
+  var TG_CERRADO = 'R76sJdArgJd6X6GlESwFVg==.79LONunnZbdiJjqj.fnQwbbIKSKPKaV2VGj5utV/Wt0x73+pJI/94r+sRFiMgazicfSbOH1NzOUVg4SZiEZa6WuJAKmNPDPAiob8=';
+  var TG_CHAT_EQUIPO = '';            // número del grupo "Dispensers Mobisond" (se completa cuando lo tengamos)
+  function b64(t) { return Uint8Array.from(atob(t), function (ch) { return ch.charCodeAt(0); }); }
+  function abrirToken(clave) {
+    var p = TG_CERRADO.split('.'), sub = crypto.subtle;
+    return sub.importKey('raw', new TextEncoder().encode(clave), 'PBKDF2', false, ['deriveKey']).then(function (k) {
+      return sub.deriveKey({name: 'PBKDF2', salt: b64(p[0]), iterations: 150000, hash: 'SHA-256'}, k,
+                           {name: 'AES-GCM', length: 256}, false, ['decrypt']);
+    }).then(function (k) { return sub.decrypt({name: 'AES-GCM', iv: b64(p[1])}, k, b64(p[2])); })
+      .then(function (b) { return new TextDecoder().decode(b); });
+  }
+  function pedirClave(forzar) {
+    var c = prompt('Contraseña del equipo Mobisond\n\nCon esto se activan los avisos al grupo de Telegram. ' +
+                   'Se pide una sola vez (si no la sabés, pedísela al Chino).', '');
+    if (!c) return;
+    abrirToken(c.trim()).then(function (tok) {
+      GM_setValue('tg_token', tok);
+      if (TG_CHAT_EQUIPO && !GM_getValue('tg_chat', '')) GM_setValue('tg_chat', TG_CHAT_EQUIPO);
+      alert('Listo: los casos nuevos también van al grupo de Telegram.');
+    }, function () { alert('Contraseña incorrecta. Probá de nuevo desde el menú "Contraseña del equipo".'); });
+  }
+  if (!GM_getValue('tg_token', '') && !GM_getValue('clave_pedida', false)) {
+    GM_setValue('clave_pedida', true);
+    setTimeout(pedirClave, 1500);
+  } else if (GM_getValue('tg_token', '') && !GM_getValue('tg_chat', '') && TG_CHAT_EQUIPO) {
+    GM_setValue('tg_chat', TG_CHAT_EQUIPO);
+  }
+
   function hayGrupo() { return GM_getValue('tg_token', '') && GM_getValue('tg_chat', ''); }
   function canalGrupo() {          // canal ntfy compartido por todas las PCs del mismo grupo (para no repetir)
     var t = String(GM_getValue('tg_chat', '')) + GM_getValue('tg_token', '').split(':')[0], h = 0;
@@ -213,6 +242,11 @@
       alert('NO: esta pestaña no es la vigilada.' + (tit ? '\nVigilo: ' + tit : '') +
             '\n(Tabla ' + k.split('|')[0] + (claveLista() && claveLista().split('|')[0] === k.split('|')[0] ? ', misma tabla pero otro filtro' : '') + ')');
     }
+  });
+  GM_registerMenuCommand('Contraseña del equipo', function () { pedirClave(true); });
+  GM_registerMenuCommand('Datos del grupo de Telegram', function () {
+    alert(hayGrupo() ? 'Grupo de Telegram activo.\nNúmero del grupo: ' + GM_getValue('tg_chat') :
+          'Grupo de Telegram sin configurar.' + (GM_getValue('tg_token', '') ? ' (Falta el grupo: usá "Grupo de Telegram".)' : ''));
   });
   GM_registerMenuCommand('Grupo de Telegram', configurarGrupo);
   GM_registerMenuCommand('Mandar prueba al grupo', function () {
