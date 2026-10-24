@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Mobisond · Avisador
 // @namespace    mobisond
-// @version      2.23
+// @version      2.24
 // @description  Avisa los casos nuevos (celular, campana y grupo de Telegram), los casos Lineales sin notas de trabajo hace 25 min y los SLA a 1 hora de vencer.
 // @match        https://*.service-now.com/*
 // @grant        GM_xmlhttpRequest
@@ -99,10 +99,12 @@
       (d.short_description ? '\n' + esc(d.short_description) : '') + '\n<a href="' + esc(f.link) + '">Abrir en ServiceNow</a>';
   }
   // Manda al grupo una sola vez por "clave", aunque varias PCs lo detecten (se anota en un canal ntfy compartido).
-  function unaVezAlGrupo(clave, html) {
+  function unaVezAlGrupo(clave, html, responderA) {
     if (!hayGrupo()) return;
     var canalG = canalGrupo();
-    var mandar = function () { tg('sendMessage', {chat_id: GM_getValue('tg_chat'), text: html, parse_mode: 'HTML', disable_web_page_preview: true}); };
+    var datos = {chat_id: GM_getValue('tg_chat'), text: html, parse_mode: 'HTML', disable_web_page_preview: true};
+    if (responderA) datos.reply_to_message_id = responderA;
+    var mandar = function () { tg('sendMessage', datos); };
     GM_xmlhttpRequest({method: 'GET', url: canalG + '/json?poll=1&since=12h', timeout: 10000,
       onload: function (r) {
         if (r.responseText.indexOf('"message":"' + clave + '"') >= 0) return;      // otra PC ya lo mandó
@@ -408,6 +410,59 @@
     }, function (e) { console.log('[Mobisond] controles: ' + e.message); });
   }
 
+  // ---------------------------------------------------------------- comandos del grupo (/bandeja)
+  // La pestaña vigilada lee los mensajes del grupo cada 5 s. Si varias PCs lo leen, contesta una sola.
+  function woDe(r) { return dv(r, 'parent') || dv(r, 'number').replace(/^WOT/i, 'WO'); }
+  function textoBandeja() {
+    var q = 'active=true^assignment_group.nameSTARTSWITH' + GRUPOS.lineales + '^ORassignment_group.nameSTARTSWITH' + GRUPOS.gpon;
+    return api('wm_task', q, 'sys_id,number,parent,state,substate,u_pause_reason,assignment_group,assigned_to,cmdb_ci').then(function (casos) {
+      var out = ['📋 <b>Bandeja</b> · ' + hhmm(Date.now())];
+      ['Lineales', 'GPON'].forEach(function (pr) {
+        var cs = casos.filter(function (r) { return proyecto(r) === pr; });
+        var curso = [], verif = [], pausa = [], sin = [];
+        cs.forEach(function (r) {
+          var motivo = dv(r, 'u_pause_reason').trim();
+          if (!enCurso(r)) sin.push(r);
+          else if (pausado(r) && /verificaci/i.test(motivo)) verif.push(r);
+          else if (pausado(r)) pausa.push(r);
+          else curso.push(r);
+        });
+        var fila = function (r, extra) {
+          return '   ' + esc(woDe(r)) + ' · ' + esc(dv(r, 'cmdb_ci') || 'sin CI') + (extra ? ' · ' + esc(extra) : '');
+        };
+        out.push('', '<b>' + pr + '</b> · ' + cs.length + (cs.length === 1 ? ' abierto' : ' abiertos'));
+        if (!cs.length) return;
+        if (curso.length) { out.push('▶️ En curso (' + curso.length + ')'); curso.forEach(function (r) { out.push(fila(r, dv(r, 'assigned_to'))); }); }
+        if (pausa.length) { out.push('⏸️ Pausados (' + pausa.length + ')'); pausa.forEach(function (r) { out.push(fila(r, dv(r, 'u_pause_reason'))); }); }
+        if (verif.length) { out.push('🔍 Verificación del cliente (' + verif.length + ')'); verif.forEach(function (r) { out.push(fila(r)); }); }
+        out.push('⏳ Sin atender (' + sin.length + ')');
+        sin.forEach(function (r) { out.push(fila(r, dv(r, 'state'))); });
+      });
+      return out.join('\n');
+    });
+  }
+  var leyendo = false;
+  function comandos() {
+    if (leyendo || !hayGrupo() || !vigilada()) return;
+    if (GM_getValue('tg_cmds', 0) < 1) {     // menú de comandos del bot (aparece al escribir "/" en el grupo)
+      tg('setMyCommands', {commands: [{command: 'bandeja', description: 'Casos abiertos de Lineales y GPON'}]}, function () { GM_setValue('tg_cmds', 1); });
+    }
+    leyendo = true;
+    tg('getUpdates', {offset: GM_getValue('tg_offset', 0), timeout: 0, allowed_updates: ['message']}, function (ups) {
+      leyendo = false;
+      ups.forEach(function (u) {
+        GM_setValue('tg_offset', u.update_id + 1);
+        var m = u.message;
+        if (!m || String(m.chat.id) !== String(GM_getValue('tg_chat')) || !m.text) return;
+        var cmd = m.text.trim().split(/[\s@]/)[0].toLowerCase();
+        if (cmd === '/bandeja') {
+          textoBandeja().then(function (t) { unaVezAlGrupo('cmd:' + u.update_id, t, m.message_id); },
+            function (e) { unaVezAlGrupo('cmd:' + u.update_id, 'No pude leer la bandeja de ServiceNow (' + esc(e.message) + ').', m.message_id); });
+        }
+      });
+    }, function () { leyendo = false; });
+  }
+
   // ---------------------------------------------------------------- panel de configuración
   function configuracion() {
     var v = document.getElementById('mbs-conf'); if (v) v.remove();
@@ -439,6 +494,8 @@
   revisar();
   setTimeout(controles, 4000);
   setInterval(controles, 30000);
+  setTimeout(comandos, 2000);
+  setInterval(comandos, 5000);
   var espera = null;
   new MutationObserver(function () {
     clearTimeout(espera);
