@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Mobisond · Aviso de casos nuevos (ServiceNow → celular)
 // @namespace    mobisond
-// @version      2.13
+// @version      2.14
 // @description  Cuando entra un caso nuevo en la lista que vigilás de ServiceNow, te llega una notificación al celular (app ntfy) y a la PC. (Alexa va en otro script.)
 // @match        https://*.service-now.com/*
 // @grant        GM_xmlhttpRequest
@@ -259,9 +259,9 @@
       [['canal', '📱 Mi canal del celular', canal()],
        ['clave', '🔑 Contraseña del equipo', GM_getValue('tg_token', '') ? 'cargada' : 'falta cargar'],
        ['grupo', '💬 Grupo de Telegram', grupo],
-       ['campana', '🔔 Abrir la campana de la PC', 'si la cerraste']].map(function (o) {
+       ['campana', '🔔 Abrir la campana de la PC', '']].map(function (o) {
         return '<div data-a="' + o[0] + '" style="padding:11px 14px;border-bottom:1px solid #f3f4f6;cursor:pointer">' + o[1] +
-               '<div style="color:#6b7280;font-size:12px;margin-top:2px">' + o[2] + '</div></div>';
+               (o[2] ? '<div style="color:#6b7280;font-size:12px;margin-top:2px">' + o[2] + '</div>' : '') + '</div>';
       }).join('') + '</div>';
     p.onclick = function (e) {
       var a = e.target.closest('[data-a]'); if (e.target === p) a = {dataset: {a: 'x'}};
