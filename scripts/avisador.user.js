@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Mobisond · Avisador
 // @namespace    mobisond
-// @version      2.22
+// @version      2.23
 // @description  Avisa los casos nuevos (celular, campana y grupo de Telegram), los casos Lineales sin notas de trabajo hace 25 min y los SLA a 1 hora de vencer.
 // @match        https://*.service-now.com/*
 // @grant        GM_xmlhttpRequest
@@ -393,7 +393,7 @@
       // 2) SLA a 1 hora de vencer (Lineales y GPON)
       var porId = {};
       casos.forEach(function (r) { porId[vl(r, 'sys_id')] = r; if (vl(r, 'parent')) porId[vl(r, 'parent')] = r; });
-      api('task_sla', 'active=true^has_breached=false^sla.nameLIKENETO^taskIN' + Object.keys(porId).join(','), 'sys_id,task,sla,stage,planned_end_time,original_breach_time')
+      api('task_sla', 'active=true^has_breached=false^taskIN' + Object.keys(porId).join(','), 'sys_id,task,sla,stage,planned_end_time,original_breach_time')
         .then(function (slas) {
           slas.forEach(function (s) {
             if (/paus/i.test(vl(s, 'stage') + dv(s, 'stage'))) return;

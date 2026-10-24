@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Mobisond · Resumen de turno (WhatsApp)
 // @namespace    mobisond
-// @version      1.6
+// @version      1.7
 // @description  Arma el mensaje de fin de turno (Lineales y GPON) con los números del día, listo para pegar en WhatsApp.
 // @match        https://*.service-now.com/*
 // @grant        GM_registerMenuCommand
@@ -89,7 +89,7 @@
         var p = val(r, 'parent'); if (p) { ids.push(p); dePadre[p] = dv(r, 'number'); }
       });
       if (!ids.length) return {casos: casos, vencidos: {}};
-      var qs = 'taskIN' + ids.join(',') + '^has_breached=true^sla.nameLIKENETO';   // solo el SLA NETO
+      var qs = 'taskIN' + ids.join(',') + '^has_breached=true';   // el NETO se filtra abajo, por nombre
       return api('task_sla', qs, 'task,sla,has_breached,planned_end_time,original_breach_time').then(function (slas) {
         var porId = {};
         casos.forEach(function (r) { porId[val(r, 'sys_id')] = dv(r, 'number'); });
