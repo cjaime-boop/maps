@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Mobisond · Avisador
 // @namespace    mobisond
-// @version      2.24
+// @version      2.25
 // @description  Avisa los casos nuevos (celular, campana y grupo de Telegram), los casos Lineales sin notas de trabajo hace 25 min y los SLA a 1 hora de vencer.
 // @match        https://*.service-now.com/*
 // @grant        GM_xmlhttpRequest
@@ -53,8 +53,13 @@
     GM_xmlhttpRequest({method: 'POST', url: 'https://api.telegram.org/bot' + GM_getValue('tg_token', '') + '/' + metodo,
       headers: {'Content-Type': 'application/json'}, data: JSON.stringify(datos || {}), timeout: 15000,
       onload: function (r) { var j = {}; try { j = JSON.parse(r.responseText); } catch (e) {}
-        if (j.ok) { if (ok) ok(j.result); } else if (mal) mal(j.description || ('error ' + r.status)); },
-      onerror: function () { if (mal) mal('sin conexión'); }});
+        if (j.ok) { if (ok) ok(j.result); return; }
+        // si el grupo pasó a "supergrupo", Telegram le cambia el número: se actualiza solo
+        if (j.parameters && j.parameters.migrate_to_chat_id) GM_setValue('tg_chat', String(j.parameters.migrate_to_chat_id));
+        console.log('[Mobisond] Telegram ' + metodo + ': ' + (j.description || r.status));
+        if (mal) mal(j.description || ('error ' + r.status)); },
+      ontimeout: function () { console.log('[Mobisond] Telegram ' + metodo + ': tardó demasiado'); if (mal) mal('tardó demasiado'); },
+      onerror: function () { console.log('[Mobisond] Telegram ' + metodo + ': sin conexión'); if (mal) mal('sin conexión'); }});
   }
   // Token del bot del equipo, cerrado con la contraseña del equipo (AES). Sin la contraseña no sirve.
   var TG_CERRADO = 'R76sJdArgJd6X6GlESwFVg==.79LONunnZbdiJjqj.fnQwbbIKSKPKaV2VGj5utV/Wt0x73+pJI/94r+sRFiMgazicfSbOH1NzOUVg4SZiEZa6WuJAKmNPDPAiob8=';
@@ -111,7 +116,7 @@
         GM_xmlhttpRequest({method: 'POST', url: canalG, data: clave, timeout: 10000});
         mandar();
       },
-      onerror: mandar});
+      onerror: mandar, ontimeout: mandar});
   }
   function alGrupo(f) { unaVezAlGrupo(f.id, mensajeGrupo(f)); }
   function configurarGrupo() {
@@ -453,11 +458,18 @@
       ups.forEach(function (u) {
         GM_setValue('tg_offset', u.update_id + 1);
         var m = u.message;
-        if (!m || String(m.chat.id) !== String(GM_getValue('tg_chat')) || !m.text) return;
+        if (!m || !m.text || !m.chat) return;
+        if (m.migrate_to_chat_id) { GM_setValue('tg_chat', String(m.migrate_to_chat_id)); return; }
+        if (String(m.chat.id) !== String(GM_getValue('tg_chat'))) {
+          console.log('[Mobisond] /comando de otro chat (' + m.chat.id + ', "' + (m.chat.title || '') + '"); el grupo guardado es ' + GM_getValue('tg_chat'));
+          if (!/group/.test(m.chat.type)) return;
+          GM_setValue('tg_chat', String(m.chat.id));          // el bot está en un solo grupo: si cambió el número, se toma el nuevo
+        }
         var cmd = m.text.trim().split(/[\s@]/)[0].toLowerCase();
+        console.log('[Mobisond] comando del grupo: ' + cmd);
         if (cmd === '/bandeja') {
           textoBandeja().then(function (t) { unaVezAlGrupo('cmd:' + u.update_id, t, m.message_id); },
-            function (e) { unaVezAlGrupo('cmd:' + u.update_id, 'No pude leer la bandeja de ServiceNow (' + esc(e.message) + ').', m.message_id); });
+            function (e) { console.log('[Mobisond] /bandeja: ' + e.message); unaVezAlGrupo('cmd:' + u.update_id, 'No pude leer la bandeja de ServiceNow (' + esc(e.message) + ').', m.message_id); });
         }
       });
     }, function () { leyendo = false; });
