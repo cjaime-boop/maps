@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Mobisond · Aviso de casos nuevos (ServiceNow → celular)
 // @namespace    mobisond
-// @version      2.15
+// @version      2.16
 // @description  Cuando entra un caso nuevo en la lista que vigilás de ServiceNow, te llega una notificación al celular (app ntfy) y a la PC. (Alexa va en otro script.)
 // @match        https://*.service-now.com/*
 // @grant        GM_xmlhttpRequest
@@ -292,21 +292,34 @@
       '\nAsignado: ' + esc(dv(r, 'assigned_to') || 'sin asignar') + ' · <a href="' + esc(linkCaso(r)) + '">Abrir en ServiceNow</a>';
   }
 
-  // última nota de trabajo de cada caso: primero por la tabla de notas; si no hay permiso, leyendo el campo del caso
+  // última nota de trabajo de cada caso. Las notas se cargan en la WO (padre), no en la WOT.
+  // Primero por la tabla de notas; si no hay permiso, leyendo el campo de notas de la WO. Devuelve {sys_id de la WOT: ms}.
+  function fechaJournal(t) {          // "2026-10-24 05:12:33 - Nombre (Notas de trabajo)" o "24/10/2026 05:12:33 - ..."
+    var m;
+    if ((m = /(\d{4})-(\d{2})-(\d{2}) (\d{2}):(\d{2}):(\d{2})/.exec(t))) return new Date(+m[1], m[2] - 1, +m[3], +m[4], +m[5], +m[6]).getTime();
+    if ((m = /(\d{2})[\/-](\d{2})[\/-](\d{4}) (\d{2}):(\d{2}):(\d{2})/.exec(t))) return new Date(+m[3], m[2] - 1, +m[1], +m[4], +m[5], +m[6]).getTime();
+    return 0;
+  }
   function ultimasNotas(casos) {
-    var ids = casos.map(function (r) { return vl(r, 'sys_id'); });
-    return api('sys_journal_field', 'element=work_notes^element_idIN' + ids.join(','), 'element_id,sys_created_on').then(function (ns) {
+    var dePadre = {};                 // sys_id de la WO -> [sys_id de las WOT]
+    casos.forEach(function (r) { var p = vl(r, 'parent'); if (p) (dePadre[p] = dePadre[p] || []).push(vl(r, 'sys_id')); });
+    var padres = Object.keys(dePadre);
+    var repartir = function (porPadre) {
+      var u = {};
+      Object.keys(porPadre).forEach(function (p) { (dePadre[p] || []).forEach(function (id) { u[id] = porPadre[p]; }); });
+      return u;
+    };
+    if (!padres.length) return Promise.resolve({});
+    return api('sys_journal_field', 'element=work_notes^element_idIN' + padres.join(','), 'element_id,sys_created_on').then(function (ns) {
       var u = {};
       ns.forEach(function (n) { var id = vl(n, 'element_id'), t = utc(vl(n, 'sys_created_on')); if (!u[id] || t > u[id]) u[id] = t; });
-      return u;
+      return repartir(u);
     }, function () {
-      var u = {};
-      casos.forEach(function (r) {        // "2026-10-24 05:12:33 - Nombre (Notas de trabajo)" o "24/10/2026 05:12:33 - ..."
-        var t = dv(r, 'work_notes'), m;
-        if ((m = /(\d{4})-(\d{2})-(\d{2}) (\d{2}):(\d{2}):(\d{2})/.exec(t))) u[vl(r, 'sys_id')] = new Date(+m[1], m[2] - 1, +m[3], +m[4], +m[5], +m[6]).getTime();
-        else if ((m = /(\d{2})[\/-](\d{2})[\/-](\d{4}) (\d{2}):(\d{2}):(\d{2})/.exec(t))) u[vl(r, 'sys_id')] = new Date(+m[3], m[2] - 1, +m[1], +m[4], +m[5], +m[6]).getTime();
+      return api('wm_order', 'sys_idIN' + padres.join(','), 'sys_id,work_notes').then(function (wos) {
+        var u = {};
+        wos.forEach(function (w) { var t = fechaJournal(dv(w, 'work_notes')); if (t) u[vl(w, 'sys_id')] = t; });
+        return repartir(u);
       });
-      return u;
     });
   }
 
@@ -316,7 +329,7 @@
     if (ahora - GM_getValue('ult_control', 0) < CADA_MS) return;      // la pestaña se recarga cada 30 s: se controla cada 2 min
     GM_setValue('ult_control', ahora);
     var q = 'active=true^assignment_group.nameSTARTSWITH' + GRUPOS.lineales + '^ORassignment_group.nameSTARTSWITH' + GRUPOS.gpon;
-    var campos = 'sys_id,number,parent,state,substate,u_pause_reason,assignment_group,assigned_to,cmdb_ci,short_description,work_start,work_notes';
+    var campos = 'sys_id,number,parent,state,substate,u_pause_reason,assignment_group,assigned_to,cmdb_ci,short_description,work_start';
     api('wm_task', q, campos).then(function (casos) {
       casos = casos.filter(enCurso);
       // pausas y entrada a "en curso" vistas desde esta PC (para empezar a contar los 25 min desde que se retoma)
