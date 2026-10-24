@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Mobisond · Aviso de casos por Alexa
 // @namespace    mobisond
-// @version      1.2
+// @version      1.3
 // @description  Cuando entra un caso nuevo en la lista que vigilás de ServiceNow, Alexa lo anuncia (Voice Monkey). Activalo solo donde tengas el Echo.
 // @match        https://*.service-now.com/*
 // @grant        GM_xmlhttpRequest
@@ -127,6 +127,12 @@
     var f = (filas() || [])[0];
     if (!f) { alert('No veo casos en esta lista para simular.'); return; }
     alexa(fraseAlexa(f), function (msg) { if (!/Listo/.test(msg)) alert(msg); });
+  });
+  // "Probar todo" del avisador: Alexa también habla (si está configurada en esta PC)
+  document.addEventListener('mobisond-probar-todo', function () {
+    if (!GM_getValue('vm_token', '')) return;
+    var f = (filas() || [])[0];
+    alexa(f ? fraseAlexa(f) : 'Prueba de Mobisond. Si me escuchás, Alexa anda.', function (msg) { if (!/Listo/.test(msg)) alert(msg); });
   });
   GM_registerMenuCommand('Alexa: configurar', function () {
     var t = prompt('Token de la API de Voice Monkey (lo ves en voicemonkey.io, sección API):', GM_getValue('vm_token', ''));

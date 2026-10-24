@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Mobisond · Aviso de casos nuevos (ServiceNow → celular)
 // @namespace    mobisond
-// @version      2.8
+// @version      2.9
 // @description  Cuando entra un caso nuevo en la lista que vigilás de ServiceNow, te llega una notificación al celular (app ntfy) y a la PC. (Alexa va en otro script.)
 // @match        https://*.service-now.com/*
 // @grant        GM_xmlhttpRequest
@@ -242,6 +242,15 @@
       alert('NO: esta pestaña no es la vigilada.' + (tit ? '\nVigilo: ' + tit : '') +
             '\n(Tabla ' + k.split('|')[0] + (claveLista() && claveLista().split('|')[0] === k.split('|')[0] ? ', misma tabla pero otro filtro' : '') + ')');
     }
+  });
+  GM_registerMenuCommand('🧪 Probar todo (celular, campana, grupo y Alexa)', function () {
+    var f = (filas() || [])[0] || {numero: 'WO0000000', datos: {short_description: 'Caso de prueba'}, link: location.href};
+    aviso('Entró ' + f.numero + ' (prueba)', texto(f), f.link, 4);          // celular (ntfy) + campana + notificación de la PC
+    if (hayGrupo()) tg('sendMessage', {chat_id: GM_getValue('tg_chat'), text: mensajeGrupo(f, true), parse_mode: 'HTML', disable_web_page_preview: true},
+                       null, function (e) { alert('El grupo de Telegram no anduvo: ' + e); });
+    document.dispatchEvent(new CustomEvent('mobisond-probar-todo'));       // Alexa (si tiene su script instalado)
+    alert('Prueba mandada. Fijate que llegue:\n\n• al celular (ntfy)\n• a la campana\n• al grupo de Telegram' +
+          (hayGrupo() ? '' : ' (NO configurado en esta PC)') + '\n• Alexa (si la tenés en esta PC)');
   });
   GM_registerMenuCommand('Contraseña del equipo', function () { pedirClave(true); });
   GM_registerMenuCommand('Datos del grupo de Telegram', function () {
