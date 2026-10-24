@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Scripts Mobisond</title>
+<style>
+  :root { --bg:#f4f6f8; --card:#fff; --txt:#1c2430; --mut:#6b7684; --acc:#1f6f8b; --borde:#dfe3e8; }
+  @media (prefers-color-scheme: dark) { :root { --bg:#14181d; --card:#1d232b; --txt:#e8ecf0; --mut:#9aa5b1; --acc:#4fb3d6; --borde:#2c343e; } }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--txt); font:15px/1.5 "Segoe UI", system-ui, -apple-system, Arial, sans-serif; }
+  main { max-width:620px; margin:0 auto; padding:28px 16px 40px; }
+  h1 { font-size:22px; margin:0 0 4px; }
+  .sub { color:var(--mut); margin:0 0 20px; }
+  .card { background:var(--card); border:1px solid var(--borde); border-radius:14px; padding:16px 18px; margin-bottom:12px;
+          display:flex; gap:14px; align-items:center; }
+  .card div { flex:1; }
+  .card b { font-size:16px; }
+  .card p { margin:2px 0 0; color:var(--mut); font-size:14px; }
+  a.instalar { background:var(--acc); color:#fff; text-decoration:none; font-weight:700; padding:9px 16px; border-radius:9px; white-space:nowrap; }
+  .nota { color:var(--mut); font-size:13px; margin-top:18px; }
+  @media (max-width:480px) { .card { flex-direction:column; align-items:stretch; } a.instalar { text-align:center; } }
+</style>
+</head>
+<body>
+<main>
+  <h1>Scripts Mobisond</h1>
+  <p class="sub">Para Tampermonkey en Chrome. Tocá <b>Instalar</b>, Tampermonkey abre su pantalla y confirmás. Después se actualizan solos.</p>
+
+  <div class="card"><div><b>Refrescador de pestañas</b><p>Recarga la pestaña cada 30 s (o lo que elijas) y avisa si se cierra la sesión de ServiceNow.</p></div>
+    <a class="instalar" href="refrescador.user.js">Instalar</a></div>
+  <div class="card"><div><b>Aviso de casos nuevos</b><p>Avisa al celular (app ntfy) y a la PC cuando entra un caso, y abre la campana.</p></div>
+    <a class="instalar" href="avisador.user.js">Instalar</a></div>
+  <div class="card"><div><b>Aviso por Alexa</b><p>Alexa dice el CI y la prioridad del caso nuevo. Necesita Voice Monkey.</p></div>
+    <a class="instalar" href="alexa.user.js">Instalar</a></div>
+
+  <p class="nota">Si ya tenías alguno instalado, instalalo igual desde acá: lo reemplaza y no perdés lo que tenías configurado.
+  Tampermonkey busca versiones nuevas una vez por día; para forzarlo: panel de Tampermonkey → Buscar actualizaciones.</p>
+</main>
+</body>
+</html>
