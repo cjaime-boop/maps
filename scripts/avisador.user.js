@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Mobisond · Avisador
 // @namespace    mobisond
-// @version      2.19
+// @version      2.20
 // @description  Avisa los casos nuevos (celular, campana y grupo de Telegram), los casos Lineales sin notas de trabajo hace 25 min y los SLA a 1 hora de vencer.
 // @match        https://*.service-now.com/*
 // @grant        GM_xmlhttpRequest
@@ -252,7 +252,7 @@
 
   // ---------------------------------------------------------------- controles al grupo de Telegram
   // Cada 2 minutos (desde la pestaña vigilada) se consulta ServiceNow por detrás:
-  //  1) Lineales en curso, sin pausa, sin notas de trabajo hace 25 min -> avisa UNA vez (hasta que haya otra nota).
+  //  1) Lineales en curso, sin pausa, sin notas de trabajo DE MOBISOND hace 25 min -> avisa UNA vez (hasta que haya otra nota).
   //  2) Lineales y GPON en curso, con el SLA NETO corriendo y a 1 hora o menos de vencer -> avisa una vez.
   var GRUPOS = {lineales: 'C-TL-MOBISOND', gpon: 'C-GZ1-MOBI'};
   var SILENCIO_MIN = 25, SLA_MIN = 60, CADA_MS = 2 * 60 * 1000;
@@ -300,11 +300,24 @@
     if ((m = /(\d{2})[\/-](\d{2})[\/-](\d{4}) (\d{2}):(\d{2}):(\d{2})/.exec(t))) return new Date(+m[3], m[2] - 1, +m[1], +m[4], +m[5], +m[6]).getTime();
     return 0;
   }
-  function autorJournal(t) {           // "… 05:12:33 - Diego Cabezas (Notas de trabajo)"
-    var m = /\d{2}:\d{2}:\d{2} - (.+?) \((?:Notas de trabajo|Work notes)\)/i.exec(t || '');
-    return m ? m[1].trim() : '';
+  // Notas que cuentan para los 25 min: solo las de gente de Mobisond (dispatchers y cuadrillas), no las de ATC.
+  // Los nombres van como huella (no en texto) porque esta página es pública. Para sumar a alguien: pasarle el nombre al Chino.
+  var MOBISOND = '3a43955d,3ce1b201,67b9421b,6af39483,741191b9,79418083,7ec80380,87ff9936,8d58e69,92e5413a,a1ef4970,b4a2cc16,c0c7e2b3,c49b7506,d43073f7,dfd95c3e,ed70c375,ee876403'.split(',');
+  function huella(t) { var x = 0; for (var i = 0; i < t.length; i++) x = (x * 31 + t.charCodeAt(i)) >>> 0; return x.toString(16); }
+  function normNom(t) { return String(t || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/\s+/g, ' ').trim(); }
+  function esNuestro(nombre) {         // "Juan Pérez" o "Juan Carlos Pérez" (nombre + último apellido)
+    var n = normNom(nombre); if (!n) return false;
+    var p = n.split(' ');
+    return MOBISOND.indexOf(huella(n)) >= 0 || (p.length > 2 && MOBISOND.indexOf(huella(p[0] + ' ' + p[p.length - 1])) >= 0) ||
+           (p.length > 2 && MOBISOND.indexOf(huella(p[0] + ' ' + p[p.length - 2])) >= 0);
   }
-  function ultimasNotas(casos) {
+  // todas las notas del campo, de la más nueva a la más vieja: "2026-10-24 05:12:33 - Juan Pérez (Notas de trabajo)"
+  function notasDelTexto(t) {
+    var re = /(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}|\d{2}[\/-]\d{2}[\/-]\d{4} \d{2}:\d{2}:\d{2}) - (.+?) \((?:Notas de trabajo|Work notes)\)/gi, m, out = [];
+    while ((m = re.exec(t || ''))) out.push({t: fechaJournal(m[1]), quien: m[2].trim()});
+    return out;
+  }
+  function ultimasNotas(casos) {      // devuelve {sys_id de la WOT: {t, quien}} con la última nota de Mobisond
     var dePadre = {};                 // sys_id de la WO -> [sys_id de las WOT]
     casos.forEach(function (r) { var p = vl(r, 'parent'); if (p) (dePadre[p] = dePadre[p] || []).push(vl(r, 'sys_id')); });
     var padres = Object.keys(dePadre);
@@ -313,31 +326,34 @@
       Object.keys(porPadre).forEach(function (p) { (dePadre[p] || []).forEach(function (id) { u[id] = porPadre[p]; }); });
       return u;
     };
-    if (!padres.length) return Promise.resolve({});
-    return api('sys_journal_field', 'element=work_notes^element_idIN' + padres.join(','), 'element_id,sys_created_on,sys_created_by').then(function (ns) {
-      var u = {};
-      ns.forEach(function (n) {
-        var id = vl(n, 'element_id'), t = utc(vl(n, 'sys_created_on'));
-        if (!u[id] || t > u[id].t) u[id] = {t: t, quien: vl(n, 'sys_created_by')};
-      });
-      // el autor viene como usuario (ej. dcabezas): se busca el nombre completo
-      var usuarios = Object.keys(u).map(function (k) { return u[k].quien; }).filter(Boolean);
-      if (!usuarios.length) return repartir(u);
-      return api('sys_user', 'user_nameIN' + usuarios.join(','), 'user_name,name').then(function (us) {
-        var nom = {}; us.forEach(function (x) { nom[vl(x, 'user_name')] = dv(x, 'name'); });
-        Object.keys(u).forEach(function (k) { u[k].quien = nom[u[k].quien] || u[k].quien; });
-        return repartir(u);
-      }, function () { return repartir(u); });
-    }, function () {
+    var porTexto = function () {
       return api('wm_order', 'sys_idIN' + padres.join(','), 'sys_id,work_notes').then(function (wos) {
         var u = {};
         wos.forEach(function (w) {
-          var txt = dv(w, 'work_notes'), t = fechaJournal(txt);
-          if (t) u[vl(w, 'sys_id')] = {t: t, quien: autorJournal(txt)};
+          var ns = notasDelTexto(dv(w, 'work_notes')).filter(function (n) { return n.t && esNuestro(n.quien); });
+          if (ns.length) u[vl(w, 'sys_id')] = ns.reduce(function (a, b) { return b.t > a.t ? b : a; });
         });
         return repartir(u);
       });
-    });
+    };
+    if (!padres.length) return Promise.resolve({});
+    return api('sys_journal_field', 'element=work_notes^element_idIN' + padres.join(','), 'element_id,sys_created_on,sys_created_by').then(function (ns) {
+      var usuarios = {};
+      ns.forEach(function (n) { if (vl(n, 'sys_created_by')) usuarios[vl(n, 'sys_created_by')] = 1; });
+      if (!Object.keys(usuarios).length) return {};
+      // el autor viene como usuario (ej. jperez): se busca el nombre completo para saber si es de Mobisond
+      return api('sys_user', 'user_nameIN' + Object.keys(usuarios).join(','), 'user_name,name').then(function (us) {
+        var nom = {}; us.forEach(function (x) { nom[vl(x, 'user_name')] = dv(x, 'name'); });
+        var u = {};
+        ns.forEach(function (n) {
+          var quien = nom[vl(n, 'sys_created_by')] || '';
+          if (!esNuestro(quien)) return;
+          var id = vl(n, 'element_id'), t = utc(vl(n, 'sys_created_on'));
+          if (!u[id] || t > u[id].t) u[id] = {t: t, quien: quien};
+        });
+        return repartir(u);
+      }, porTexto);                    // sin permiso para ver nombres: se leen del texto de las notas
+    }, porTexto);
   }
 
   function controles() {
