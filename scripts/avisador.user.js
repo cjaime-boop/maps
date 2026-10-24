@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Mobisond · Avisador
 // @namespace    mobisond
-// @version      2.31
+// @version      2.32
 // @description  Avisa los casos nuevos (celular, campana y grupo de Telegram), los casos Lineales sin notas de trabajo hace 25 min y los SLA a 1 hora de vencer.
 // @match        https://*.service-now.com/*
 // @grant        GM_xmlhttpRequest
@@ -269,7 +269,7 @@
   });
   GM_registerMenuCommand('⚙️ Configuración', configuracion);
   GM_registerMenuCommand('🔧 Revisar bot', function () {          // diagnóstico temporal de /bandeja
-    var info = ['Versión 2.31', 'Pestaña vigilada: ' + (vigilada() ? 'SÍ' : 'NO'), 'Grupo guardado: ' + (GM_getValue('tg_chat', '') || 'ninguno'),
+    var info = ['Versión 2.32', 'Pestaña vigilada: ' + (vigilada() ? 'SÍ' : 'NO'), 'Grupo guardado: ' + (GM_getValue('tg_chat', '') || 'ninguno'),
                 'Token: ' + (GM_getValue('tg_token', '') ? 'cargado' : 'falta'), 'Último leído: ' + GM_getValue('tg_offset', 0)];
     tg('getWebhookInfo', {}, function (w) {
       info.push('Webhook: ' + (w.url ? w.url : 'no'));
@@ -554,8 +554,10 @@
         else if (!neto) out.push('SLA neto: ' + (vl(r, 'active') === 'false' ? 'caso cerrado' : 'sin SLA activo'));
         else {
           var vence = utc(vl(neto, 'planned_end_time')), falta = (vence - ahora) / 60000;
-          if (vl(neto, 'has_breached') === 'true' || falta <= 0) out.push('SLA neto: 🔴 vencido');
-          else if (/paus/i.test(vl(neto, 'stage') + dv(neto, 'stage'))) out.push('SLA neto: ⏸️ pausado');
+          var enPausa = /paus/i.test(vl(neto, 'stage') + dv(neto, 'stage'));
+          if (vl(neto, 'has_breached') === 'true') out.push('SLA neto: 🔴 vencido' + (enPausa ? ' (ahora pausado)' : ''));
+          else if (enPausa) out.push('SLA neto: ⏸️ pausado');      // pausado: la fecha de vencimiento no sirve hasta que se retome
+          else if (falta <= 0) out.push('SLA neto: 🔴 vencido');
           else out.push('SLA neto: ' + (falta <= 60 ? '⚠️ ' : '') + 'quedan ' + duracion(falta) + ' (vence ' + hhmm(vence) + ')');
         }
         out.push('<a href="' + esc(linkCaso(r)) + '">Abrir en ServiceNow</a>');
