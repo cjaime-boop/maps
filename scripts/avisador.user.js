@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Mobisond · Avisador
 // @namespace    mobisond
-// @version      2.25
+// @version      2.26
 // @description  Avisa los casos nuevos (celular, campana y grupo de Telegram), los casos Lineales sin notas de trabajo hace 25 min y los SLA a 1 hora de vencer.
 // @match        https://*.service-now.com/*
 // @grant        GM_xmlhttpRequest
@@ -255,6 +255,18 @@
           (hayGrupo() ? '' : ' (NO configurado en esta PC)') + '\n• Alexa (si la tenés en esta PC)');
   });
   GM_registerMenuCommand('⚙️ Configuración', configuracion);
+  GM_registerMenuCommand('🔧 Revisar bot', function () {          // diagnóstico temporal de /bandeja
+    var info = ['Versión 2.26', 'Pestaña vigilada: ' + (vigilada() ? 'SÍ' : 'NO'), 'Grupo guardado: ' + (GM_getValue('tg_chat', '') || 'ninguno'),
+                'Token: ' + (GM_getValue('tg_token', '') ? 'cargado' : 'falta'), 'Último leído: ' + GM_getValue('tg_offset', 0)];
+    tg('getWebhookInfo', {}, function (w) {
+      info.push('Webhook: ' + (w.url ? w.url : 'no'));
+      tg('getUpdates', {timeout: 0, allowed_updates: ['message']}, function (ups) {
+        info.push('Mensajes pendientes: ' + ups.length);
+        ups.slice(-3).forEach(function (u) { var m = u.message || {}; info.push('  #' + u.update_id + ' ' + (m.chat ? m.chat.id + ' ' + (m.chat.title || '') : '') + ': ' + (m.text || '(sin texto)')); });
+        alert(info.join('\n'));
+      }, function (e) { info.push('getUpdates ERROR: ' + e); alert(info.join('\n')); });
+    }, function (e) { info.push('Telegram ERROR: ' + e); alert(info.join('\n')); });
+  });
   GM_registerMenuCommand('Dejar de vigilar', function () { GM_setValue('lista', ''); alert('Ya no vigilo ninguna lista.'); });
 
   // ---------------------------------------------------------------- controles al grupo de Telegram
@@ -455,6 +467,7 @@
     leyendo = true;
     tg('getUpdates', {offset: GM_getValue('tg_offset', 0), timeout: 0, allowed_updates: ['message']}, function (ups) {
       leyendo = false;
+      if (!comandos.avisado) { comandos.avisado = true; console.log('[Mobisond] leyendo el grupo de Telegram (' + ups.length + ' mensajes nuevos)'); }
       ups.forEach(function (u) {
         GM_setValue('tg_offset', u.update_id + 1);
         var m = u.message;
