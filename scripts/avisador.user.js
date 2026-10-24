@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Mobisond · Avisador
 // @namespace    mobisond
-// @version      2.39
+// @version      2.40
 // @description  Avisa los casos nuevos (celular, campana y grupo de Telegram), los casos Lineales sin notas de trabajo hace 25 min y los SLA a 1 hora de vencer.
 // @match        https://*.service-now.com/*
 // @grant        GM_xmlhttpRequest
@@ -270,7 +270,7 @@
   });
   GM_registerMenuCommand('⚙️ Configuración', configuracion);
   GM_registerMenuCommand('🔧 Revisar bot', function () {          // diagnóstico temporal de /bandeja
-    var info = ['Versión 2.39', 'Pestaña vigilada: ' + (vigilada() ? 'SÍ' : 'NO'), 'Grupo guardado: ' + (GM_getValue('tg_chat', '') || 'ninguno'),
+    var info = ['Versión 2.40', 'Pestaña vigilada: ' + (vigilada() ? 'SÍ' : 'NO'), 'Grupo guardado: ' + (GM_getValue('tg_chat', '') || 'ninguno'),
                 'Token: ' + (GM_getValue('tg_token', '') ? 'cargado' : 'falta'), 'Último leído: ' + GM_getValue('tg_offset', 0)];
     tg('getWebhookInfo', {}, function (w) {
       info.push('Webhook: ' + (w.url ? w.url : 'no') + (w.last_error_message ? '\nÚltimo error de Telegram: ' + w.last_error_message : '') +
@@ -633,6 +633,11 @@
   function comandos() {
     if (!hayGrupo() || !vigilada()) return;
     atenderPendientes();
+    if (GM_getValue('tg_cmds', 0) < 4) {     // menú de comandos del bot (aparece al escribir "/" en el grupo)
+      tg('setMyCommands', {commands: [{command: 'bandeja', description: 'Casos abiertos de Lineales y GPON'},
+                                      {command: 'caso', description: 'Detalle de un caso: /caso WO0096818'},
+                                      {command: 'activos', description: 'Quién está activo ahora y quién entra'}]}, function () { GM_setValue('tg_cmds', 4); });
+    }
     if (modoBot === null) {                    // ¿el bot está conectado a Supabase?
       modoBot = 'esperando';
       tg('getWebhookInfo', {}, function (w) { modoBot = /supabase/.test(w.url || '') ? 'supabase' : 'telegram'; botLog('modo del bot: ' + modoBot); },
@@ -641,11 +646,7 @@
     }
     if (modoBot === 'supabase') { tomarDeSupabase(); return; }
     if (modoBot !== 'telegram' || leyendo) return;
-    if (GM_getValue('tg_cmds', 0) < 3) {     // menú de comandos del bot (aparece al escribir "/" en el grupo)
-      tg('setMyCommands', {commands: [{command: 'bandeja', description: 'Casos abiertos de Lineales y GPON'},
-                                      {command: 'caso', description: 'Detalle de un caso: /caso WO0096818'},
-                                      {command: 'activos', description: 'Quién está activo ahora y quién entra'}]}, function () { GM_setValue('tg_cmds', 3); });
-    }
+
     leyendo = true;
     tg('getUpdates', {offset: GM_getValue('tg_offset', 0), timeout: 0, allowed_updates: ['message']}, function (ups) {
       leyendo = false;
