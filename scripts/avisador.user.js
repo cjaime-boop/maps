@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Mobisond · Avisador
 // @namespace    mobisond
-// @version      2.27
+// @version      2.28
 // @description  Avisa los casos nuevos (celular, campana y grupo de Telegram), los casos Lineales sin notas de trabajo hace 25 min y los SLA a 1 hora de vencer.
 // @match        https://*.service-now.com/*
 // @grant        GM_xmlhttpRequest
@@ -104,10 +104,10 @@
       (d.short_description ? '\n' + esc(d.short_description) : '') + '\n<a href="' + esc(f.link) + '">Abrir en ServiceNow</a>';
   }
   // Manda al grupo una sola vez por "clave", aunque varias PCs lo detecten (se anota en un canal ntfy compartido).
-  function unaVezAlGrupo(clave, html, responderA) {
+  function unaVezAlGrupo(clave, html, responderA, chatId) {   // chatId: para contestar por privado (si no, al grupo)
     if (!hayGrupo()) return;
     var canalG = canalGrupo();
-    var datos = {chat_id: GM_getValue('tg_chat'), text: html, parse_mode: 'HTML', disable_web_page_preview: true};
+    var datos = {chat_id: chatId || GM_getValue('tg_chat'), text: html, parse_mode: 'HTML', disable_web_page_preview: true};
     if (responderA) datos.reply_to_message_id = responderA;
     var mandar = function () { tg('sendMessage', datos, null, function (e) { botLog('Telegram no dejó mandar: ' + e); }); };
     GM_xmlhttpRequest({method: 'GET', url: canalG + '/json?poll=1&since=12h', timeout: 10000,
@@ -256,7 +256,7 @@
   });
   GM_registerMenuCommand('⚙️ Configuración', configuracion);
   GM_registerMenuCommand('🔧 Revisar bot', function () {          // diagnóstico temporal de /bandeja
-    var info = ['Versión 2.27', 'Pestaña vigilada: ' + (vigilada() ? 'SÍ' : 'NO'), 'Grupo guardado: ' + (GM_getValue('tg_chat', '') || 'ninguno'),
+    var info = ['Versión 2.28', 'Pestaña vigilada: ' + (vigilada() ? 'SÍ' : 'NO'), 'Grupo guardado: ' + (GM_getValue('tg_chat', '') || 'ninguno'),
                 'Token: ' + (GM_getValue('tg_token', '') ? 'cargado' : 'falta'), 'Último leído: ' + GM_getValue('tg_offset', 0)];
     tg('getWebhookInfo', {}, function (w) {
       info.push('Webhook: ' + (w.url ? w.url : 'no'));
@@ -478,9 +478,22 @@
       GM_setValue('tg_pend', GM_getValue('tg_pend', []).filter(function (x) { return x.id !== p.id; }));
       botLog(p.cmd + ': ' + que);
     };
+    if (p.chat && !p.verificado) {           // privado: ¿es del grupo del equipo?
+      tg('getChatMember', {chat_id: GM_getValue('tg_chat'), user_id: p.quien}, function (mb) {
+        atenderPendientes.ocupado = false;
+        if (/creator|administrator|member/.test(mb.status)) {
+          GM_setValue('tg_pend', GM_getValue('tg_pend', []).map(function (x) { if (x.id === p.id) x.verificado = true; return x; }));
+          atenderPendientes();
+        } else {
+          tg('sendMessage', {chat_id: p.chat, text: 'Este bot es solo para el equipo de Mobisond.'});
+          listo('privado de alguien de afuera, rechazado');
+        }
+      }, function (e) { listo('no pude verificar al usuario: ' + e); });
+      return;
+    }
     if (p.cmd === '/bandeja') {
-      textoBandeja().then(function (t) { unaVezAlGrupo('cmd:' + p.id, t, p.msg); listo('contestado'); },
-        function (e) { unaVezAlGrupo('cmd:' + p.id, 'No pude leer la bandeja de ServiceNow (' + esc(e.message) + ').', p.msg); listo('error ServiceNow ' + e.message); });
+      textoBandeja().then(function (t) { unaVezAlGrupo('cmd:' + p.id, t, p.msg, p.chat); listo('contestado' + (p.chat ? ' por privado' : '')); },
+        function (e) { unaVezAlGrupo('cmd:' + p.id, 'No pude leer la bandeja de ServiceNow (' + esc(e.message) + ').', p.msg, p.chat); listo('error ServiceNow ' + e.message); });
     } else listo('comando desconocido');
   }
   var leyendo = false;
@@ -502,13 +515,14 @@
         if (m.migrate_to_chat_id) { GM_setValue('tg_chat', String(m.migrate_to_chat_id)); botLog('el grupo cambió de número'); return; }
         if (!m.text || m.text.charAt(0) !== '/') return;
         var cmd = m.text.trim().split(/[\s@]/)[0].toLowerCase();
-        if (String(m.chat.id) !== String(GM_getValue('tg_chat'))) {
-          if (!/group/.test(m.chat.type)) { botLog(cmd + ' de un chat privado, ignorado'); return; }
+        var privado = m.chat.type === 'private';
+        if (!privado && String(m.chat.id) !== String(GM_getValue('tg_chat'))) {
           GM_setValue('tg_chat', String(m.chat.id));          // el bot está en un solo grupo: si cambió el número, se toma el nuevo
           botLog('grupo nuevo: ' + m.chat.id);
         }
-        botLog('recibí ' + cmd);
-        pend.push({id: u.update_id, msg: m.message_id, cmd: cmd, cuando: Date.now()});
+        botLog('recibí ' + cmd + (privado ? ' por privado de ' + (m.from && m.from.first_name || '?') : ''));
+        // por privado solo se contesta a quien esté en el grupo del equipo (se revisa al atenderlo)
+        pend.push({id: u.update_id, msg: m.message_id, cmd: cmd, cuando: Date.now(), chat: privado ? m.chat.id : null, quien: privado && m.from ? m.from.id : null});
       });
       GM_setValue('tg_pend', pend);
       GM_setValue('tg_offset', ups[ups.length - 1].update_id + 1);
