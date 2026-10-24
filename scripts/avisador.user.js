@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Mobisond · Avisador
 // @namespace    mobisond
-// @version      2.38
+// @version      2.39
 // @description  Avisa los casos nuevos (celular, campana y grupo de Telegram), los casos Lineales sin notas de trabajo hace 25 min y los SLA a 1 hora de vencer.
 // @match        https://*.service-now.com/*
 // @grant        GM_xmlhttpRequest
@@ -270,7 +270,7 @@
   });
   GM_registerMenuCommand('⚙️ Configuración', configuracion);
   GM_registerMenuCommand('🔧 Revisar bot', function () {          // diagnóstico temporal de /bandeja
-    var info = ['Versión 2.38', 'Pestaña vigilada: ' + (vigilada() ? 'SÍ' : 'NO'), 'Grupo guardado: ' + (GM_getValue('tg_chat', '') || 'ninguno'),
+    var info = ['Versión 2.39', 'Pestaña vigilada: ' + (vigilada() ? 'SÍ' : 'NO'), 'Grupo guardado: ' + (GM_getValue('tg_chat', '') || 'ninguno'),
                 'Token: ' + (GM_getValue('tg_token', '') ? 'cargado' : 'falta'), 'Último leído: ' + GM_getValue('tg_offset', 0)];
     tg('getWebhookInfo', {}, function (w) {
       info.push('Webhook: ' + (w.url ? w.url : 'no') + (w.last_error_message ? '\nÚltimo error de Telegram: ' + w.last_error_message : '') +
@@ -480,16 +480,23 @@
           else if (pausado(r)) pausa.push(r);
           else curso.push(r);
         });
-        var fila = function (r, extra) {
-          return '   ' + esc(woDe(r)) + ' · ' + esc(dv(r, 'cmdb_ci') || 'sin CI') + (extra ? ' · ' + esc(extra) : '');
+        var fila = function (r, abajo, alLado) {      // abajo: renglón en cursiva debajo; alLado: en cursiva en el mismo renglón
+          var t = '• ' + esc(woDe(r)) + ' · ' + esc(dv(r, 'cmdb_ci') || 'sin CI') + (alLado ? ' · <i>' + esc(alLado) + '</i>' : '');
+          if (abajo) t += '\n   <i>' + esc(abajo) + '</i>';
+          return t;
         };
-        out.push('', '<b>' + pr + '</b> · ' + cs.length + (cs.length === 1 ? ' abierto' : ' abiertos'));
+        var grupo = function (titulo, lista, abajo, alLado) {
+          if (!lista.length) return;
+          out.push('', '<b>' + titulo + ' (' + lista.length + ')</b>');
+          lista.forEach(function (r) { out.push(fila(r, abajo && abajo(r), alLado && alLado(r))); });
+        };
+        out.push('', (pr === 'Lineales' ? '🔧' : '📡') + ' <b>' + pr + '</b> · ' + cs.length + (cs.length === 1 ? ' abierto' : ' abiertos'));
         if (!cs.length) return;
-        if (curso.length) { out.push('▶️ En curso (' + curso.length + ')'); curso.forEach(function (r) { out.push(fila(r, dv(r, 'assigned_to'))); }); }
-        if (pausa.length) { out.push('⏸️ Pausados (' + pausa.length + ')'); pausa.forEach(function (r) { out.push(fila(r, dv(r, 'u_pause_reason'))); }); }
-        if (verif.length) { out.push('🔍 Verificación del cliente (' + verif.length + ')'); verif.forEach(function (r) { out.push(fila(r)); }); }
-        out.push('⏳ Sin atender (' + sin.length + ')');
-        sin.forEach(function (r) { out.push(fila(r, dv(r, 'state'))); });
+        grupo('▶️ En curso', curso, function (r) { return dv(r, 'assigned_to'); });
+        grupo('⏸️ Pausados', pausa, function (r) { return dv(r, 'u_pause_reason'); });
+        grupo('🔍 Verificación del cliente', verif);
+        if (sin.length) grupo('⏳ Sin atender', sin, null, function (r) { return dv(r, 'state'); });
+        else out.push('', '⏳ Sin atender: 0');
       });
       return out.join('\n');
     });
