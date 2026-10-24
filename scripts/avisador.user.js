@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Mobisond · Aviso de casos nuevos (ServiceNow → celular)
 // @namespace    mobisond
-// @version      2.7
+// @version      2.8
 // @description  Cuando entra un caso nuevo en la lista que vigilás de ServiceNow, te llega una notificación al celular (app ntfy) y a la PC. (Alexa va en otro script.)
 // @match        https://*.service-now.com/*
 // @grant        GM_xmlhttpRequest
@@ -57,7 +57,7 @@
   }
   // Token del bot del equipo, cerrado con la contraseña del equipo (AES). Sin la contraseña no sirve.
   var TG_CERRADO = 'R76sJdArgJd6X6GlESwFVg==.79LONunnZbdiJjqj.fnQwbbIKSKPKaV2VGj5utV/Wt0x73+pJI/94r+sRFiMgazicfSbOH1NzOUVg4SZiEZa6WuJAKmNPDPAiob8=';
-  var TG_CHAT_EQUIPO = '';            // número del grupo "Dispensers Mobisond" (se completa cuando lo tengamos)
+  var TG_CHAT_EQUIPO = '-5016783082';   // número del grupo "Dispensers Mobisond"
   function b64(t) { return Uint8Array.from(atob(t), function (ch) { return ch.charCodeAt(0); }); }
   function abrirToken(clave) {
     var p = TG_CERRADO.split('.'), sub = crypto.subtle;
