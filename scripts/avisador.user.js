@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Mobisond · Aviso de casos nuevos (ServiceNow → celular)
 // @namespace    mobisond
-// @version      2.10
+// @version      2.11
 // @description  Cuando entra un caso nuevo en la lista que vigilás de ServiceNow, te llega una notificación al celular (app ntfy) y a la PC. (Alexa va en otro script.)
 // @match        https://*.service-now.com/*
 // @grant        GM_xmlhttpRequest
@@ -227,11 +227,6 @@
   GM_registerMenuCommand('Abrir la campana de la PC', abrirCampana);
   GM_registerMenuCommand('Mandar aviso de prueba', function () {
     aviso('Prueba Mobisond', 'Si te llegó esto, los avisos de casos nuevos funcionan.', location.href, 3);
-  });
-  GM_registerMenuCommand('Simular caso nuevo (con el primero de la lista)', function () {
-    var f = (filas() || [])[0];
-    if (!f) { alert('No veo casos en esta lista para simular.'); return; }
-    aviso('Entró ' + f.numero + ' (simulacro)', texto(f), f.link, 4);
   });
   GM_registerMenuCommand('¿Qué lista vigilo?', function () {
     var k = GM_getValue('lista', ''), tit = GM_getValue('lista_titulo', '');
