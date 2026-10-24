@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Mobisond · Avisador
 // @namespace    mobisond
-// @version      2.18
+// @version      2.19
 // @description  Avisa los casos nuevos (celular, campana y grupo de Telegram), los casos Lineales sin notas de trabajo hace 25 min y los SLA a 1 hora de vencer.
 // @match        https://*.service-now.com/*
 // @grant        GM_xmlhttpRequest
@@ -253,7 +253,7 @@
   // ---------------------------------------------------------------- controles al grupo de Telegram
   // Cada 2 minutos (desde la pestaña vigilada) se consulta ServiceNow por detrás:
   //  1) Lineales en curso, sin pausa, sin notas de trabajo hace 25 min -> avisa UNA vez (hasta que haya otra nota).
-  //  2) Lineales y GPON en curso, con el SLA corriendo y a 1 hora o menos de vencer -> avisa una vez por SLA.
+  //  2) Lineales y GPON en curso, con el SLA NETO corriendo y a 1 hora o menos de vencer -> avisa una vez.
   var GRUPOS = {lineales: 'C-TL-MOBISOND', gpon: 'C-GZ1-MOBI'};
   var SILENCIO_MIN = 25, SLA_MIN = 60, CADA_MS = 2 * 60 * 1000;
 
@@ -377,10 +377,11 @@
       // 2) SLA a 1 hora de vencer (Lineales y GPON)
       var porId = {};
       casos.forEach(function (r) { porId[vl(r, 'sys_id')] = r; if (vl(r, 'parent')) porId[vl(r, 'parent')] = r; });
-      api('task_sla', 'active=true^has_breached=false^taskIN' + Object.keys(porId).join(','), 'sys_id,task,stage,planned_end_time,original_breach_time')
+      api('task_sla', 'active=true^has_breached=false^sla.nameLIKENETO^taskIN' + Object.keys(porId).join(','), 'sys_id,task,sla,stage,planned_end_time,original_breach_time')
         .then(function (slas) {
           slas.forEach(function (s) {
             if (/paus/i.test(vl(s, 'stage') + dv(s, 'stage'))) return;
+            if (!/neto/i.test(dv(s, 'sla'))) return;                         // solo el SLA NETO
             var r = porId[vl(s, 'task')]; if (!r) return;
             var vence = utc(vl(s, 'planned_end_time')), falta = (vence - ahora) / 60000;
             if (falta > 0 && falta <= SLA_MIN) {
