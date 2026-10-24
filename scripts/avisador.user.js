@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Mobisond · Aviso de casos nuevos (ServiceNow → celular)
 // @namespace    mobisond
-// @version      2.14
+// @version      2.15
 // @description  Cuando entra un caso nuevo en la lista que vigilás de ServiceNow, te llega una notificación al celular (app ntfy) y a la PC. (Alexa va en otro script.)
 // @match        https://*.service-now.com/*
 // @grant        GM_xmlhttpRequest
@@ -10,6 +10,7 @@
 // @grant        GM_registerMenuCommand
 // @grant        GM_notification
 // @grant        GM_openInTab
+// @grant        unsafeWindow
 // @connect      ntfy.sh
 // @connect      api.telegram.org
 // @updateURL    https://cjaime-boop.github.io/maps/scripts/avisador.user.js
@@ -97,17 +98,20 @@
     return '🔔 <b>' + (prueba ? 'Prueba · ' : 'Entró ') + esc(f.numero) + '</b>' + (linea ? '\n' + esc(linea) : '') +
       (d.short_description ? '\n' + esc(d.short_description) : '') + '\n<a href="' + esc(f.link) + '">Abrir en ServiceNow</a>';
   }
-  function alGrupo(f) {
+  // Manda al grupo una sola vez por "clave", aunque varias PCs lo detecten (se anota en un canal ntfy compartido).
+  function unaVezAlGrupo(clave, html) {
     if (!hayGrupo()) return;
     var canalG = canalGrupo();
-    GM_xmlhttpRequest({method: 'GET', url: canalG + '/json?poll=1&since=6h', timeout: 10000,
+    var mandar = function () { tg('sendMessage', {chat_id: GM_getValue('tg_chat'), text: html, parse_mode: 'HTML', disable_web_page_preview: true}); };
+    GM_xmlhttpRequest({method: 'GET', url: canalG + '/json?poll=1&since=12h', timeout: 10000,
       onload: function (r) {
-        if (r.responseText.indexOf('"message":"' + f.id + '"') >= 0) return;      // otra PC ya lo mandó
-        GM_xmlhttpRequest({method: 'POST', url: canalG, data: f.id, timeout: 10000});
-        tg('sendMessage', {chat_id: GM_getValue('tg_chat'), text: mensajeGrupo(f), parse_mode: 'HTML', disable_web_page_preview: true});
+        if (r.responseText.indexOf('"message":"' + clave + '"') >= 0) return;      // otra PC ya lo mandó
+        GM_xmlhttpRequest({method: 'POST', url: canalG, data: clave, timeout: 10000});
+        mandar();
       },
-      onerror: function () { tg('sendMessage', {chat_id: GM_getValue('tg_chat'), text: mensajeGrupo(f), parse_mode: 'HTML', disable_web_page_preview: true}); }});
+      onerror: mandar});
   }
+  function alGrupo(f) { unaVezAlGrupo(f.id, mensajeGrupo(f)); }
   function configurarGrupo() {
     var tok = prompt('Grupo de Telegram\n\nPegá el token del bot (te lo da @BotFather, es algo como 123456:ABC-xyz).\n' +
                      'Dejalo vacío y Aceptar para desactivar el grupo.', GM_getValue('tg_token', ''));
@@ -246,6 +250,115 @@
   GM_registerMenuCommand('⚙️ Configuración', configuracion);
   GM_registerMenuCommand('Dejar de vigilar', function () { GM_setValue('lista', ''); alert('Ya no vigilo ninguna lista.'); });
 
+  // ---------------------------------------------------------------- controles al grupo de Telegram
+  // Cada 2 minutos (desde la pestaña vigilada) se consulta ServiceNow por detrás:
+  //  1) Lineales en curso, sin pausa, sin notas de trabajo hace 25 min -> avisa UNA vez (hasta que haya otra nota).
+  //  2) Lineales y GPON en curso, con el SLA corriendo y a 1 hora o menos de vencer -> avisa una vez por SLA.
+  var GRUPOS = {lineales: 'C-TL-MOBISOND', gpon: 'C-GZ1-MOBI'};
+  var SILENCIO_MIN = 25, SLA_MIN = 60, CADA_MS = 2 * 60 * 1000;
+
+  function token() {
+    try { if (unsafeWindow.g_ck) return unsafeWindow.g_ck; } catch (e) {}
+    try { var f = document.querySelector('iframe#gsft_main'); if (f && f.contentWindow.g_ck) return f.contentWindow.g_ck; } catch (e) {}
+    return '';
+  }
+  function api(tabla, query, campos) {
+    var url = location.origin + '/api/now/table/' + tabla + '?sysparm_display_value=all&sysparm_exclude_reference_link=true' +
+      '&sysparm_limit=1000&sysparm_fields=' + campos + '&sysparm_query=' + encodeURIComponent(query);
+    var h = {'Accept': 'application/json'}, t = token(); if (t) h['X-UserToken'] = t;
+    return fetch(url, {credentials: 'same-origin', headers: h}).then(function (r) {
+      if (!r.ok) throw new Error('ServiceNow ' + r.status);
+      return r.json();
+    }).then(function (j) { return j.result || []; });
+  }
+  function dv(r, c) { var v = r[c]; return v ? (v.display_value || '') : ''; }
+  function vl(r, c) { var v = r[c]; return v ? (v.value || '') : ''; }
+  function utc(t) { return t ? new Date(t.replace(' ', 'T') + 'Z').getTime() : 0; }
+  function hhmm(ms) { var d = new Date(ms); return ('0' + d.getHours()).slice(-2) + ':' + ('0' + d.getMinutes()).slice(-2); }
+  function enCurso(r) { return /work in progress|en curso/i.test(dv(r, 'state')); }
+  function pausado(r) {                // manda el subestado ("Paused"/"En pausa"); si no viene, el motivo de pausa
+    var sub = dv(r, 'substate');
+    return sub ? /paus/i.test(sub) : !!dv(r, 'u_pause_reason').trim();
+  }
+  function proyecto(r) {
+    var g = dv(r, 'assignment_group').toUpperCase();
+    return g.indexOf(GRUPOS.lineales) === 0 ? 'Lineales' : g.indexOf(GRUPOS.gpon) === 0 ? 'GPON' : '';
+  }
+  function linkCaso(r) { return location.origin + '/wm_task.do?sys_id=' + vl(r, 'sys_id'); }
+  function cuerpo(r) {
+    var num = dv(r, 'number').replace(/^WOT/i, 'WO');
+    return esc(num) + ' · ' + esc(proyecto(r)) + (dv(r, 'cmdb_ci') ? ' · ' + esc(dv(r, 'cmdb_ci')) : '') +
+      (dv(r, 'short_description') ? '\n' + esc(dv(r, 'short_description')) : '') +
+      '\nAsignado: ' + esc(dv(r, 'assigned_to') || 'sin asignar') + ' · <a href="' + esc(linkCaso(r)) + '">Abrir en ServiceNow</a>';
+  }
+
+  // última nota de trabajo de cada caso: primero por la tabla de notas; si no hay permiso, leyendo el campo del caso
+  function ultimasNotas(casos) {
+    var ids = casos.map(function (r) { return vl(r, 'sys_id'); });
+    return api('sys_journal_field', 'element=work_notes^element_idIN' + ids.join(','), 'element_id,sys_created_on').then(function (ns) {
+      var u = {};
+      ns.forEach(function (n) { var id = vl(n, 'element_id'), t = utc(vl(n, 'sys_created_on')); if (!u[id] || t > u[id]) u[id] = t; });
+      return u;
+    }, function () {
+      var u = {};
+      casos.forEach(function (r) {        // "2026-10-24 05:12:33 - Nombre (Notas de trabajo)" o "24/10/2026 05:12:33 - ..."
+        var t = dv(r, 'work_notes'), m;
+        if ((m = /(\d{4})-(\d{2})-(\d{2}) (\d{2}):(\d{2}):(\d{2})/.exec(t))) u[vl(r, 'sys_id')] = new Date(+m[1], m[2] - 1, +m[3], +m[4], +m[5], +m[6]).getTime();
+        else if ((m = /(\d{2})[\/-](\d{2})[\/-](\d{4}) (\d{2}):(\d{2}):(\d{2})/.exec(t))) u[vl(r, 'sys_id')] = new Date(+m[3], m[2] - 1, +m[1], +m[4], +m[5], +m[6]).getTime();
+      });
+      return u;
+    });
+  }
+
+  function controles() {
+    if (!hayGrupo() || !vigilada()) return;
+    var ahora = Date.now();
+    if (ahora - GM_getValue('ult_control', 0) < CADA_MS) return;      // la pestaña se recarga cada 30 s: se controla cada 2 min
+    GM_setValue('ult_control', ahora);
+    var q = 'active=true^assignment_group.nameSTARTSWITH' + GRUPOS.lineales + '^ORassignment_group.nameSTARTSWITH' + GRUPOS.gpon;
+    var campos = 'sys_id,number,parent,state,substate,u_pause_reason,assignment_group,assigned_to,cmdb_ci,short_description,work_start,work_notes';
+    api('wm_task', q, campos).then(function (casos) {
+      casos = casos.filter(enCurso);
+      // pausas y entrada a "en curso" vistas desde esta PC (para empezar a contar los 25 min desde que se retoma)
+      var visto = GM_getValue('ctl_visto', {}), nuevoVisto = {};
+      casos.forEach(function (r) {
+        var id = vl(r, 'sys_id'), v = visto[id] || {desde: ahora, pausa: 0};
+        if (pausado(r)) v.pausa = ahora;
+        nuevoVisto[id] = v;
+      });
+      GM_setValue('ctl_visto', nuevoVisto);
+      if (!casos.length) return;
+
+      // 1) sin notas de trabajo (solo Lineales, sin pausa)
+      var lin = casos.filter(function (r) { return proyecto(r) === 'Lineales' && !pausado(r); });
+      if (lin.length) ultimasNotas(lin).then(function (notas) {
+        lin.forEach(function (r) {
+          var id = vl(r, 'sys_id'), v = nuevoVisto[id];
+          var base = Math.max(notas[id] || 0, utc(vl(r, 'work_start')), v.pausa || 0, notas[id] || utc(vl(r, 'work_start')) ? 0 : v.desde);
+          var min = (ahora - base) / 60000;
+          if (min >= SILENCIO_MIN && min < SILENCIO_MIN + 20) {     // recién cruzó los 25 min (no avisa de golpe los viejos)
+            unaVezAlGrupo('nota:' + id + ':' + base, '⏱️ <b>Sin notas de trabajo hace ' + Math.floor(min) + ' min</b>\n' + cuerpo(r));
+          }
+        });
+      });
+
+      // 2) SLA a 1 hora de vencer (Lineales y GPON)
+      var porId = {};
+      casos.forEach(function (r) { porId[vl(r, 'sys_id')] = r; if (vl(r, 'parent')) porId[vl(r, 'parent')] = r; });
+      api('task_sla', 'active=true^has_breached=false^taskIN' + Object.keys(porId).join(','), 'sys_id,task,stage,planned_end_time,original_breach_time')
+        .then(function (slas) {
+          slas.forEach(function (s) {
+            if (/paus/i.test(vl(s, 'stage') + dv(s, 'stage'))) return;
+            var r = porId[vl(s, 'task')]; if (!r) return;
+            var vence = utc(vl(s, 'planned_end_time')), falta = (vence - ahora) / 60000;
+            if (falta > 0 && falta <= SLA_MIN) {
+              unaVezAlGrupo('sla:' + vl(s, 'sys_id'), '⚠️ <b>SLA vence en ' + Math.round(falta) + ' min (' + hhmm(vence) + ')</b>\n' + cuerpo(r));
+            }
+          });
+        }, function () {});
+    }, function (e) { console.log('[Mobisond] controles: ' + e.message); });
+  }
+
   // ---------------------------------------------------------------- panel de configuración
   function configuracion() {
     var v = document.getElementById('mbs-conf'); if (v) v.remove();
@@ -275,6 +388,8 @@
   // ---------------------------------------------------------------- cuándo revisar
   if (!claveLista()) return;
   revisar();
+  setTimeout(controles, 4000);
+  setInterval(controles, 30000);
   var espera = null;
   new MutationObserver(function () {
     clearTimeout(espera);
