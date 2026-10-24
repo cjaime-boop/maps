@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Mobisond · Avisador
 // @namespace    mobisond
-// @version      2.40
+// @version      2.41
 // @description  Avisa los casos nuevos (celular, campana y grupo de Telegram), los casos Lineales sin notas de trabajo hace 25 min y los SLA a 1 hora de vencer.
 // @match        https://*.service-now.com/*
 // @grant        GM_xmlhttpRequest
@@ -270,7 +270,7 @@
   });
   GM_registerMenuCommand('⚙️ Configuración', configuracion);
   GM_registerMenuCommand('🔧 Revisar bot', function () {          // diagnóstico temporal de /bandeja
-    var info = ['Versión 2.40', 'Pestaña vigilada: ' + (vigilada() ? 'SÍ' : 'NO'), 'Grupo guardado: ' + (GM_getValue('tg_chat', '') || 'ninguno'),
+    var info = ['Versión 2.41', 'Pestaña vigilada: ' + (vigilada() ? 'SÍ' : 'NO'), 'Grupo guardado: ' + (GM_getValue('tg_chat', '') || 'ninguno'),
                 'Token: ' + (GM_getValue('tg_token', '') ? 'cargado' : 'falta'), 'Último leído: ' + GM_getValue('tg_offset', 0)];
     tg('getWebhookInfo', {}, function (w) {
       info.push('Webhook: ' + (w.url ? w.url : 'no') + (w.last_error_message ? '\nÚltimo error de Telegram: ' + w.last_error_message : '') +
@@ -564,27 +564,32 @@
         api('task_sla', 'active=true^taskIN' + ids.join(','), 'sla,stage,has_breached,planned_end_time,business_time_left').catch(function () { return null; })
       ]).then(function (res) {
         var nota = res[0][vl(r, 'sys_id')], slas = res[1];
-        var estado = dv(r, 'state') + (pausado(r) ? ' · ⏸️ ' + (dv(r, 'u_pause_reason') || 'en pausa') : '');
-        var out = ['🔎 <b>' + esc(woDe(r)) + '</b> · ' + esc(dv(r, 'cmdb_ci') || 'sin CI'),
-                   esc(dv(r, 'short_description')),
-                   'Estado: ' + esc(estado),
-                   'Prioridad: ' + esc(dv(r, 'priority')) + ' · Asignado: ' + esc(dv(r, 'assigned_to') || 'sin asignar')];
-        out.push('Última nota Mobisond: ' + (nota && nota.t ? esc(nota.quien || 'sin nombre') + (nota.foto ? ' (foto)' : '') + ' · hace ' + duracion((ahora - nota.t) / 60000) + ' (' + hhmm(nota.t) + ')' : 'ninguna'));
+        var prio = dv(r, 'priority'), color = /^1/.test(prio) ? '🔴' : /^2/.test(prio) ? '🟠' : /^3/.test(prio) ? '🟡' : '⚪';
+        var out = ['🔎 <b>' + esc(woDe(r)) + '</b>', esc(dv(r, 'cmdb_ci') || 'sin CI')];
+        if (dv(r, 'short_description')) out.push('<i>' + esc(dv(r, 'short_description')) + '</i>');
+        out.push('', '📌 <b>Estado</b>',
+                 esc(dv(r, 'state')) + (pausado(r) ? ' · ⏸️ ' + esc(dv(r, 'u_pause_reason') || 'en pausa') : ''),
+                 color + ' Prioridad ' + esc(prio || '—'),
+                 '👷 ' + esc(dv(r, 'assigned_to') || 'sin asignar'));
+        out.push('', '📝 <b>Última actividad Mobisond</b>');
+        if (nota && nota.t) out.push(esc(nota.quien || 'sin nombre') + (nota.foto ? ' (foto)' : ''), 'hace ' + duracion((ahora - nota.t) / 60000) + ' · ' + hhmm(nota.t));
+        else out.push('ninguna todavía');
+        out.push('', '⏱️ <b>SLA neto</b>');
         var neto = (slas || []).filter(function (x) { return /neto/i.test(dv(x, 'sla')); })[0];
-        if (slas === null) out.push('SLA neto: no lo pude leer');
-        else if (!neto) out.push('SLA neto: ' + (vl(r, 'active') === 'false' ? 'caso cerrado' : 'sin SLA activo'));
+        if (slas === null) out.push('no lo pude leer');
+        else if (!neto) out.push(vl(r, 'active') === 'false' ? 'caso cerrado' : 'sin SLA activo');
         else {
           var vence = utc(vl(neto, 'planned_end_time')), falta = (vence - ahora) / 60000;
           var enPausa = /paus/i.test(vl(neto, 'stage') + dv(neto, 'stage'));
-          if (vl(neto, 'has_breached') === 'true') out.push('SLA neto: 🔴 vencido' + (enPausa ? ' (ahora pausado)' : ''));
-          else if (enPausa) {                                       // "3 Hours 4 Minutes" -> "3 h 4 min"
+          if (vl(neto, 'has_breached') === 'true') out.push('🔴 Vencido' + (enPausa ? ' (ahora pausado)' : ''));
+          else if (enPausa) {                                       // pausado: la fecha de vencimiento no sirve; "3 Hours 4 Minutes" -> "3 h 4 min"
             var resta = dv(neto, 'business_time_left').replace(/\s*Hours?/i, ' h').replace(/\s*Minutes?/i, ' min').replace(/\s*Seconds?/i, ' s').replace(/\s*Days?/i, ' d');
-            out.push('SLA neto: ⏸️ pausado' + (resta ? ' · le quedan ' + resta : ''));
-          }      // pausado: la fecha de vencimiento no sirve hasta que se retome
-          else if (falta <= 0) out.push('SLA neto: 🔴 vencido');
-          else out.push('SLA neto: ' + (falta <= 60 ? '⚠️ ' : '') + 'quedan ' + duracion(falta) + ' (vence ' + hhmm(vence) + ')');
+            out.push('⏸️ Pausado' + (resta ? ' · le quedan ' + esc(resta) : ''));
+          }
+          else if (falta <= 0) out.push('🔴 Vencido');
+          else out.push((falta <= 60 ? '⚠️ ' : '🟢 ') + 'Quedan ' + duracion(falta) + ' · vence ' + hhmm(vence));
         }
-        out.push('<a href="' + esc(linkCaso(r)) + '">Abrir en ServiceNow</a>');
+        out.push('', '🔗 <a href="' + esc(linkCaso(r)) + '">Abrir en ServiceNow</a>');
         return out.join('\n');
       });
     });
