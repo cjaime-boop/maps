@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Mobisond · Avisador
 // @namespace    mobisond
-// @version      2.26
+// @version      2.27
 // @description  Avisa los casos nuevos (celular, campana y grupo de Telegram), los casos Lineales sin notas de trabajo hace 25 min y los SLA a 1 hora de vencer.
 // @match        https://*.service-now.com/*
 // @grant        GM_xmlhttpRequest
@@ -109,7 +109,7 @@
     var canalG = canalGrupo();
     var datos = {chat_id: GM_getValue('tg_chat'), text: html, parse_mode: 'HTML', disable_web_page_preview: true};
     if (responderA) datos.reply_to_message_id = responderA;
-    var mandar = function () { tg('sendMessage', datos); };
+    var mandar = function () { tg('sendMessage', datos, null, function (e) { botLog('Telegram no dejó mandar: ' + e); }); };
     GM_xmlhttpRequest({method: 'GET', url: canalG + '/json?poll=1&since=12h', timeout: 10000,
       onload: function (r) {
         if (r.responseText.indexOf('"message":"' + clave + '"') >= 0) return;      // otra PC ya lo mandó
@@ -256,13 +256,14 @@
   });
   GM_registerMenuCommand('⚙️ Configuración', configuracion);
   GM_registerMenuCommand('🔧 Revisar bot', function () {          // diagnóstico temporal de /bandeja
-    var info = ['Versión 2.26', 'Pestaña vigilada: ' + (vigilada() ? 'SÍ' : 'NO'), 'Grupo guardado: ' + (GM_getValue('tg_chat', '') || 'ninguno'),
+    var info = ['Versión 2.27', 'Pestaña vigilada: ' + (vigilada() ? 'SÍ' : 'NO'), 'Grupo guardado: ' + (GM_getValue('tg_chat', '') || 'ninguno'),
                 'Token: ' + (GM_getValue('tg_token', '') ? 'cargado' : 'falta'), 'Último leído: ' + GM_getValue('tg_offset', 0)];
     tg('getWebhookInfo', {}, function (w) {
       info.push('Webhook: ' + (w.url ? w.url : 'no'));
       tg('getUpdates', {timeout: 0, allowed_updates: ['message']}, function (ups) {
         info.push('Mensajes pendientes: ' + ups.length);
         ups.slice(-3).forEach(function (u) { var m = u.message || {}; info.push('  #' + u.update_id + ' ' + (m.chat ? m.chat.id + ' ' + (m.chat.title || '') : '') + ': ' + (m.text || '(sin texto)')); });
+        info.push('', 'Lo último que hizo el bot:'); GM_getValue('tg_log', []).forEach(function (l) { info.push('  ' + l); });
         alert(info.join('\n'));
       }, function (e) { info.push('getUpdates ERROR: ' + e); alert(info.join('\n')); });
     }, function (e) { info.push('Telegram ERROR: ' + e); alert(info.join('\n')); });
@@ -458,34 +459,61 @@
       return out.join('\n');
     });
   }
+  // registro corto de lo que hace el bot (se ve en "🔧 Revisar bot")
+  function botLog(t) {
+    var l = GM_getValue('tg_log', []); l.push(hhmm(Date.now()) + ' ' + t); GM_setValue('tg_log', l.slice(-8));
+    console.log('[Mobisond] ' + t);
+  }
+  // Los comandos se anotan como pendientes ANTES de confirmarle a Telegram que se leyeron, así si la pestaña
+  // se recarga (refrescador) en el medio, se contestan igual en la próxima carga.
+  function atenderPendientes() {
+    var pend = GM_getValue('tg_pend', []);
+    if (!pend.length) return;
+    var p = pend[0];
+    if (Date.now() - p.cuando > 10 * 60 * 1000) { GM_setValue('tg_pend', pend.slice(1)); botLog('descarto ' + p.cmd + ' viejo'); return; }
+    if (atenderPendientes.ocupado) return;
+    atenderPendientes.ocupado = true;
+    var listo = function (que) {
+      atenderPendientes.ocupado = false;
+      GM_setValue('tg_pend', GM_getValue('tg_pend', []).filter(function (x) { return x.id !== p.id; }));
+      botLog(p.cmd + ': ' + que);
+    };
+    if (p.cmd === '/bandeja') {
+      textoBandeja().then(function (t) { unaVezAlGrupo('cmd:' + p.id, t, p.msg); listo('contestado'); },
+        function (e) { unaVezAlGrupo('cmd:' + p.id, 'No pude leer la bandeja de ServiceNow (' + esc(e.message) + ').', p.msg); listo('error ServiceNow ' + e.message); });
+    } else listo('comando desconocido');
+  }
   var leyendo = false;
   function comandos() {
-    if (leyendo || !hayGrupo() || !vigilada()) return;
+    if (!hayGrupo() || !vigilada()) return;
+    atenderPendientes();
+    if (leyendo) return;
     if (GM_getValue('tg_cmds', 0) < 1) {     // menú de comandos del bot (aparece al escribir "/" en el grupo)
       tg('setMyCommands', {commands: [{command: 'bandeja', description: 'Casos abiertos de Lineales y GPON'}]}, function () { GM_setValue('tg_cmds', 1); });
     }
     leyendo = true;
     tg('getUpdates', {offset: GM_getValue('tg_offset', 0), timeout: 0, allowed_updates: ['message']}, function (ups) {
       leyendo = false;
-      if (!comandos.avisado) { comandos.avisado = true; console.log('[Mobisond] leyendo el grupo de Telegram (' + ups.length + ' mensajes nuevos)'); }
+      if (!ups.length) return;
+      var pend = GM_getValue('tg_pend', []);
       ups.forEach(function (u) {
-        GM_setValue('tg_offset', u.update_id + 1);
         var m = u.message;
-        if (!m || !m.text || !m.chat) return;
-        if (m.migrate_to_chat_id) { GM_setValue('tg_chat', String(m.migrate_to_chat_id)); return; }
-        if (String(m.chat.id) !== String(GM_getValue('tg_chat'))) {
-          console.log('[Mobisond] /comando de otro chat (' + m.chat.id + ', "' + (m.chat.title || '') + '"); el grupo guardado es ' + GM_getValue('tg_chat'));
-          if (!/group/.test(m.chat.type)) return;
-          GM_setValue('tg_chat', String(m.chat.id));          // el bot está en un solo grupo: si cambió el número, se toma el nuevo
-        }
+        if (!m || !m.chat) return;
+        if (m.migrate_to_chat_id) { GM_setValue('tg_chat', String(m.migrate_to_chat_id)); botLog('el grupo cambió de número'); return; }
+        if (!m.text || m.text.charAt(0) !== '/') return;
         var cmd = m.text.trim().split(/[\s@]/)[0].toLowerCase();
-        console.log('[Mobisond] comando del grupo: ' + cmd);
-        if (cmd === '/bandeja') {
-          textoBandeja().then(function (t) { unaVezAlGrupo('cmd:' + u.update_id, t, m.message_id); },
-            function (e) { console.log('[Mobisond] /bandeja: ' + e.message); unaVezAlGrupo('cmd:' + u.update_id, 'No pude leer la bandeja de ServiceNow (' + esc(e.message) + ').', m.message_id); });
+        if (String(m.chat.id) !== String(GM_getValue('tg_chat'))) {
+          if (!/group/.test(m.chat.type)) { botLog(cmd + ' de un chat privado, ignorado'); return; }
+          GM_setValue('tg_chat', String(m.chat.id));          // el bot está en un solo grupo: si cambió el número, se toma el nuevo
+          botLog('grupo nuevo: ' + m.chat.id);
         }
+        botLog('recibí ' + cmd);
+        pend.push({id: u.update_id, msg: m.message_id, cmd: cmd, cuando: Date.now()});
       });
-    }, function () { leyendo = false; });
+      GM_setValue('tg_pend', pend);
+      GM_setValue('tg_offset', ups[ups.length - 1].update_id + 1);
+      atenderPendientes();
+    }, function (e) { leyendo = false; botLog('no pude leer el grupo: ' + e); });
   }
 
   // ---------------------------------------------------------------- panel de configuración
