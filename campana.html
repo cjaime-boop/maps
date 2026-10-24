@@ -190,16 +190,28 @@
   };
 
   // ---- escucha el mismo canal de ntfy que el celular
-  function conectar() {
+  // Conexión al canal: si se corta (wifi, PC dormida), se reconecta sola y pide los avisos que se perdieron
+  // mientras tanto (desde el último que llegó). Además un control cada 15 s revisa que siga viva.
+  var ultimoId = '', ultimaSenal = 0, reconectando = null;
+  function conectar(desde) {
     var canal = $('canal').value.trim().replace(/[^\w-]/g, '');
     if (fuente) { fuente.close(); fuente = null; }
     if (!canal) { estado('Abrila desde Tampermonkey: "Abrir la campana de la PC"', 'mal'); return; }
     estado('Conectando…', 'apagada');
-    fuente = new EventSource('https://ntfy.sh/' + encodeURIComponent(canal) + '/sse');
-    fuente.onopen = function () { pintarEstado(); };
-    fuente.onerror = function () { estado('Sin conexión, reintentando…', 'mal'); };   // EventSource reintenta solo
-    fuente.onmessage = function (ev) {
+    var url = 'https://ntfy.sh/' + encodeURIComponent(canal) + '/sse' + (desde ? '?since=' + encodeURIComponent(desde) : '');
+    var f = fuente = new EventSource(url);
+    ultimaSenal = Date.now();
+    f.onopen = function () { ultimaSenal = Date.now(); pintarEstado(); };
+    f.onerror = function () {
+      if (f !== fuente) return;
+      estado('Sin conexión, reintentando…', 'mal');
+      if (f.readyState === 2) reconectar(5000);       // cerrada del todo: la reabrimos nosotros
+    };
+    f.addEventListener('keepalive', function (ev) { ultimaSenal = Date.now(); marcarId(ev); });
+    f.onmessage = function (ev) {
+      ultimaSenal = Date.now();
       var m; try { m = JSON.parse(ev.data); } catch (e) { return; }
+      if (m.id) ultimoId = m.id;
       if (m.event !== 'message' || vistos[m.id]) return;
       vistos[m.id] = 1;
       var titulo = m.title || 'Aviso';
@@ -208,6 +220,18 @@
       if (!sonido()) titilar(titulo);      // si Chrome todavía no deja sonar, que por lo menos se vea
     };
   }
+  function marcarId(ev) { try { var m = JSON.parse(ev.data); if (m.id) ultimoId = m.id; } catch (e) {} }
+  function reconectar(espera) {
+    if (reconectando) return;
+    reconectando = setTimeout(function () { reconectando = null; conectar(ultimoId || Math.floor((Date.now() - 120000) / 1000)); },
+                              espera || 0);
+  }
+  window.addEventListener('online', function () { reconectar(1000); });
+  setInterval(function () {                // ntfy manda una señal cada ~45 s: si pasan 100 s sin nada, se reabre
+    if (!fuente) return;
+    if (fuente.readyState === 2 || Date.now() - ultimaSenal > 100000) reconectar(0);
+  }, 15000);
+
 
   // ---- arranca sola: se conecta apenas abre. El sonido lo habilita Chrome: si ya dejó sonar antes a esta
   // página arranca sonando; si no, alcanza con tocar una vez cualquier parte de la página.
