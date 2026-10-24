@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Mobisond · Refrescador de pestañas
 // @namespace    mobisond
-// @version      2.6
+// @version      2.7
 // @description  Refresca la página entera cada 30 segundos en las pestañas que elijas (cualquier página). Refresca siempre, aunque estés escribiendo o usando la página. Muestra la cuenta en el título y, en ServiceNow, avisa si se cerró la sesión.
 // @match        *://*/*
 // @grant        GM_getValue
@@ -21,7 +21,7 @@
   // la página se reconoce por su dirección (sin lo que va después del #)
   var miClave = location.origin + location.pathname + location.search;
   function paginas() { return GM_getValue('refrescar_paginas', {}); }
-  function limpio(t) { return String(t || '').replace(/^(\(\d+ s\)|\(⏸\)|⚠ SESIÓN CERRADA ·)\s*/, '').trim(); }
+  function limpio(t) { t = String(t || ''); var r = /^(\(\d+ s\)|\(⏸\)|\(sin conexión\)|⚠ SESIÓN CERRADA ·)\s*/; while (r.test(t)) t = t.replace(r, ''); return t.trim(); }
 
   // ---------------------------------------------------------------- ServiceNow: sesión cerrada
   // Si después de un refresco aparece la pantalla de login, avisa: sin sesión no entra ningún caso.
@@ -86,18 +86,38 @@
     b.onclick = function (e) { e.stopPropagation(); pausa = !pausa; proximo = Date.now() + SEG * 1000; pintar(); };
     document.body.appendChild(b);
 
+    var sinRed = false, probando = false;
     function pintar() {
       var r = Math.max(0, Math.ceil((proximo - Date.now()) / 1000));
-      b.textContent = pausa ? '⏸ refresco en pausa' : '↻ ' + r + ' s';
-      b.style.background = pausa ? '#888' : '#1f6f8b';
-      document.title = (pausa ? '(⏸) ' : '(' + r + ' s) ') + limpio(document.title);
+      b.textContent = pausa ? '⏸ refresco en pausa' : sinRed ? '⚠ sin conexión · reintento en ' + r + ' s' : '↻ ' + r + ' s';
+      b.style.background = pausa ? '#888' : sinRed ? '#c0392b' : '#1f6f8b';
+      document.title = (pausa ? '(⏸) ' : sinRed ? '(sin conexión) ' : '(' + r + ' s) ') + limpio(document.title);
     }
+    // Antes de recargar se fija si hay internet. Si no hay, NO recarga (si recarga sin internet, Chrome muestra
+    // su página de error, ahí el script no corre y la pestaña queda caída para siempre). Reintenta cada 10 s
+    // y recarga apenas vuelve la conexión.
+    function hayConexion(listo) {
+      if (navigator.onLine === false) { listo(false); return; }
+      var ctl = window.AbortController ? new AbortController() : null;
+      var corte = setTimeout(function () { if (ctl) ctl.abort(); }, 8000);
+      fetch(location.origin + '/favicon.ico?_=' + Date.now(), {method: 'HEAD', cache: 'no-store', mode: 'no-cors',
+                                                             credentials: 'omit', signal: ctl ? ctl.signal : undefined})
+        .then(function () { clearTimeout(corte); listo(true); }, function () { clearTimeout(corte); listo(false); });
+    }
+    function recargar() {
+      if (probando) return;
+      probando = true;
+      hayConexion(function (ok) {
+        probando = false;
+        if (ok) { GM_setValue('ultimo_refresco', Date.now()); location.reload(); return; }
+        sinRed = true; proximo = Date.now() + 10000; pintar();
+      });
+    }
+    window.addEventListener('online', function () { if (!pausa && !apagado) { proximo = Date.now(); recargar(); } });
     function tic() {
       if (apagado) return;
       if (pausa) { pintar(); return; }
-      if (Date.now() >= proximo) {
-        GM_setValue('ultimo_refresco', Date.now()); location.reload(); return;   // refresca siempre, sin esperar
-      }
+      if (Date.now() >= proximo) { recargar(); return; }   // refresca siempre (si hay conexión), sin esperar
       pintar();
     }
     // El reloj corre en un "worker" porque Chrome frena los relojes de las pestañas en segundo plano
