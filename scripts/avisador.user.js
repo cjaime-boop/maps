@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Mobisond · Avisador
 // @namespace    mobisond
-// @version      2.17
+// @version      2.18
 // @description  Avisa los casos nuevos (celular, campana y grupo de Telegram), los casos Lineales sin notas de trabajo hace 25 min y los SLA a 1 hora de vencer.
 // @match        https://*.service-now.com/*
 // @grant        GM_xmlhttpRequest
@@ -285,11 +285,11 @@
     return g.indexOf(GRUPOS.lineales) === 0 ? 'Lineales' : g.indexOf(GRUPOS.gpon) === 0 ? 'GPON' : '';
   }
   function linkCaso(r) { return location.origin + '/wm_task.do?sys_id=' + vl(r, 'sys_id'); }
-  function cuerpo(r) {
+  function cuerpo(r, extra) {          // extra: renglón opcional antes del link (ej. "Última nota: …")
     var num = dv(r, 'number').replace(/^WOT/i, 'WO');
     return esc(num) + ' · ' + esc(proyecto(r)) + (dv(r, 'cmdb_ci') ? ' · ' + esc(dv(r, 'cmdb_ci')) : '') +
       (dv(r, 'short_description') ? '\n' + esc(dv(r, 'short_description')) : '') +
-      '\nAsignado: ' + esc(dv(r, 'assigned_to') || 'sin asignar') + ' · <a href="' + esc(linkCaso(r)) + '">Abrir en ServiceNow</a>';
+      '\n' + (extra ? esc(extra) + ' · ' : '') + '<a href="' + esc(linkCaso(r)) + '">Abrir en ServiceNow</a>';
   }
 
   // última nota de trabajo de cada caso. Las notas se cargan en la WO (padre), no en la WOT.
@@ -299,6 +299,10 @@
     if ((m = /(\d{4})-(\d{2})-(\d{2}) (\d{2}):(\d{2}):(\d{2})/.exec(t))) return new Date(+m[1], m[2] - 1, +m[3], +m[4], +m[5], +m[6]).getTime();
     if ((m = /(\d{2})[\/-](\d{2})[\/-](\d{4}) (\d{2}):(\d{2}):(\d{2})/.exec(t))) return new Date(+m[3], m[2] - 1, +m[1], +m[4], +m[5], +m[6]).getTime();
     return 0;
+  }
+  function autorJournal(t) {           // "… 05:12:33 - Diego Cabezas (Notas de trabajo)"
+    var m = /\d{2}:\d{2}:\d{2} - (.+?) \((?:Notas de trabajo|Work notes)\)/i.exec(t || '');
+    return m ? m[1].trim() : '';
   }
   function ultimasNotas(casos) {
     var dePadre = {};                 // sys_id de la WO -> [sys_id de las WOT]
@@ -310,14 +314,27 @@
       return u;
     };
     if (!padres.length) return Promise.resolve({});
-    return api('sys_journal_field', 'element=work_notes^element_idIN' + padres.join(','), 'element_id,sys_created_on').then(function (ns) {
+    return api('sys_journal_field', 'element=work_notes^element_idIN' + padres.join(','), 'element_id,sys_created_on,sys_created_by').then(function (ns) {
       var u = {};
-      ns.forEach(function (n) { var id = vl(n, 'element_id'), t = utc(vl(n, 'sys_created_on')); if (!u[id] || t > u[id]) u[id] = t; });
-      return repartir(u);
+      ns.forEach(function (n) {
+        var id = vl(n, 'element_id'), t = utc(vl(n, 'sys_created_on'));
+        if (!u[id] || t > u[id].t) u[id] = {t: t, quien: vl(n, 'sys_created_by')};
+      });
+      // el autor viene como usuario (ej. dcabezas): se busca el nombre completo
+      var usuarios = Object.keys(u).map(function (k) { return u[k].quien; }).filter(Boolean);
+      if (!usuarios.length) return repartir(u);
+      return api('sys_user', 'user_nameIN' + usuarios.join(','), 'user_name,name').then(function (us) {
+        var nom = {}; us.forEach(function (x) { nom[vl(x, 'user_name')] = dv(x, 'name'); });
+        Object.keys(u).forEach(function (k) { u[k].quien = nom[u[k].quien] || u[k].quien; });
+        return repartir(u);
+      }, function () { return repartir(u); });
     }, function () {
       return api('wm_order', 'sys_idIN' + padres.join(','), 'sys_id,work_notes').then(function (wos) {
         var u = {};
-        wos.forEach(function (w) { var t = fechaJournal(dv(w, 'work_notes')); if (t) u[vl(w, 'sys_id')] = t; });
+        wos.forEach(function (w) {
+          var txt = dv(w, 'work_notes'), t = fechaJournal(txt);
+          if (t) u[vl(w, 'sys_id')] = {t: t, quien: autorJournal(txt)};
+        });
         return repartir(u);
       });
     });
@@ -347,10 +364,12 @@
       if (lin.length) ultimasNotas(lin).then(function (notas) {
         lin.forEach(function (r) {
           var id = vl(r, 'sys_id'), v = nuevoVisto[id];
-          var base = Math.max(notas[id] || 0, utc(vl(r, 'work_start')), v.pausa || 0, notas[id] || utc(vl(r, 'work_start')) ? 0 : v.desde);
+          var nota = notas[id] || {t: 0, quien: ''};
+          var base = Math.max(nota.t, utc(vl(r, 'work_start')), v.pausa || 0, nota.t || utc(vl(r, 'work_start')) ? 0 : v.desde);
           var min = (ahora - base) / 60000;
           if (min >= SILENCIO_MIN && min < SILENCIO_MIN + 20) {     // recién cruzó los 25 min (no avisa de golpe los viejos)
-            unaVezAlGrupo('nota:' + id + ':' + base, '⏱️ <b>Sin notas de trabajo hace ' + Math.floor(min) + ' min</b>\n' + cuerpo(r));
+            unaVezAlGrupo('nota:' + id + ':' + base, '⏱️ <b>Sin notas de trabajo hace ' + Math.floor(min) + ' min</b>\n' +
+                          cuerpo(r, nota.t ? 'Última nota: ' + (nota.quien || 'sin nombre') + ' (' + hhmm(nota.t) + ')' : 'Todavía sin notas'));
           }
         });
       });
