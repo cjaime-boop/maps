@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Mobisond · Resumen de turno (WhatsApp)
 // @namespace    mobisond
-// @version      1.5
+// @version      1.6
 // @description  Arma el mensaje de fin de turno (Lineales y GPON) con los números del día, listo para pegar en WhatsApp.
 // @match        https://*.service-now.com/*
 // @grant        GM_registerMenuCommand
@@ -110,7 +110,7 @@
 
   function calcular(casos, venc, proy) {
     var r = {ingresados: 0, resueltos: 0, acumulados: 0, verificacion: 0, pausas: [], sinAtender: 0, claroSin: 0,
-             enMano: [], vencidos: 0, emergencia: false};
+             enMano: [], vencidos: 0, vencidosWO: [], emergencia: false};
     casos.forEach(function (c) {
       if (proyecto(c) !== proy) return;
       if (/cancel/i.test(dv(c, 'state'))) return;   // los cancelados no cuentan para nada
@@ -121,7 +121,11 @@
         if (/^[12]\b/.test(dv(c, 'priority')) || /^[12]$/.test(val(c, 'priority'))) r.emergencia = true;
       }
       if (!abierto && val(c, 'closed_at') && esHoy(val(c, 'closed_at')) && !/cancel/i.test(dv(c, 'state'))) r.resueltos++;
-      if (venc && venc[n]) r.vencidos++;
+      if (venc && venc[n]) {
+        r.vencidos++;
+        var wo = dv(c, 'parent') || n.replace(/^WOT/i, 'WO');
+        if (r.vencidosWO.indexOf(wo) < 0) r.vencidosWO.push(wo);
+      }
       if (!abierto) return;
       r.acumulados++;
       var pausa = dv(c, 'u_pause_reason').trim();
@@ -154,6 +158,11 @@
     return h >= 6 && h < 12 ? 'Buenos días' : h >= 12 && h < 20 ? 'Buenas tardes' : 'Buenas noches';
   }
 
+  function vencTxt(r) {               // "2 / WO0096818 / WO0096820"
+    if (r.vencidos === '?' || !r.vencidos) return String(r.vencidos);
+    return r.vencidos + ' / ' + r.vencidosWO.join(' / ');
+  }
+
   function texto(casos, venc) {
     var L = calcular(casos, venc, 'lineales');
     var G = calcular(casos, venc, 'gpon');
@@ -166,7 +175,7 @@
     t.push('Casos pausados: ' + L.pausas.length);
     contar(L.pausas).forEach(function (p) { t.push('- ' + p[1] + ' ' + p[0]); });
     t.push('');
-    t.push('Casos vencidos: ' + L.vencidos);
+    t.push('Casos vencidos: ' + vencTxt(L));
     t.push('Casos totales sin atender: ' + L.sinAtender);
     t.push('Casos de Claro sin atender: ' + L.claroSin);
     t.push('Casos en mano: ' + enManoTxt(L.enMano, true));
@@ -178,7 +187,7 @@
     t.push('Casos pausados: ' + G.pausas.length);
     contar(G.pausas).forEach(function (p) { t.push('* ' + (p[1] > 1 ? p[1] + ' ' : '') + p[0]); });
     t.push('');
-    t.push('Casos vencidos: ' + G.vencidos);
+    t.push('Casos vencidos: ' + vencTxt(G));
     t.push('Casos sin atender: ' + G.sinAtender);
     t.push('Alguna emergencia: ' + (G.emergencia ? 'sí' : 'no'));
     t.push('Casos en mano: ' + enManoTxt(G.enMano, false));
