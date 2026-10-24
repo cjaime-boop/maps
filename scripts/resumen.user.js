@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Mobisond · Resumen de turno (WhatsApp)
 // @namespace    mobisond
-// @version      1.0
+// @version      1.1
 // @description  Arma el mensaje de fin de turno (Lineales y GPON) con los números del día, listo para pegar en WhatsApp.
 // @match        https://*.service-now.com/*
 // @grant        GM_registerMenuCommand
@@ -17,7 +17,7 @@
 
   var GRUPOS = {lineales: 'C-TL-MOBISOND', gpon: 'C-GZ1-MOBI'};
   // Cliente: sale del Service offering (TSO_C_TL_<cliente>_<zona>_BA)
-  var CLIENTES = {CL: 'Claro', EDNR: 'EDN', MUNI: 'Municipal', TP: 'Telecom'};
+  var CLIENTES = {CL: 'CLR', EDNR: 'EDN', MUNI: 'MUNI', TP: 'TP'};   // cómo se escribe cada cliente en "Casos en mano"
   var VERIFICACION = /verificaci[oó]n del cliente/i;
 
   var HOY = '@javascript:gs.beginningOfToday()@javascript:gs.endOfToday()';
@@ -119,7 +119,7 @@
       if (pausa && VERIFICACION.test(pausa)) r.verificacion++;
       else if (pausa) r.pausas.push(pausa);
       else if (/work in progress|en curso/i.test(estado)) r.enMano.push(cliente(c));
-      else { r.sinAtender++; if (cliente(c) === 'Claro') r.claroSin++; }
+      else { r.sinAtender++; if (cliente(c) === 'CLR') r.claroSin++; }
     });
     if (!venc) r.vencidos = '?';
     return r;
@@ -136,36 +136,40 @@
     if (!lista.length) return '0';
     if (!conCliente) return String(lista.length);
     var partes = contar(lista.map(function (x) { return x || 'sin cliente'; }));
-    if (partes.length === 1) return lista.length + ' ' + partes[0][0];
-    return lista.length + ' (' + partes.map(function (p) { return p[1] + ' ' + p[0]; }).join(', ') + ')';
+    return lista.length + ' / ' + partes.map(function (p) { return p[1] + ' - ' + p[0]; }).join(' / ');
+  }
+
+  function saludo() {                              // 6 a 12 días · 12 a 20 tardes · 20 a 6 noches
+    var h = new Date().getHours();
+    return h >= 6 && h < 12 ? 'Buenos días' : h >= 12 && h < 20 ? 'Buenas tardes' : 'Buenas noches';
   }
 
   function texto(casos, venc) {
     var L = calcular(casos, venc, 'lineales');
     var G = calcular(casos, venc, 'gpon');
     var t = [];
-    t.push('Buenos días;', '', 'Lineales', '');
+    t.push(saludo() + ';', '', '*Lineales*', '');
     t.push('Casos ingresados: ' + L.ingresados);
     t.push('Casos resueltos: ' + L.resueltos);
     t.push('Casos totales acumulados: ' + L.acumulados);
     t.push('Casos en verificación: ' + L.verificacion);
-    t.push('Casos Pausados: ' + L.pausas.length);
+    t.push('Casos pausados: ' + L.pausas.length);
     contar(L.pausas).forEach(function (p) { t.push('- ' + p[1] + ' ' + p[0]); });
     t.push('');
     t.push('Casos vencidos: ' + L.vencidos);
     t.push('Casos totales sin atender: ' + L.sinAtender);
     t.push('Casos de Claro sin atender: ' + L.claroSin);
     t.push('Casos en mano: ' + enManoTxt(L.enMano, true));
-    t.push('', 'GPON', '');
+    t.push('', '', '*GPON*', '');
     t.push('Casos ingresados: ' + G.ingresados);
     t.push('Casos resueltos : ' + G.resueltos);
     t.push('Casos acumulados: ' + G.acumulados);
     t.push('Casos en verificacion: ' + G.verificacion);
-    t.push('Casos vencidos: ' + G.vencidos);
     t.push('Casos pausados: ' + G.pausas.length);
     contar(G.pausas).forEach(function (p) { t.push('* ' + (p[1] > 1 ? p[1] + ' ' : '') + p[0]); });
     t.push('');
-    t.push('Sin atender: ' + G.sinAtender);
+    t.push('Casos vencidos: ' + G.vencidos);
+    t.push('Casos sin atender: ' + G.sinAtender);
     t.push('Alguna emergencia: ' + (G.emergencia ? 'sí' : 'no'));
     t.push('Casos en mano: ' + enManoTxt(G.enMano, false));
     return {texto: t.join('\n'), sinSla: !venc};
