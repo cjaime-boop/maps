@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Mobisond · Avisador
 // @namespace    mobisond
-// @version      2.44
+// @version      2.45
 // @description  Avisa los casos nuevos (celular, campana y grupo de Telegram), los casos Lineales sin notas de trabajo hace 25 min y los SLA a 1 hora de vencer.
 // @match        https://*.service-now.com/*
 // @grant        GM_xmlhttpRequest
@@ -269,7 +269,7 @@
   });
   GM_registerMenuCommand('⚙️ Configuración', configuracion);
   GM_registerMenuCommand('🔧 Revisar bot', function () {          // diagnóstico temporal de /bandeja
-    var info = ['Versión 2.44', 'Pestaña vigilada: ' + (vigilada() ? 'SÍ' : 'NO'), 'Grupo guardado: ' + (GM_getValue('tg_chat', '') || 'ninguno'),
+    var info = ['Versión 2.45', 'Pestaña vigilada: ' + (vigilada() ? 'SÍ' : 'NO'), 'Grupo guardado: ' + (GM_getValue('tg_chat', '') || 'ninguno'),
                 'Token: ' + (GM_getValue('tg_token', '') ? 'cargado' : 'falta'), 'Último leído: ' + GM_getValue('tg_offset', 0)];
     tg('getWebhookInfo', {}, function (w) {
       info.push('Webhook: ' + (w.url ? w.url : 'no') + (w.last_error_message ? '\nÚltimo error de Telegram: ' + w.last_error_message : '') +
@@ -579,7 +579,8 @@
           var enPausa = /paus/i.test(vl(neto, 'stage') + dv(neto, 'stage'));
           if (vl(neto, 'has_breached') === 'true') out.push('🔴 Vencido' + (enPausa ? ' (ahora pausado)' : ''));
           else if (enPausa) {                                       // pausado: la fecha de vencimiento no sirve; "3 Hours 4 Minutes" -> "3 h 4 min"
-            var resta = dv(neto, 'business_time_left').replace(/\s*Hours?/i, ' h').replace(/\s*Minutes?/i, ' min').replace(/\s*Seconds?/i, ' s').replace(/\s*Days?/i, ' d');
+            var resta = dv(neto, 'business_time_left').replace(/\s*(Hours?|Horas?)/i, ' h').replace(/\s*(Minutes?|Minutos?)/i, ' min')
+              .replace(/\s*(Seconds?|Segundos?)/i, ' s').replace(/\s*(Days?|D[ií]as?)/i, ' d');   // SN en inglés o en español
             out.push('⏸️ Pausado' + (resta ? ' · le quedan ' + esc(resta) : ''));
           }
           else if (falta <= 0) out.push('🔴 Vencido');
