@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Mobisond · Resumen de turno (WhatsApp)
 // @namespace    mobisond
-// @version      1.4
+// @version      1.5
 // @description  Arma el mensaje de fin de turno (Lineales y GPON) con los números del día, listo para pegar en WhatsApp.
 // @match        https://*.service-now.com/*
 // @grant        GM_registerMenuCommand
@@ -89,8 +89,8 @@
         var p = val(r, 'parent'); if (p) { ids.push(p); dePadre[p] = dv(r, 'number'); }
       });
       if (!ids.length) return {casos: casos, vencidos: {}};
-      var qs = 'taskIN' + ids.join(',') + '^has_breached=true';
-      return api('task_sla', qs, 'task,has_breached,planned_end_time,original_breach_time').then(function (slas) {
+      var qs = 'taskIN' + ids.join(',') + '^has_breached=true^sla.nameLIKENETO';   // solo el SLA NETO
+      return api('task_sla', qs, 'task,sla,has_breached,planned_end_time,original_breach_time').then(function (slas) {
         var porId = {};
         casos.forEach(function (r) { porId[val(r, 'sys_id')] = dv(r, 'number'); });
         var venc = {};
@@ -98,6 +98,7 @@
         slas.forEach(function (s) {
           // vencido = el SLA se venció HOY (no importa qué día entró el caso).
           // Se usa el momento original del vencimiento: si el caso estuvo pausado, el otro campo se corre y daba falsos vencidos.
+          if (!/neto/i.test(dv(s, 'sla'))) return;
           var cuando = val(s, 'original_breach_time') || val(s, 'planned_end_time');
           if (!cuando || !esHoy(cuando) || new Date(cuando.replace(' ', 'T') + 'Z').getTime() > ahora) return;
           var t = val(s, 'task'); var n = porId[t] || dePadre[t]; if (n) venc[n] = 1;
