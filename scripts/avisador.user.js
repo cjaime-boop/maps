@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Mobisond · Aviso de casos nuevos (ServiceNow → celular)
 // @namespace    mobisond
-// @version      2.9
+// @version      2.10
 // @description  Cuando entra un caso nuevo en la lista que vigilás de ServiceNow, te llega una notificación al celular (app ntfy) y a la PC. (Alexa va en otro script.)
 // @match        https://*.service-now.com/*
 // @grant        GM_xmlhttpRequest
@@ -253,10 +253,6 @@
           (hayGrupo() ? '' : ' (NO configurado en esta PC)') + '\n• Alexa (si la tenés en esta PC)');
   });
   GM_registerMenuCommand('Contraseña del equipo', function () { pedirClave(true); });
-  GM_registerMenuCommand('Datos del grupo de Telegram', function () {
-    alert(hayGrupo() ? 'Grupo de Telegram activo.\nNúmero del grupo: ' + GM_getValue('tg_chat') :
-          'Grupo de Telegram sin configurar.' + (GM_getValue('tg_token', '') ? ' (Falta el grupo: usá "Grupo de Telegram".)' : ''));
-  });
   GM_registerMenuCommand('Grupo de Telegram', configurarGrupo);
   GM_registerMenuCommand('Mandar prueba al grupo', function () {
     if (!hayGrupo()) { alert('Primero configurá el grupo (menú "Grupo de Telegram").'); return; }
