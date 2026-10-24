@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Mobisond · Avisador
 // @namespace    mobisond
-// @version      2.30
+// @version      2.31
 // @description  Avisa los casos nuevos (celular, campana y grupo de Telegram), los casos Lineales sin notas de trabajo hace 25 min y los SLA a 1 hora de vencer.
 // @match        https://*.service-now.com/*
 // @grant        GM_xmlhttpRequest
@@ -178,7 +178,8 @@
         if (n && txt) datos[n] = txt;
       });
       var a = tr.querySelector('a.formlink, a.linked');
-      var numero = (datos.number || (a && a.textContent.trim()) || id.slice(0, 8)).replace(/^WOT/i, 'WO');
+      // el número que se muestra es el de la WO (columna Parent); si la lista no la tiene, el de la WOT
+      var numero = datos.parent || datos.number || (a && a.textContent.trim()) || id.slice(0, 8);
       out.push({id: id, numero: numero, datos: datos,
         link: location.origin + '/' + tabla + '.do?sys_id=' + id});
     });
@@ -268,7 +269,7 @@
   });
   GM_registerMenuCommand('⚙️ Configuración', configuracion);
   GM_registerMenuCommand('🔧 Revisar bot', function () {          // diagnóstico temporal de /bandeja
-    var info = ['Versión 2.30', 'Pestaña vigilada: ' + (vigilada() ? 'SÍ' : 'NO'), 'Grupo guardado: ' + (GM_getValue('tg_chat', '') || 'ninguno'),
+    var info = ['Versión 2.31', 'Pestaña vigilada: ' + (vigilada() ? 'SÍ' : 'NO'), 'Grupo guardado: ' + (GM_getValue('tg_chat', '') || 'ninguno'),
                 'Token: ' + (GM_getValue('tg_token', '') ? 'cargado' : 'falta'), 'Último leído: ' + GM_getValue('tg_offset', 0)];
     tg('getWebhookInfo', {}, function (w) {
       info.push('Webhook: ' + (w.url ? w.url : 'no'));
@@ -286,6 +287,7 @@
   // Cada 2 minutos (desde la pestaña vigilada) se consulta ServiceNow por detrás:
   //  1) Lineales en curso, sin pausa, sin notas de trabajo DE MOBISOND hace 25 min -> avisa UNA vez (hasta que haya otra nota).
   //  2) Lineales y GPON en curso, con el SLA NETO corriendo y a 1 hora o menos de vencer -> avisa una vez.
+  //  3) Lineales y GPON en curso, cuando se les vence el SLA NETO -> avisa una vez.
   var GRUPOS = {lineales: 'C-TL-MOBISOND', gpon: 'C-GZ1-MOBI'};
   var SILENCIO_MIN = 25, SLA_MIN = 60, CADA_MS = 2 * 60 * 1000;
 
@@ -318,7 +320,7 @@
   }
   function linkCaso(r) { return location.origin + '/wm_task.do?sys_id=' + vl(r, 'sys_id'); }
   function cuerpo(r, extra) {          // extra: renglón opcional antes del link (ej. "Última nota: …")
-    var num = dv(r, 'number').replace(/^WOT/i, 'WO');
+    var num = woDe(r);
     return esc(num) + (dv(r, 'cmdb_ci') ? ' · ' + esc(dv(r, 'cmdb_ci')) : '') +
       (dv(r, 'short_description') ? '\n' + esc(dv(r, 'short_description')) : '') +
       '\n' + (extra ? esc(extra) + ' · ' : '') + '<a href="' + esc(linkCaso(r)) + '">Abrir en ServiceNow</a>';
@@ -425,12 +427,20 @@
       // 2) SLA a 1 hora de vencer (Lineales y GPON)
       var porId = {};
       casos.forEach(function (r) { porId[vl(r, 'sys_id')] = r; if (vl(r, 'parent')) porId[vl(r, 'parent')] = r; });
-      api('task_sla', 'active=true^has_breached=false^taskIN' + Object.keys(porId).join(','), 'sys_id,task,sla,stage,planned_end_time,original_breach_time')
+      api('task_sla', 'active=true^taskIN' + Object.keys(porId).join(','), 'sys_id,task,sla,stage,has_breached,planned_end_time,original_breach_time')
         .then(function (slas) {
           slas.forEach(function (s) {
-            if (/paus/i.test(vl(s, 'stage') + dv(s, 'stage'))) return;
             if (!/neto/i.test(dv(s, 'sla'))) return;                         // solo el SLA NETO
             var r = porId[vl(s, 'task')]; if (!r) return;
+            // se venció: aviso una vez (solo si se venció hace menos de 30 min, para no avisar de golpe los viejos)
+            if (vl(s, 'has_breached') === 'true') {
+              var cuando = utc(vl(s, 'original_breach_time') || vl(s, 'planned_end_time'));
+              if (cuando && ahora - cuando < 30 * 60000) {
+                unaVezAlGrupo('venc:' + vl(s, 'sys_id'), '🔴 <b>SLA NETO vencido (' + hhmm(cuando) + ')</b>\n' + cuerpo(r));
+              }
+              return;
+            }
+            if (/paus/i.test(vl(s, 'stage') + dv(s, 'stage'))) return;
             var vence = utc(vl(s, 'planned_end_time')), falta = (vence - ahora) / 60000;
             if (falta > 0 && falta <= SLA_MIN) {
               unaVezAlGrupo('sla:' + vl(s, 'sys_id'), '⚠️ <b>SLA vence en ' + Math.round(falta) + ' min (' + hhmm(vence) + ')</b>\n' + cuerpo(r));
@@ -503,19 +513,64 @@
       }, function (e) { listo('no pude verificar al usuario: ' + e); });
       return;
     }
+    if (p.cmd === '/caso') {
+      textoCaso((p.texto || '').trim().split(/\s+/)[1]).then(function (t) {
+        unaVezAlGrupo('cmd:' + p.id, t, p.msg, p.chat, function (ok) { listo(ok ? 'contestado' : 'no se pudo contestar'); });
+      }, function (e) { unaVezAlGrupo('cmd:' + p.id, 'No pude leer el caso de ServiceNow (' + esc(e.message) + ').', p.msg, p.chat); listo('error ServiceNow ' + e.message); });
+      return;
+    }
     if (p.cmd === '/bandeja') {
       textoBandeja().then(function (t) {
         unaVezAlGrupo('cmd:' + p.id, t, p.msg, p.chat, function (ok) { listo(ok ? 'contestado' + (p.chat ? ' por privado' : '') : 'no se pudo contestar'); });
       }, function (e) { unaVezAlGrupo('cmd:' + p.id, 'No pude leer la bandeja de ServiceNow (' + esc(e.message) + ').', p.msg, p.chat); listo('error ServiceNow ' + e.message); });
     } else listo('comando desconocido');
   }
+  function duracion(min) {
+    min = Math.round(Math.abs(min));
+    return min >= 60 ? Math.floor(min / 60) + ' h ' + (min % 60) + ' min' : min + ' min';
+  }
+  function textoCaso(arg) {
+    var n = (arg || '').trim().toUpperCase();
+    if (!n) return Promise.resolve('Decime qué caso: <code>/caso WO0096818</code> (también sirve el WOT o el CS).');
+    var q = /^WOT/.test(n) ? 'number=' + n : /^WO/.test(n) ? 'parent.number=' + n : /^CS/.test(n) ? 'short_descriptionSTARTSWITH' + n : 'number=' + n;
+    var campos = 'sys_id,number,parent,state,substate,u_pause_reason,priority,assigned_to,cmdb_ci,short_description,opened_at,assignment_group,active';
+    return api('wm_task', q + '^ORDERBYDESCopened_at', campos).then(function (rs) {
+      if (!rs.length) return 'No encontré el caso ' + esc(n) + '.';
+      var r = rs[0], ahora = Date.now();
+      var ids = [vl(r, 'sys_id')]; if (vl(r, 'parent')) ids.push(vl(r, 'parent'));
+      return Promise.all([
+        ultimasNotas([r]).catch(function () { return {}; }),
+        api('task_sla', 'active=true^taskIN' + ids.join(','), 'sla,stage,has_breached,planned_end_time').catch(function () { return null; })
+      ]).then(function (res) {
+        var nota = res[0][vl(r, 'sys_id')], slas = res[1];
+        var estado = dv(r, 'state') + (pausado(r) ? ' · ⏸️ ' + (dv(r, 'u_pause_reason') || 'en pausa') : '');
+        var out = ['🔎 <b>' + esc(woDe(r)) + '</b> · ' + esc(dv(r, 'cmdb_ci') || 'sin CI'),
+                   esc(dv(r, 'short_description')),
+                   'Estado: ' + esc(estado),
+                   'Prioridad: ' + esc(dv(r, 'priority')) + ' · Asignado: ' + esc(dv(r, 'assigned_to') || 'sin asignar')];
+        out.push('Última nota Mobisond: ' + (nota && nota.t ? esc(nota.quien || 'sin nombre') + ' · hace ' + duracion((ahora - nota.t) / 60000) + ' (' + hhmm(nota.t) + ')' : 'ninguna'));
+        var neto = (slas || []).filter(function (x) { return /neto/i.test(dv(x, 'sla')); })[0];
+        if (slas === null) out.push('SLA neto: no lo pude leer');
+        else if (!neto) out.push('SLA neto: ' + (vl(r, 'active') === 'false' ? 'caso cerrado' : 'sin SLA activo'));
+        else {
+          var vence = utc(vl(neto, 'planned_end_time')), falta = (vence - ahora) / 60000;
+          if (vl(neto, 'has_breached') === 'true' || falta <= 0) out.push('SLA neto: 🔴 vencido');
+          else if (/paus/i.test(vl(neto, 'stage') + dv(neto, 'stage'))) out.push('SLA neto: ⏸️ pausado');
+          else out.push('SLA neto: ' + (falta <= 60 ? '⚠️ ' : '') + 'quedan ' + duracion(falta) + ' (vence ' + hhmm(vence) + ')');
+        }
+        out.push('<a href="' + esc(linkCaso(r)) + '">Abrir en ServiceNow</a>');
+        return out.join('\n');
+      });
+    });
+  }
   var leyendo = false;
   function comandos() {
     if (!hayGrupo() || !vigilada()) return;
     atenderPendientes();
     if (leyendo) return;
-    if (GM_getValue('tg_cmds', 0) < 1) {     // menú de comandos del bot (aparece al escribir "/" en el grupo)
-      tg('setMyCommands', {commands: [{command: 'bandeja', description: 'Casos abiertos de Lineales y GPON'}]}, function () { GM_setValue('tg_cmds', 1); });
+    if (GM_getValue('tg_cmds', 0) < 2) {     // menú de comandos del bot (aparece al escribir "/" en el grupo)
+      tg('setMyCommands', {commands: [{command: 'bandeja', description: 'Casos abiertos de Lineales y GPON'},
+                                      {command: 'caso', description: 'Detalle de un caso: /caso WO0096818'}]}, function () { GM_setValue('tg_cmds', 2); });
     }
     leyendo = true;
     tg('getUpdates', {offset: GM_getValue('tg_offset', 0), timeout: 0, allowed_updates: ['message']}, function (ups) {
@@ -535,7 +590,7 @@
         }
         botLog('recibí ' + cmd + (privado ? ' por privado de ' + (m.from && m.from.first_name || '?') : ''));
         // por privado solo se contesta a quien esté en el grupo del equipo (se revisa al atenderlo)
-        pend.push({id: u.update_id, msg: m.message_id, cmd: cmd, cuando: Date.now(), chat: privado ? m.chat.id : null, quien: privado && m.from ? m.from.id : null});
+        pend.push({id: u.update_id, msg: m.message_id, cmd: cmd, texto: m.text, cuando: Date.now(), chat: privado ? m.chat.id : null, quien: privado && m.from ? m.from.id : null});
       });
       GM_setValue('tg_pend', pend);
       GM_setValue('tg_offset', ups[ups.length - 1].update_id + 1);
