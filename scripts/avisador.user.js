@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Mobisond · Avisador
 // @namespace    mobisond
-// @version      2.36
+// @version      2.37
 // @description  Avisa los casos nuevos (celular, campana y grupo de Telegram), los casos Lineales sin notas de trabajo hace 25 min y los SLA a 1 hora de vencer.
 // @match        https://*.service-now.com/*
 // @grant        GM_xmlhttpRequest
@@ -15,6 +15,7 @@
 // @connect      api.telegram.org
 // @connect      docs.google.com
 // @connect      googleusercontent.com
+// @connect      supabase.co
 // @updateURL    https://cjaime-boop.github.io/maps/scripts/avisador.user.js
 // @downloadURL  https://cjaime-boop.github.io/maps/scripts/avisador.user.js
 // @run-at       document-idle
@@ -271,10 +272,15 @@
   });
   GM_registerMenuCommand('⚙️ Configuración', configuracion);
   GM_registerMenuCommand('🔧 Revisar bot', function () {          // diagnóstico temporal de /bandeja
-    var info = ['Versión 2.36', 'Pestaña vigilada: ' + (vigilada() ? 'SÍ' : 'NO'), 'Grupo guardado: ' + (GM_getValue('tg_chat', '') || 'ninguno'),
+    var info = ['Versión 2.37', 'Pestaña vigilada: ' + (vigilada() ? 'SÍ' : 'NO'), 'Grupo guardado: ' + (GM_getValue('tg_chat', '') || 'ninguno'),
                 'Token: ' + (GM_getValue('tg_token', '') ? 'cargado' : 'falta'), 'Último leído: ' + GM_getValue('tg_offset', 0)];
     tg('getWebhookInfo', {}, function (w) {
-      info.push('Webhook: ' + (w.url ? w.url : 'no'));
+      info.push('Webhook: ' + (w.url ? w.url : 'no') + (w.last_error_message ? '\nÚltimo error de Telegram: ' + w.last_error_message : '') +
+                (w.pending_update_count ? '\nPendientes en Telegram: ' + w.pending_update_count : ''));
+      if (w.url) {
+        info.push('', 'Lo último que hizo el bot:'); GM_getValue('tg_log', []).forEach(function (l) { info.push('  ' + l); });
+        alert(info.join('\n')); return;
+      }
       tg('getUpdates', {timeout: 0, allowed_updates: ['message']}, function (ups) {
         info.push('Mensajes pendientes: ' + ups.length);
         ups.slice(-3).forEach(function (u) { var m = u.message || {}; info.push('  #' + u.update_id + ' ' + (m.chat ? m.chat.id + ' ' + (m.chat.title || '') : '') + ': ' + (m.text || '(sin texto)')); });
@@ -508,6 +514,7 @@
       atenderPendientes.ocupado = false;
       GM_setValue('tg_pend', GM_getValue('tg_pend', []).filter(function (x) { return x.id !== p.id; }));
       botLog(p.cmd + ': ' + que);
+      if (p.sb) sbRpc('bot_listo', {p_id: p.id}).catch(function () {});   // Supabase: avisar que ya se contestó
     };
     if (p.chat && !p.verificado) {           // privado: ¿es del grupo del equipo?
       tg('getChatMember', {chat_id: GM_getValue('tg_chat'), user_id: p.quien}, function (mb) {
@@ -536,7 +543,7 @@
     }
     if (p.cmd === '/bandeja') {
       textoBandeja().then(function (t) {
-        unaVezAlGrupo('cmd:' + p.id, t, p.msg, p.chat, function (ok) { listo(ok ? 'contestado' + (p.chat ? ' por privado' : '') : 'no se pudo contestar'); });
+        unaVezAlGrupo('cmd:' + p.id, t, p.msg, p.chat, function (ok) { listo(ok ? 'contestado' + (p.chat && String(p.chat) !== String(GM_getValue('tg_chat')) ? ' por privado' : '') : 'no se pudo contestar'); });
       }, function (e) { unaVezAlGrupo('cmd:' + p.id, 'No pude leer la bandeja de ServiceNow (' + esc(e.message) + ').', p.msg, p.chat); listo('error ServiceNow ' + e.message); });
     } else listo('comando desconocido');
   }
@@ -644,11 +651,58 @@
     return out.join('\n');
   }
 
+  // ---- modo Supabase: el bot vive en una Edge Function (siempre prendida) que anota en Supabase los pedidos
+  // que necesitan ServiceNow; esta PC los toma de ahí. Se usa si el bot tiene el "webhook" apuntando a Supabase.
+  var SB_URL = 'https://gnqvhlpknxtdnzuxfybc.supabase.co', SB_PUBLICA = 'sb_publishable_dUhjyCfRfNtLVLfOYnJ1WA_hfPD3kk9';
+  var SB_CLAVE_CERRADA = 'bJrezExAXJxoyFvb0o308Q==.ZboOXClNC9Ip+ElA.W16qHZOZc4b+j9Hh2sXBpphx4IDVonNvZwAhN85Fr2uV4530JZFIgoc/QytC6qN8';
+  var sbClave = null, modoBot = null;           // modoBot: 'supabase' | 'telegram' (se averigua al cargar)
+  function sbRpc(fn, args) {
+    var ir = sbClave ? Promise.resolve(sbClave) : abrirToken(GM_getValue('tg_token', ''), SB_CLAVE_CERRADA).then(function (c) { sbClave = c; return c; });
+    return ir.then(function (clave) {
+      args.p_clave = clave;
+      return new Promise(function (ok, mal) {
+        GM_xmlhttpRequest({method: 'POST', url: SB_URL + '/rest/v1/rpc/' + fn, timeout: 10000,
+          headers: {'apikey': SB_PUBLICA, 'Content-Type': 'application/json'}, data: JSON.stringify(args),
+          onload: function (r) { if (r.status < 300) { try { ok(JSON.parse(r.responseText || 'null')); } catch (e) { ok(null); } } else mal(new Error('Supabase ' + r.status)); },
+          onerror: function () { mal(new Error('sin conexión con Supabase')); }, ontimeout: function () { mal(new Error('Supabase tardó')); }});
+      });
+    });
+  }
+  function pcId() {
+    var id = GM_getValue('pc_id', '');
+    if (!id) { id = 'pc-' + Math.random().toString(36).slice(2, 10); GM_setValue('pc_id', id); }
+    return id;
+  }
+  var tomando = false;
+  function tomarDeSupabase() {
+    if (tomando) return;
+    tomando = true;
+    sbRpc('bot_tomar', {p_pc: pcId()}).then(function (filas) {
+      tomando = false;
+      if (!filas || !filas.length) return;
+      var pend = GM_getValue('tg_pend', []);
+      filas.forEach(function (f) {
+        if (pend.some(function (x) { return x.id === f.id; })) return;
+        botLog('recibí ' + f.cmd + ' (Supabase)');
+        pend.push({id: f.id, msg: f.msg_id, cmd: f.cmd, texto: f.texto, cuando: Date.now(), chat: f.chat_id, verificado: true, sb: true});
+      });
+      GM_setValue('tg_pend', pend);
+      atenderPendientes();
+    }, function (e) { tomando = false; botLog('Supabase: ' + e.message); });
+  }
+
   var leyendo = false;
   function comandos() {
     if (!hayGrupo() || !vigilada()) return;
     atenderPendientes();
-    if (leyendo) return;
+    if (modoBot === null) {                    // ¿el bot está conectado a Supabase?
+      modoBot = 'esperando';
+      tg('getWebhookInfo', {}, function (w) { modoBot = /supabase/.test(w.url || '') ? 'supabase' : 'telegram'; botLog('modo del bot: ' + modoBot); },
+         function () { modoBot = null; });
+      return;
+    }
+    if (modoBot === 'supabase') { tomarDeSupabase(); return; }
+    if (modoBot !== 'telegram' || leyendo) return;
     if (GM_getValue('tg_cmds', 0) < 3) {     // menú de comandos del bot (aparece al escribir "/" en el grupo)
       tg('setMyCommands', {commands: [{command: 'bandeja', description: 'Casos abiertos de Lineales y GPON'},
                                       {command: 'caso', description: 'Detalle de un caso: /caso WO0096818'},
