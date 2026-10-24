@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Mobisond · Avisador
 // @namespace    mobisond
-// @version      2.33
+// @version      2.34
 // @description  Avisa los casos nuevos (celular, campana y grupo de Telegram), los casos Lineales sin notas de trabajo hace 25 min y los SLA a 1 hora de vencer.
 // @match        https://*.service-now.com/*
 // @grant        GM_xmlhttpRequest
@@ -269,7 +269,7 @@
   });
   GM_registerMenuCommand('⚙️ Configuración', configuracion);
   GM_registerMenuCommand('🔧 Revisar bot', function () {          // diagnóstico temporal de /bandeja
-    var info = ['Versión 2.33', 'Pestaña vigilada: ' + (vigilada() ? 'SÍ' : 'NO'), 'Grupo guardado: ' + (GM_getValue('tg_chat', '') || 'ninguno'),
+    var info = ['Versión 2.34', 'Pestaña vigilada: ' + (vigilada() ? 'SÍ' : 'NO'), 'Grupo guardado: ' + (GM_getValue('tg_chat', '') || 'ninguno'),
                 'Token: ' + (GM_getValue('tg_token', '') ? 'cargado' : 'falta'), 'Último leído: ' + GM_getValue('tg_offset', 0)];
     tg('getWebhookInfo', {}, function (w) {
       info.push('Webhook: ' + (w.url ? w.url : 'no'));
@@ -345,49 +345,42 @@
     return MOBISOND.indexOf(huella(n)) >= 0 || (p.length > 2 && MOBISOND.indexOf(huella(p[0] + ' ' + p[p.length - 1])) >= 0) ||
            (p.length > 2 && MOBISOND.indexOf(huella(p[0] + ' ' + p[p.length - 2])) >= 0);
   }
-  // todas las notas del campo, de la más nueva a la más vieja: "2026-10-24 05:12:33 - Juan Pérez (Notas de trabajo)"
+  // todas las entradas de un campo de notas: "2026-10-24 05:12:33 - Juan Pérez (Notas de trabajo)" / "(Additional comments)"
   function notasDelTexto(t) {
-    var re = /(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}|\d{2}[\/-]\d{2}[\/-]\d{4} \d{2}:\d{2}:\d{2}) - (.+?) \((?:Notas de trabajo|Work notes)\)/gi, m, out = [];
+    var re = /(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}|\d{2}[\/-]\d{2}[\/-]\d{4} \d{2}:\d{2}:\d{2}) - (.+?) \((?:Notas de trabajo|Work notes|Comentarios adicionales|Additional comments|Comentarios)\)/gi, m, out = [];
     while ((m = re.exec(t || ''))) out.push({t: fechaJournal(m[1]), quien: m[2].trim()});
     return out;
   }
-  function ultimasNotas(casos) {      // devuelve {sys_id de la WOT: {t, quien}} con la última nota de Mobisond
+  // Última nota de gente de Mobisond en la WO (padre): notas de trabajo y comentarios adicionales.
+  // Se leen por dos caminos y se toma la más nueva: los campos de la WO (texto) y la tabla de notas
+  // (que a veces viene vacía por permisos). Devuelve {sys_id de la WOT: {t, quien}}.
+  function ultimasNotas(casos) {
     var dePadre = {};                 // sys_id de la WO -> [sys_id de las WOT]
     casos.forEach(function (r) { var p = vl(r, 'parent'); if (p) (dePadre[p] = dePadre[p] || []).push(vl(r, 'sys_id')); });
     var padres = Object.keys(dePadre);
-    var repartir = function (porPadre) {
-      var u = {};
-      Object.keys(porPadre).forEach(function (p) { (dePadre[p] || []).forEach(function (id) { u[id] = porPadre[p]; }); });
-      return u;
-    };
-    var porTexto = function () {
-      return api('wm_order', 'sys_idIN' + padres.join(','), 'sys_id,work_notes').then(function (wos) {
-        var u = {};
-        wos.forEach(function (w) {
-          var ns = notasDelTexto(dv(w, 'work_notes')).filter(function (n) { return n.t && esNuestro(n.quien); });
-          if (ns.length) u[vl(w, 'sys_id')] = ns.reduce(function (a, b) { return b.t > a.t ? b : a; });
-        });
-        return repartir(u);
-      });
-    };
     if (!padres.length) return Promise.resolve({});
-    return api('sys_journal_field', 'element=work_notes^element_idIN' + padres.join(','), 'element_id,sys_created_on,sys_created_by').then(function (ns) {
+    var mejor = {};                   // sys_id de la WO -> {t, quien}
+    var sumar = function (wo, n) { if (n && n.t && esNuestro(n.quien) && (!mejor[wo] || n.t > mejor[wo].t)) mejor[wo] = n; };
+    var porTexto = api('wm_order', 'sys_idIN' + padres.join(','), 'sys_id,work_notes,comments').then(function (wos) {
+      wos.forEach(function (w) {
+        notasDelTexto(dv(w, 'work_notes') + '\n' + dv(w, 'comments')).forEach(function (n) { sumar(vl(w, 'sys_id'), n); });
+      });
+    }, function (e) { console.log('[Mobisond] notas (WO): ' + e.message); });
+    var porTabla = api('sys_journal_field', 'element=work_notes^ORelement=comments^element_idIN' + padres.join(','), 'element_id,sys_created_on,sys_created_by').then(function (ns) {
       var usuarios = {};
       ns.forEach(function (n) { if (vl(n, 'sys_created_by')) usuarios[vl(n, 'sys_created_by')] = 1; });
-      if (!Object.keys(usuarios).length) return {};
+      if (!Object.keys(usuarios).length) return;
       // el autor viene como usuario (ej. jperez): se busca el nombre completo para saber si es de Mobisond
       return api('sys_user', 'user_nameIN' + Object.keys(usuarios).join(','), 'user_name,name').then(function (us) {
         var nom = {}; us.forEach(function (x) { nom[vl(x, 'user_name')] = dv(x, 'name'); });
-        var u = {};
-        ns.forEach(function (n) {
-          var quien = nom[vl(n, 'sys_created_by')] || '';
-          if (!esNuestro(quien)) return;
-          var id = vl(n, 'element_id'), t = utc(vl(n, 'sys_created_on'));
-          if (!u[id] || t > u[id].t) u[id] = {t: t, quien: quien};
-        });
-        return repartir(u);
-      }, porTexto);                    // sin permiso para ver nombres: se leen del texto de las notas
-    }, porTexto);
+        ns.forEach(function (n) { sumar(vl(n, 'element_id'), {t: utc(vl(n, 'sys_created_on')), quien: nom[vl(n, 'sys_created_by')] || ''}); });
+      });
+    }).catch(function () {});
+    return Promise.all([porTexto, porTabla]).then(function () {
+      var u = {};
+      Object.keys(mejor).forEach(function (p) { (dePadre[p] || []).forEach(function (id) { u[id] = mejor[p]; }); });
+      return u;
+    });
   }
 
   function controles() {
@@ -418,7 +411,7 @@
           var base = Math.max(nota.t, utc(vl(r, 'work_start')), v.pausa || 0, nota.t || utc(vl(r, 'work_start')) ? 0 : v.desde);
           var min = (ahora - base) / 60000;
           if (min >= SILENCIO_MIN && min < SILENCIO_MIN + 20) {     // recién cruzó los 25 min (no avisa de golpe los viejos)
-            unaVezAlGrupo('nota:' + id + ':' + base, '⏱️ <b>Sin notas de trabajo hace ' + Math.floor(min) + ' min</b>\n' +
+            unaVezAlGrupo('nota:' + id + ':' + base, '⏱️ <b>Sin notas hace ' + Math.floor(min) + ' min</b>\n' +
                           cuerpo(r, nota.t ? 'Última nota: ' + (nota.quien || 'sin nombre') + ' (' + hhmm(nota.t) + ')' : 'Todavía sin notas'));
           }
         });
