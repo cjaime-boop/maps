@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Mobisond · Aviso de casos nuevos (ServiceNow → celular)
 // @namespace    mobisond
-// @version      2.12
+// @version      2.13
 // @description  Cuando entra un caso nuevo en la lista que vigilás de ServiceNow, te llega una notificación al celular (app ntfy) y a la PC. (Alexa va en otro script.)
 // @match        https://*.service-now.com/*
 // @grant        GM_xmlhttpRequest
@@ -216,15 +216,14 @@
           'Ahora se abre la campana: tocá "Activar campana" para que también suene en la PC.');
     abrirCampana();
   });
-  GM_registerMenuCommand('Mi canal del celular', function () {
+  function cambiarCanal() {
     var nuevo = prompt('Este es tu canal. En la app ntfy del celular tocá "+" y suscribite a este nombre ' +
                        '(si ya tenés uno, podés pegarlo acá y Aceptar):', canal());
     if (nuevo && nuevo.trim() && nuevo.trim() !== canal()) {
       GM_setValue('canal', nuevo.trim().replace(/[^\w-]/g, ''));
       alert('Listo, ahora aviso al canal: ' + GM_getValue('canal') + '\nRecargá la página para que tome el cambio.');
     }
-  });
-  GM_registerMenuCommand('Abrir la campana de la PC', abrirCampana);
+  }
   GM_registerMenuCommand('¿Qué lista vigilo?', function () {
     var k = GM_getValue('lista', ''), tit = GM_getValue('lista_titulo', '');
     if (!k) { alert('No estoy vigilando ninguna lista. Abrí la de Pending Dispatch y elegí "Vigilar esta lista".'); return; }
@@ -244,9 +243,34 @@
     alert('Prueba mandada. Fijate que llegue:\n\n• al celular (ntfy)\n• a la campana\n• al grupo de Telegram' +
           (hayGrupo() ? '' : ' (NO configurado en esta PC)') + '\n• Alexa (si la tenés en esta PC)');
   });
-  GM_registerMenuCommand('Contraseña del equipo', function () { pedirClave(true); });
-  GM_registerMenuCommand('Grupo de Telegram', configurarGrupo);
+  GM_registerMenuCommand('⚙️ Configuración', configuracion);
   GM_registerMenuCommand('Dejar de vigilar', function () { GM_setValue('lista', ''); alert('Ya no vigilo ninguna lista.'); });
+
+  // ---------------------------------------------------------------- panel de configuración
+  function configuracion() {
+    var v = document.getElementById('mbs-conf'); if (v) v.remove();
+    var p = document.createElement('div');
+    p.id = 'mbs-conf';
+    p.style.cssText = 'position:fixed;inset:0;z-index:2147483646;background:rgba(15,23,42,.35);display:flex;align-items:center;justify-content:center;font:14px "Segoe UI",Arial';
+    var grupo = hayGrupo() ? 'activo' : 'sin configurar';
+    p.innerHTML = '<div style="background:#fff;color:#1f2937;border-radius:12px;width:340px;box-shadow:0 10px 30px rgba(0,0,0,.25);overflow:hidden">' +
+      '<div style="display:flex;align-items:center;padding:12px 14px;border-bottom:1px solid #eef0f2"><b style="font-size:15px">⚙️ Configuración de avisos</b>' +
+      '<span data-a="x" style="margin-left:auto;color:#9ca3af;cursor:pointer;font-size:16px">✕</span></div>' +
+      [['canal', '📱 Mi canal del celular', canal()],
+       ['clave', '🔑 Contraseña del equipo', GM_getValue('tg_token', '') ? 'cargada' : 'falta cargar'],
+       ['grupo', '💬 Grupo de Telegram', grupo],
+       ['campana', '🔔 Abrir la campana de la PC', 'si la cerraste']].map(function (o) {
+        return '<div data-a="' + o[0] + '" style="padding:11px 14px;border-bottom:1px solid #f3f4f6;cursor:pointer">' + o[1] +
+               '<div style="color:#6b7280;font-size:12px;margin-top:2px">' + o[2] + '</div></div>';
+      }).join('') + '</div>';
+    p.onclick = function (e) {
+      var a = e.target.closest('[data-a]'); if (e.target === p) a = {dataset: {a: 'x'}};
+      if (!a) return;
+      p.remove();
+      ({canal: cambiarCanal, clave: function () { pedirClave(true); }, grupo: configurarGrupo, campana: abrirCampana, x: function () {}})[a.dataset.a]();
+    };
+    document.body.appendChild(p);
+  }
 
   // ---------------------------------------------------------------- cuándo revisar
   if (!claveLista()) return;
