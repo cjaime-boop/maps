@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Mobisond · Avisador
 // @namespace    mobisond
-// @version      2.42
+// @version      2.43
 // @description  Avisa los casos nuevos (celular, campana y grupo de Telegram), los casos Lineales sin notas de trabajo hace 25 min y los SLA a 1 hora de vencer.
 // @match        https://*.service-now.com/*
 // @grant        GM_xmlhttpRequest
@@ -98,11 +98,21 @@
     return 'https://ntfy.sh/mobisond-grupo-' + h.toString(36);
   }
   function esc(t) { return String(t).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
+  function colorPrio(p) { return /^1/.test(p) ? '🔴' : /^2/.test(p) ? '🟠' : /^3/.test(p) ? '🟡' : '⚪'; }
+  // bloque común de los avisos: WO en negrita, CI, descripción en cursiva, (extra) y link
+  function bloqueCaso(wo, ci, desc, link, extra) {
+    return '\n\n<b>' + esc(wo) + '</b>' + (ci ? '\n' + esc(ci) : '') +
+      (desc ? '\n\n<i>' + esc(desc) + '</i>' : '') + '\n\n' + (extra ? extra + '\n' : '') +
+      '🔗 <a href="' + esc(link) + '">Abrir en ServiceNow</a>';
+  }
+  var DRAMA = ['Se terminó la paz 😩', 'Arriba, que hay laburo 💪', 'Nadie lo pidió, pero llegó 🙃', 'A ponerse las pilas ⚡',
+               'Y justo cuando estaba todo tranquilo… 😬', 'Atención, atención 📢'];
   function mensajeGrupo(f, prueba) {
-    var d = f.datos;
-    var linea = [d.priority, d.cmdb_ci].filter(Boolean).join(' · ');
-    return '🔔 <b>' + (prueba ? 'Prueba · ' : 'Entró ') + esc(f.numero) + '</b>' + (linea ? '\n' + esc(linea) : '') +
-      (d.short_description ? '\n' + esc(d.short_description) : '') + '\n<a href="' + esc(f.link) + '">Abrir en ServiceNow</a>';
+    var d = f.datos, prio = d.priority || '';
+    var titulo = prueba ? '🧪 <b>Prueba de caso nuevo</b>'
+                        : '🚨🚨 <b>¡Entró un caso!</b> 🚨🚨\n<i>' + DRAMA[Math.floor(Math.random() * DRAMA.length)] + '</i>';
+    var lineaPrio = prio ? '\n\n' + colorPrio(prio) + ' <b>' + esc(prio) + '</b>' + (/^1/.test(prio) && !prueba ? ' 🔥' : '') : '';
+    return titulo + lineaPrio + bloqueCaso(f.numero, d.cmdb_ci, d.short_description, f.link);
   }
   // Manda al grupo una sola vez por "clave", aunque varias PCs lo detecten (se anota en un canal ntfy compartido).
   function unaVezAlGrupo(clave, html, responderA, chatId, alTerminar) {   // chatId: para contestar por privado (si no, al grupo)
@@ -269,7 +279,7 @@
   });
   GM_registerMenuCommand('⚙️ Configuración', configuracion);
   GM_registerMenuCommand('🔧 Revisar bot', function () {          // diagnóstico temporal de /bandeja
-    var info = ['Versión 2.42', 'Pestaña vigilada: ' + (vigilada() ? 'SÍ' : 'NO'), 'Grupo guardado: ' + (GM_getValue('tg_chat', '') || 'ninguno'),
+    var info = ['Versión 2.43', 'Pestaña vigilada: ' + (vigilada() ? 'SÍ' : 'NO'), 'Grupo guardado: ' + (GM_getValue('tg_chat', '') || 'ninguno'),
                 'Token: ' + (GM_getValue('tg_token', '') ? 'cargado' : 'falta'), 'Último leído: ' + GM_getValue('tg_offset', 0)];
     tg('getWebhookInfo', {}, function (w) {
       info.push('Webhook: ' + (w.url ? w.url : 'no') + (w.last_error_message ? '\nÚltimo error de Telegram: ' + w.last_error_message : '') +
@@ -324,11 +334,8 @@
     return g.indexOf(GRUPOS.lineales) === 0 ? 'Lineales' : g.indexOf(GRUPOS.gpon) === 0 ? 'GPON' : '';
   }
   function linkCaso(r) { return location.origin + '/wm_task.do?sys_id=' + vl(r, 'sys_id'); }
-  function cuerpo(r, extra) {          // extra: renglón opcional antes del link (ej. "Última nota: …")
-    var num = woDe(r);
-    return esc(num) + (dv(r, 'cmdb_ci') ? ' · ' + esc(dv(r, 'cmdb_ci')) : '') +
-      (dv(r, 'short_description') ? '\n' + esc(dv(r, 'short_description')) : '') +
-      '\n' + (extra ? esc(extra) + ' · ' : '') + '<a href="' + esc(linkCaso(r)) + '">Abrir en ServiceNow</a>';
+  function cuerpo(r, extra) {          // extra: renglón (ya en HTML) antes del link, ej. "📝 Última: …"
+    return bloqueCaso(woDe(r), dv(r, 'cmdb_ci'), dv(r, 'short_description'), linkCaso(r), extra);
   }
 
   // última nota de trabajo de cada caso. Las notas se cargan en la WO (padre), no en la WOT.
@@ -430,8 +437,8 @@
           var base = Math.max(nota.t, utc(vl(r, 'work_start')), v.pausa || 0, nota.t || utc(vl(r, 'work_start')) ? 0 : v.desde);
           var min = (ahora - base) / 60000;
           if (min >= SILENCIO_MIN && min < SILENCIO_MIN + 20) {     // recién cruzó los 25 min (no avisa de golpe los viejos)
-            unaVezAlGrupo('nota:' + id + ':' + base, '⏱️ <b>Sin notas hace ' + Math.floor(min) + ' min</b>\n' +
-                          cuerpo(r, nota.t ? 'Última nota: ' + (nota.quien || 'sin nombre') + (nota.foto ? ', foto' : '') + ' (' + hhmm(nota.t) + ')' : 'Todavía sin notas'));
+            unaVezAlGrupo('nota:' + id + ':' + base, '⏱️ <b>' + Math.floor(min) + ' min sin notas de Mobisond</b>' +
+                          cuerpo(r, '📝 ' + (nota.t ? 'Última: ' + esc(nota.quien || 'sin nombre') + (nota.foto ? ' (foto)' : '') + ' · ' + hhmm(nota.t) : 'Todavía sin notas')));
           }
         });
       });
@@ -448,14 +455,14 @@
             if (vl(s, 'has_breached') === 'true') {
               var cuando = utc(vl(s, 'original_breach_time') || vl(s, 'planned_end_time'));
               if (cuando && ahora - cuando < 30 * 60000) {
-                unaVezAlGrupo('venc:' + vl(s, 'sys_id'), '🔴 <b>SLA NETO vencido (' + hhmm(cuando) + ')</b>\n' + cuerpo(r));
+                unaVezAlGrupo('venc:' + vl(s, 'sys_id'), '🔴 <b>SLA neto vencido</b> · ' + hhmm(cuando) + cuerpo(r));
               }
               return;
             }
             if (/paus/i.test(vl(s, 'stage') + dv(s, 'stage'))) return;
             var vence = utc(vl(s, 'planned_end_time')), falta = (vence - ahora) / 60000;
             if (falta > 0 && falta <= SLA_MIN) {
-              unaVezAlGrupo('sla:' + vl(s, 'sys_id'), '⚠️ <b>SLA vence en ' + Math.round(falta) + ' min (' + hhmm(vence) + ')</b>\n' + cuerpo(r));
+              unaVezAlGrupo('sla:' + vl(s, 'sys_id'), '⚠️ <b>SLA neto vence en ' + Math.round(falta) + ' min</b> · ' + hhmm(vence) + cuerpo(r));
             }
           });
         }, function () {});
