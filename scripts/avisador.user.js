@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Mobisond · Avisador
 // @namespace    mobisond
-// @version      2.34
+// @version      2.35
 // @description  Avisa los casos nuevos (celular, campana y grupo de Telegram), los casos Lineales sin notas de trabajo hace 25 min y los SLA a 1 hora de vencer.
 // @match        https://*.service-now.com/*
 // @grant        GM_xmlhttpRequest
@@ -269,7 +269,7 @@
   });
   GM_registerMenuCommand('⚙️ Configuración', configuracion);
   GM_registerMenuCommand('🔧 Revisar bot', function () {          // diagnóstico temporal de /bandeja
-    var info = ['Versión 2.34', 'Pestaña vigilada: ' + (vigilada() ? 'SÍ' : 'NO'), 'Grupo guardado: ' + (GM_getValue('tg_chat', '') || 'ninguno'),
+    var info = ['Versión 2.35', 'Pestaña vigilada: ' + (vigilada() ? 'SÍ' : 'NO'), 'Grupo guardado: ' + (GM_getValue('tg_chat', '') || 'ninguno'),
                 'Token: ' + (GM_getValue('tg_token', '') ? 'cargado' : 'falta'), 'Último leído: ' + GM_getValue('tg_offset', 0)];
     tg('getWebhookInfo', {}, function (w) {
       info.push('Webhook: ' + (w.url ? w.url : 'no'));
@@ -351,7 +351,7 @@
     while ((m = re.exec(t || ''))) out.push({t: fechaJournal(m[1]), quien: m[2].trim()});
     return out;
   }
-  // Última nota de gente de Mobisond en la WO (padre): notas de trabajo y comentarios adicionales.
+  // Última actividad de gente de Mobisond en la WO (padre): notas de trabajo, comentarios adicionales y fotos/archivos subidos.
   // Se leen por dos caminos y se toma la más nueva: los campos de la WO (texto) y la tabla de notas
   // (que a veces viene vacía por permisos). Devuelve {sys_id de la WOT: {t, quien}}.
   function ultimasNotas(casos) {
@@ -376,7 +376,21 @@
         ns.forEach(function (n) { sumar(vl(n, 'element_id'), {t: utc(vl(n, 'sys_created_on')), quien: nom[vl(n, 'sys_created_by')] || ''}); });
       });
     }).catch(function () {});
-    return Promise.all([porTexto, porTabla]).then(function () {
+    // fotos y archivos subidos (a la WO o a la WOT) también cuentan
+    var woDeWot = {}; casos.forEach(function (r) { if (vl(r, 'parent')) woDeWot[vl(r, 'sys_id')] = vl(r, 'parent'); });
+    var porAdjuntos = api('sys_attachment', 'table_sys_idIN' + padres.concat(Object.keys(woDeWot)).join(','), 'table_sys_id,sys_created_on,sys_created_by').then(function (as) {
+      var usuarios = {};
+      as.forEach(function (a) { if (vl(a, 'sys_created_by')) usuarios[vl(a, 'sys_created_by')] = 1; });
+      if (!Object.keys(usuarios).length) return;
+      return api('sys_user', 'user_nameIN' + Object.keys(usuarios).join(','), 'user_name,name').then(function (us) {
+        var nom = {}; us.forEach(function (x) { nom[vl(x, 'user_name')] = dv(x, 'name'); });
+        as.forEach(function (a) {
+          var dueño = woDeWot[vl(a, 'table_sys_id')] || vl(a, 'table_sys_id');
+          sumar(dueño, {t: utc(vl(a, 'sys_created_on')), quien: (nom[vl(a, 'sys_created_by')] || ''), foto: true});
+        });
+      });
+    }).catch(function (e) { console.log('[Mobisond] adjuntos: ' + (e && e.message)); });
+    return Promise.all([porTexto, porTabla, porAdjuntos]).then(function () {
       var u = {};
       Object.keys(mejor).forEach(function (p) { (dePadre[p] || []).forEach(function (id) { u[id] = mejor[p]; }); });
       return u;
@@ -412,7 +426,7 @@
           var min = (ahora - base) / 60000;
           if (min >= SILENCIO_MIN && min < SILENCIO_MIN + 20) {     // recién cruzó los 25 min (no avisa de golpe los viejos)
             unaVezAlGrupo('nota:' + id + ':' + base, '⏱️ <b>Sin notas hace ' + Math.floor(min) + ' min</b>\n' +
-                          cuerpo(r, nota.t ? 'Última nota: ' + (nota.quien || 'sin nombre') + ' (' + hhmm(nota.t) + ')' : 'Todavía sin notas'));
+                          cuerpo(r, nota.t ? 'Última nota: ' + (nota.quien || 'sin nombre') + (nota.foto ? ', foto' : '') + ' (' + hhmm(nota.t) + ')' : 'Todavía sin notas'));
           }
         });
       });
@@ -541,7 +555,7 @@
                    esc(dv(r, 'short_description')),
                    'Estado: ' + esc(estado),
                    'Prioridad: ' + esc(dv(r, 'priority')) + ' · Asignado: ' + esc(dv(r, 'assigned_to') || 'sin asignar')];
-        out.push('Última nota Mobisond: ' + (nota && nota.t ? esc(nota.quien || 'sin nombre') + ' · hace ' + duracion((ahora - nota.t) / 60000) + ' (' + hhmm(nota.t) + ')' : 'ninguna'));
+        out.push('Última nota Mobisond: ' + (nota && nota.t ? esc(nota.quien || 'sin nombre') + (nota.foto ? ' (foto)' : '') + ' · hace ' + duracion((ahora - nota.t) / 60000) + ' (' + hhmm(nota.t) + ')' : 'ninguna'));
         var neto = (slas || []).filter(function (x) { return /neto/i.test(dv(x, 'sla')); })[0];
         if (slas === null) out.push('SLA neto: no lo pude leer');
         else if (!neto) out.push('SLA neto: ' + (vl(r, 'active') === 'false' ? 'caso cerrado' : 'sin SLA activo'));
