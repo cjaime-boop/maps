@@ -1,8 +1,8 @@
 // ==UserScript==
-// @name         Mobisond · Aviso de casos nuevos (ServiceNow → celular)
+// @name         Mobisond · Avisador
 // @namespace    mobisond
-// @version      2.16
-// @description  Cuando entra un caso nuevo en la lista que vigilás de ServiceNow, te llega una notificación al celular (app ntfy) y a la PC. (Alexa va en otro script.)
+// @version      2.17
+// @description  Avisa los casos nuevos (celular, campana y grupo de Telegram), los casos Lineales sin notas de trabajo hace 25 min y los SLA a 1 hora de vencer.
 // @match        https://*.service-now.com/*
 // @grant        GM_xmlhttpRequest
 // @grant        GM_getValue
