@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Mobisond · Avisador
 // @namespace    mobisond
-// @version      2.21
+// @version      2.22
 // @description  Avisa los casos nuevos (celular, campana y grupo de Telegram), los casos Lineales sin notas de trabajo hace 25 min y los SLA a 1 hora de vencer.
 // @match        https://*.service-now.com/*
 // @grant        GM_xmlhttpRequest
@@ -285,9 +285,9 @@
     return g.indexOf(GRUPOS.lineales) === 0 ? 'Lineales' : g.indexOf(GRUPOS.gpon) === 0 ? 'GPON' : '';
   }
   function linkCaso(r) { return location.origin + '/wm_task.do?sys_id=' + vl(r, 'sys_id'); }
-  function cuerpo(r, extra, sinProyecto) {   // extra: renglón opcional antes del link (ej. "Última nota: …")
+  function cuerpo(r, extra) {          // extra: renglón opcional antes del link (ej. "Última nota: …")
     var num = dv(r, 'number').replace(/^WOT/i, 'WO');
-    return esc(num) + (sinProyecto ? '' : ' · ' + esc(proyecto(r))) + (dv(r, 'cmdb_ci') ? ' · ' + esc(dv(r, 'cmdb_ci')) : '') +
+    return esc(num) + (dv(r, 'cmdb_ci') ? ' · ' + esc(dv(r, 'cmdb_ci')) : '') +
       (dv(r, 'short_description') ? '\n' + esc(dv(r, 'short_description')) : '') +
       '\n' + (extra ? esc(extra) + ' · ' : '') + '<a href="' + esc(linkCaso(r)) + '">Abrir en ServiceNow</a>';
   }
@@ -385,7 +385,7 @@
           var min = (ahora - base) / 60000;
           if (min >= SILENCIO_MIN && min < SILENCIO_MIN + 20) {     // recién cruzó los 25 min (no avisa de golpe los viejos)
             unaVezAlGrupo('nota:' + id + ':' + base, '⏱️ <b>Sin notas de trabajo hace ' + Math.floor(min) + ' min</b>\n' +
-                          cuerpo(r, nota.t ? 'Última nota: ' + (nota.quien || 'sin nombre') + ' (' + hhmm(nota.t) + ')' : 'Todavía sin notas', true));
+                          cuerpo(r, nota.t ? 'Última nota: ' + (nota.quien || 'sin nombre') + ' (' + hhmm(nota.t) + ')' : 'Todavía sin notas'));
           }
         });
       });
