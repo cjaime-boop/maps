@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Mobisond · Avisador
 // @namespace    mobisond
-// @version      2.35
+// @version      2.36
 // @description  Avisa los casos nuevos (celular, campana y grupo de Telegram), los casos Lineales sin notas de trabajo hace 25 min y los SLA a 1 hora de vencer.
 // @match        https://*.service-now.com/*
 // @grant        GM_xmlhttpRequest
@@ -13,6 +13,8 @@
 // @grant        unsafeWindow
 // @connect      ntfy.sh
 // @connect      api.telegram.org
+// @connect      docs.google.com
+// @connect      googleusercontent.com
 // @updateURL    https://cjaime-boop.github.io/maps/scripts/avisador.user.js
 // @downloadURL  https://cjaime-boop.github.io/maps/scripts/avisador.user.js
 // @run-at       document-idle
@@ -65,8 +67,8 @@
   var TG_CERRADO = 'R76sJdArgJd6X6GlESwFVg==.79LONunnZbdiJjqj.fnQwbbIKSKPKaV2VGj5utV/Wt0x73+pJI/94r+sRFiMgazicfSbOH1NzOUVg4SZiEZa6WuJAKmNPDPAiob8=';
   var TG_CHAT_EQUIPO = '-5016783082';   // número del grupo "Dispensers Mobisond"
   function b64(t) { return Uint8Array.from(atob(t), function (ch) { return ch.charCodeAt(0); }); }
-  function abrirToken(clave) {
-    var p = TG_CERRADO.split('.'), sub = crypto.subtle;
+  function abrirToken(clave, cerrado) {
+    var p = (cerrado || TG_CERRADO).split('.'), sub = crypto.subtle;
     return sub.importKey('raw', new TextEncoder().encode(clave), 'PBKDF2', false, ['deriveKey']).then(function (k) {
       return sub.deriveKey({name: 'PBKDF2', salt: b64(p[0]), iterations: 150000, hash: 'SHA-256'}, k,
                            {name: 'AES-GCM', length: 256}, false, ['decrypt']);
@@ -269,7 +271,7 @@
   });
   GM_registerMenuCommand('⚙️ Configuración', configuracion);
   GM_registerMenuCommand('🔧 Revisar bot', function () {          // diagnóstico temporal de /bandeja
-    var info = ['Versión 2.35', 'Pestaña vigilada: ' + (vigilada() ? 'SÍ' : 'NO'), 'Grupo guardado: ' + (GM_getValue('tg_chat', '') || 'ninguno'),
+    var info = ['Versión 2.36', 'Pestaña vigilada: ' + (vigilada() ? 'SÍ' : 'NO'), 'Grupo guardado: ' + (GM_getValue('tg_chat', '') || 'ninguno'),
                 'Token: ' + (GM_getValue('tg_token', '') ? 'cargado' : 'falta'), 'Último leído: ' + GM_getValue('tg_offset', 0)];
     tg('getWebhookInfo', {}, function (w) {
       info.push('Webhook: ' + (w.url ? w.url : 'no'));
@@ -526,6 +528,12 @@
       }, function (e) { unaVezAlGrupo('cmd:' + p.id, 'No pude leer el caso de ServiceNow (' + esc(e.message) + ').', p.msg, p.chat); listo('error ServiceNow ' + e.message); });
       return;
     }
+    if (p.cmd === '/activos') {
+      leerHorario().then(textoActivos).then(function (t) {
+        unaVezAlGrupo('cmd:' + p.id, t, p.msg, p.chat, function (ok) { listo(ok ? 'contestado' : 'no se pudo contestar'); });
+      }, function (e) { unaVezAlGrupo('cmd:' + p.id, 'No pude leer la planilla de horarios (' + esc(e.message) + ').', p.msg, p.chat); listo('error planilla ' + e.message); });
+      return;
+    }
     if (p.cmd === '/bandeja') {
       textoBandeja().then(function (t) {
         unaVezAlGrupo('cmd:' + p.id, t, p.msg, p.chat, function (ok) { listo(ok ? 'contestado' + (p.chat ? ' por privado' : '') : 'no se pudo contestar'); });
@@ -575,14 +583,76 @@
       });
     });
   }
+  // ---- /activos: cuadro de horarios (pestaña publicada como CSV; el link va cerrado con el token del bot)
+  var HORARIO_CERRADO = 'iHCeQ3jhucfuyvYDRLjlsA==.z4gGOj0BBkS+eWYf.uyf2/IPN6xtiGcTOE/vePWAbU40+1mSc+Epva1+GNoRR+FDuteBoKSZFZFGIzUH80MmofK0+PI87B3xkFOYthSXwBZf232I8E3GolYf6oBALo2G1Xj5vyi0jZopRfTRDwJXSLytIIn2s7J8+Kc2NDzjEITAs0pHchGVDLTV6gZCVolxsOvDGgYBV3bZ1xaJWdokayP/GLPm016ESb5nKJfMmzQrSoNmPvOklohQqq7g=';
+  function csv(t) {                    // CSV simple con comillas
+    var filas = [], fila = [], campo = '', q = false;
+    for (var i = 0; i < t.length; i++) {
+      var c = t[i];
+      if (q) { if (c === '"') { if (t[i + 1] === '"') { campo += '"'; i++; } else q = false; } else campo += c; }
+      else if (c === '"') q = true;
+      else if (c === ',') { fila.push(campo); campo = ''; }
+      else if (c === '\n' || c === '\r') { if (c === '\r' && t[i + 1] === '\n') i++; fila.push(campo); filas.push(fila); fila = []; campo = ''; }
+      else campo += c;
+    }
+    if (campo || fila.length) { fila.push(campo); filas.push(fila); }
+    return filas.map(function (f) { return f.map(function (x) { return x.trim(); }); });
+  }
+  function leerHorario() {
+    return abrirToken(GM_getValue('tg_token', ''), HORARIO_CERRADO).then(function (url) {
+      return new Promise(function (ok, mal) {
+        GM_xmlhttpRequest({method: 'GET', url: url + '&_=' + Date.now(), timeout: 15000,
+          onload: function (r) { if (r.status === 200) ok(r.responseText); else mal(new Error('planilla ' + r.status)); },
+          onerror: function () { mal(new Error('sin conexión con la planilla')); }, ontimeout: function () { mal(new Error('la planilla tardó')); }});
+      });
+    });
+  }
+  var DIAS = ['domingo', 'lunes', 'martes', 'miercoles', 'jueves', 'viernes', 'sabado'];
+  function sinTilde(t) { return String(t || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, ''); }
+  function textoActivos(t) {
+    var f = csv(t), out = ['👥 <b>Activos</b> · ' + hhmm(Date.now())];
+    // cuadro ACTIVOS: fila con "DS" / "TL" / "GPON" y los nombres abajo
+    var hecho = false;
+    for (var r = 0; r < f.length && !hecho; r++) {
+      var c = f[r].findIndex(function (x) { return /^DS$/i.test(x); });
+      if (c < 0) continue;
+      hecho = true;
+      f[r].forEach(function (h, j) {
+        if (j < c || !h) return;
+        var nombres = [];
+        for (var k = r + 1; k < f.length && k < r + 12; k++) { var v = (f[k][j] || '').trim(); if (v && v !== '-') nombres.push(v); }
+        out.push('<b>' + esc(h) + ':</b> ' + (nombres.length ? esc(nombres.join(', ')) : '—'));
+      });
+    }
+    if (!hecho) out.push('(no encontré el cuadro de activos en la planilla)');
+    // próximos: en cada tabla "Semana …", las filas con "Próximo" y su horario de hoy
+    var hoy = DIAS[new Date().getDay()], bloques = [], actual = null;
+    f.forEach(function (fila) {
+      if (/^semana/i.test(fila[0] || '')) {
+        var col = fila.findIndex(function (x) { return sinTilde(x) === hoy; });
+        actual = {col: col, prox: []}; bloques.push(actual); return;
+      }
+      if (!actual) return;
+      if (!fila[0]) { actual = null; return; }
+      if (fila.some(function (x) { return /pr[oó]ximo/i.test(x); })) {
+        actual.prox.push(fila[0] + (actual.col >= 0 && fila[actual.col] ? ' (' + fila[actual.col] + ')' : ''));
+      }
+    });
+    var nombres = ['Cuadrillas', 'Dispatchers'], prox = [];
+    bloques.forEach(function (b, i) { if (b.prox.length) prox.push('<b>' + (nombres[i] || 'Otros') + ':</b> ' + esc(b.prox.join(', '))); });
+    if (prox.length) out.push('', '⏳ <b>Próximos</b>', prox.join('\n'));
+    return out.join('\n');
+  }
+
   var leyendo = false;
   function comandos() {
     if (!hayGrupo() || !vigilada()) return;
     atenderPendientes();
     if (leyendo) return;
-    if (GM_getValue('tg_cmds', 0) < 2) {     // menú de comandos del bot (aparece al escribir "/" en el grupo)
+    if (GM_getValue('tg_cmds', 0) < 3) {     // menú de comandos del bot (aparece al escribir "/" en el grupo)
       tg('setMyCommands', {commands: [{command: 'bandeja', description: 'Casos abiertos de Lineales y GPON'},
-                                      {command: 'caso', description: 'Detalle de un caso: /caso WO0096818'}]}, function () { GM_setValue('tg_cmds', 2); });
+                                      {command: 'caso', description: 'Detalle de un caso: /caso WO0096818'},
+                                      {command: 'activos', description: 'Quién está activo ahora y quién entra'}]}, function () { GM_setValue('tg_cmds', 3); });
     }
     leyendo = true;
     tg('getUpdates', {offset: GM_getValue('tg_offset', 0), timeout: 0, allowed_updates: ['message']}, function (ups) {
