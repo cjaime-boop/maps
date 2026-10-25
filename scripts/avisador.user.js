@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Mobisond · Avisador
 // @namespace    mobisond
-// @version      2.62
+// @version      2.63
 // @description  Avisa los casos nuevos (celular, campana y grupo de Telegram), los Lineales sin notas hace 25 min, los SLA y los aceptados; botón de resumen de turno y comandos del bot.
 // @match        https://*.service-now.com/*
 // @grant        GM_xmlhttpRequest
@@ -329,7 +329,7 @@
     return sub ? /paus/i.test(sub) : !!dv(r, 'u_pause_reason').trim();
   }
   // "Aceptado por el cliente": el caso sigue En curso pero ya está resuelto, esperando el cierre
-  function aceptado(r) { return /acept/i.test(dv(r, 'u_pause_reason') + ' ' + dv(r, 'substate')); }
+  function aceptado(r) { var t = dv(r, 'u_pause_reason') + ' ' + dv(r, 'substate'); return /acept/i.test(t) && !/no acept/i.test(t); }   // ojo: "No aceptado por el cliente" es un rechazo
   function proyecto(r) {
     var g = dv(r, 'assignment_group').toUpperCase();
     return g.indexOf(GRUPOS.lineales) === 0 ? 'Lineales' : g.indexOf(GRUPOS.gpon) === 0 ? 'GPON' : '';
@@ -881,7 +881,7 @@
     function hoyLocal(d) { var h = DIA; return d && d.getFullYear() === h.getFullYear() && d.getMonth() === h.getMonth() && d.getDate() === h.getDate(); }
     // RESUELTO = el pase a verificación que "quedó": se arma la historia de cada caso con
     //   V = pase a verificación ("Se espera la verificación del cliente" / motivo de pausa -> Verificación)
-    //   R = rechazo ("Rechazado por el cliente" / motivo de pausa: Verificación -> sin pausa)
+    //   R = rechazo (motivo de pausa: Verificación -> "No aceptado por el cliente" o sin pausa; o comentario "Rechazado/No aceptado por el cliente")
     // Un V abre un intento; los V repetidos sin un R en el medio (duplicados de casos hijos) no cuentan;
     // un R anula el intento abierto. Cuenta el último intento que no fue rechazado, el día de su V.
     function verificadosHoy(casos) {
@@ -892,16 +892,16 @@
       });
       var ids = Object.keys(porId);
       if (!ids.length) return Promise.resolve({});
-      var hist = {}, leido = false;              // número de WOT -> [{d, t: 'V'|'R', de}]
+      var hist = {}, leido = false; verificadosHoy.historial = false;              // número de WOT -> [{d, t: 'V'|'R', de}]
       var anotar = function (n, d, t, de) { if (n && d && !isNaN(d)) (hist[n] = hist[n] || []).push({d: d, t: t, de: de}); };
       var porAudit = api('sys_audit', 'fieldname=u_pause_reason^documentkeyIN' + ids.join(','),
                          'documentkey,oldvalue,newvalue,sys_created_on').then(function (as) {
-        leido = true;
+        leido = true; verificadosHoy.historial = true;
         as.forEach(function (a) {
           var nuevo = val(a, 'newvalue') + ' ' + dv(a, 'newvalue'), viejo = val(a, 'oldvalue') + ' ' + dv(a, 'oldvalue');
           var d = new Date(val(a, 'sys_created_on').replace(' ', 'T') + 'Z'), n = porId[val(a, 'documentkey')];
           if (/verific/i.test(nuevo)) anotar(n, d, 'V', 'historial');
-          else if (/rechaz/i.test(nuevo) || (/verific/i.test(viejo) && !nuevo.trim())) anotar(n, d, 'R', 'historial');
+          else if (/rechaz|no acept/i.test(nuevo) || (/verific/i.test(viejo) && !nuevo.trim())) anotar(n, d, 'R', 'historial');
         });
       }, function () {});
       var porComentario = padres.length ? api('wm_order', 'sys_idIN' + padres.join(','), 'sys_id,comments,work_notes').then(function (wos) {
@@ -913,7 +913,7 @@
           var re = /(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}|\d{2}[\/-]\d{2}[\/-]\d{4} \d{2}:\d{2}:\d{2}) - [^\n]*\n([\s\S]*?)(?=\n\s*(?:\d{4}-\d{2}-\d{2}|\d{2}[\/-]\d{2}[\/-]\d{4}) \d{2}:\d{2}:\d{2} - |$)/g, m;
           while ((m = re.exec(txt))) {
             var n = porId[val(w, 'sys_id')];
-            if (/rechazad[oa] por el cliente/i.test(m[2])) anotar(n, fechaEntrada(m[1]), 'R', 'comentario');
+            if (/(rechazad[oa]|no aceptad[oa]) por el cliente/i.test(m[2])) anotar(n, fechaEntrada(m[1]), 'R', 'comentario');
             else if (/espera la verificaci[oó]n del cliente/i.test(m[2]) && !/hijo/i.test(m[2])) anotar(n, fechaEntrada(m[1]), 'V', 'comentario');
           }
         });
@@ -1031,7 +1031,8 @@
       t.push('Casos sin atender: ' + G.sinAtender);
       t.push('Alguna emergencia: ' + (G.emergencia ? 'sí' : 'no'));
       t.push('Casos en mano: ' + enManoTxt(G.enMano, false));
-      return {dia: new Date(DIA.getTime()), hoy: esDiaHoy(), texto: t.join('\n'), sinSla: !venc, sinVerif: !vh, detalle: 'Resueltos Lineales: ' + (L.resueltosDet.join(', ') || 'ninguno') + ' · GPON: ' + (G.resueltosDet.join(', ') || 'ninguno')};
+      return {dia: new Date(DIA.getTime()), hoy: esDiaHoy(), texto: t.join('\n'), sinSla: !venc, sinVerif: !vh,
+              detalle: (verificadosHoy.historial ? '' : '⚠️ Sin acceso al historial de cambios: no puedo ver los rechazos. ') + 'Resueltos Lineales: ' + (L.resueltosDet.join(', ') || 'ninguno') + ' · GPON: ' + (G.resueltosDet.join(', ') || 'ninguno')};
     }
 
     // ---------- pantalla ----------
