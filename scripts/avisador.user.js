@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Mobisond · Avisador
 // @namespace    mobisond
-// @version      2.66
+// @version      2.67
 // @description  Avisa los casos nuevos (celular, campana y grupo de Telegram), los Lineales sin notas hace 25 min, los SLA y los aceptados; botón de resumen de turno y comandos del bot.
 // @match        https://*.service-now.com/*
 // @grant        GM_xmlhttpRequest
@@ -298,7 +298,7 @@
 
   // ---------------------------------------------------------------- controles al grupo de Telegram
   // Cada 2 minutos (desde la pestaña que atiende en cada PC) se consulta ServiceNow por detrás:
-  //  1) Lineales en curso, sin pausa, sin notas de trabajo DE MOBISOND hace 25 min -> avisa UNA vez (hasta que haya otra nota).
+  //  1) Lineales (y GPON P1/P2) en curso, sin pausa, sin notas de trabajo DE MOBISOND hace 25 min -> avisa UNA vez (hasta que haya otra nota).
   //  2) Lineales y GPON en curso, con el SLA NETO corriendo y a 1 hora o menos de vencer -> avisa una vez.
   //  3) Lineales y GPON en curso, cuando se les vence el SLA NETO -> avisa una vez.
   //  4) Lineales y GPON, cuando un caso pasa a "Aceptado por el cliente" -> avisa una vez.
@@ -417,7 +417,7 @@
     if (ahora - GM_getValue('ult_control', 0) < CADA_MS) return;      // la pestaña se recarga cada 30 s: se controla cada 2 min
     GM_setValue('ult_control', ahora);
     var q = 'active=true^assignment_group.nameSTARTSWITH' + GRUPOS.lineales + '^ORassignment_group.nameSTARTSWITH' + GRUPOS.gpon;
-    var campos = 'sys_id,number,parent,state,substate,u_pause_reason,assignment_group,assigned_to,cmdb_ci,short_description,work_start';
+    var campos = 'sys_id,number,parent,state,substate,u_pause_reason,priority,assignment_group,assigned_to,cmdb_ci,short_description,work_start';
     api('wm_task', q, campos).then(function (casos) {
       casos = casos.filter(enCurso);
       // pausas y entrada a "en curso" vistas desde esta PC (para empezar a contar los 25 min desde que se retoma)
@@ -451,7 +451,11 @@
       GM_setValue('acept_iniciado', true);
 
       // 1) sin notas de trabajo (solo Lineales, sin pausa ni aceptados)
-      var lin = casos.filter(function (r) { return proyecto(r) === 'Lineales' && !pausado(r) && !aceptado(r); });
+      // Lineales siempre; GPON solo prioridad 1 y 2
+      var p12 = function (r) { return /^[12]$/.test(vl(r, 'priority')) || /^[12]\b/.test(dv(r, 'priority')); };
+      var lin = casos.filter(function (r) {
+        return (proyecto(r) === 'Lineales' || (proyecto(r) === 'GPON' && p12(r))) && !pausado(r) && !aceptado(r);
+      });
       if (lin.length) ultimasNotas(lin).then(function (notas) {
         lin.forEach(function (r) {
           var id = vl(r, 'sys_id'), v = nuevoVisto[id];
