@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Mobisond · Avisador
 // @namespace    mobisond
-// @version      2.64
+// @version      2.65
 // @description  Avisa los casos nuevos (celular, campana y grupo de Telegram), los Lineales sin notas hace 25 min, los SLA y los aceptados; botón de resumen de turno y comandos del bot.
 // @match        https://*.service-now.com/*
 // @grant        GM_xmlhttpRequest
@@ -302,6 +302,7 @@
   //  2) Lineales y GPON en curso, con el SLA NETO corriendo y a 1 hora o menos de vencer -> avisa una vez.
   //  3) Lineales y GPON en curso, cuando se les vence el SLA NETO -> avisa una vez.
   //  4) Lineales y GPON, cuando un caso pasa a "Aceptado por el cliente" -> avisa una vez.
+  //  5) Lineales y GPON, cuando el cliente NO acepta (sale de Verificación del cliente y vuelve a trabajo) -> avisa una vez.
   var GRUPOS = {lineales: 'C-TL-MOBISOND', gpon: 'C-GZ1-MOBI'};
   var SILENCIO_MIN = 25, SLA_MIN = 60, CADA_MS = 2 * 60 * 1000;
 
@@ -421,9 +422,17 @@
       casos = casos.filter(enCurso);
       // pausas y entrada a "en curso" vistas desde esta PC (para empezar a contar los 25 min desde que se retoma)
       var visto = GM_getValue('ctl_visto', {}), nuevoVisto = {};
+      var enVerif = function (r) { return /verificaci/i.test(dv(r, 'u_pause_reason')) && pausado(r); };
       casos.forEach(function (r) {
-        var id = vl(r, 'sys_id'), v = visto[id] || {desde: ahora, pausa: 0};
+        var id = vl(r, 'sys_id'), antes = visto[id], v = antes ? {desde: antes.desde, pausa: antes.pausa, verif: antes.verif} : {desde: ahora, pausa: 0};
         if (pausado(r)) v.pausa = ahora;
+        // NO ACEPTADO: estaba en Verificación del cliente y ahora volvió a trabajo (sin pausa) o dice "No aceptado"
+        var noAcept = /no acept/i.test(dv(r, 'u_pause_reason'));
+        if ((antes && antes.verif && !enVerif(r) && !aceptado(r) && (!pausado(r) || noAcept)) || (noAcept && !(antes && antes.noAcept))) {
+          unaVezAlGrupo('rech:' + id + ':' + Math.floor(ahora / 1800000),
+            '❌ <b>El cliente no aceptó el caso</b>\n<i>Vuelve a estar en curso</i>' + cuerpo(r, '👷 ' + esc(dv(r, 'assigned_to') || 'sin asignar')));
+        }
+        v.verif = enVerif(r); v.noAcept = noAcept;
         nuevoVisto[id] = v;
       });
       GM_setValue('ctl_visto', nuevoVisto);
