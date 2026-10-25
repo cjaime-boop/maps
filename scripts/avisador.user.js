@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Mobisond · Avisador
 // @namespace    mobisond
-// @version      2.63
+// @version      2.64
 // @description  Avisa los casos nuevos (celular, campana y grupo de Telegram), los Lineales sin notas hace 25 min, los SLA y los aceptados; botón de resumen de turno y comandos del bot.
 // @match        https://*.service-now.com/*
 // @grant        GM_xmlhttpRequest
@@ -879,11 +879,9 @@
       return null;
     }
     function hoyLocal(d) { var h = DIA; return d && d.getFullYear() === h.getFullYear() && d.getMonth() === h.getMonth() && d.getDate() === h.getDate(); }
-    // RESUELTO = el pase a verificación que "quedó": se arma la historia de cada caso con
-    //   V = pase a verificación ("Se espera la verificación del cliente" / motivo de pausa -> Verificación)
-    //   R = rechazo (motivo de pausa: Verificación -> "No aceptado por el cliente" o sin pausa; o comentario "Rechazado/No aceptado por el cliente")
-    // Un V abre un intento; los V repetidos sin un R en el medio (duplicados de casos hijos) no cuentan;
-    // un R anula el intento abierto. Cuenta el último intento que no fue rechazado, el día de su V.
+    // RESUELTO = el PRIMER pase a verificación de cada caso ("Se espera la verificación del cliente" o el motivo
+    // de pausa que cambia a Verificación). Cuenta una sola vez, ese día, aunque después lo rechacen y se vuelva a
+    // verificar, o aparezcan duplicados por casos hijos.
     function verificadosHoy(casos) {
       var porId = {}, padres = [];
       casos.forEach(function (c) {
@@ -923,10 +921,7 @@
         var hoy = {};
         Object.keys(hist).forEach(function (n) {
           var ev = hist[n].sort(function (a, b) { return a.d - b.d; }), abierto = null, valido = null;
-          ev.forEach(function (e) {
-            if (e.t === 'V') { if (!abierto) abierto = e; valido = abierto; }       // V repetido sin rechazo: sigue el mismo intento
-            else { abierto = null; valido = null; }                                // rechazo: se anula el intento
-          });
+          ev.forEach(function (e) { if (e.t === 'V' && !valido) valido = e; });   // el primero; los rechazos no cambian nada
           if (valido && hoyLocal(valido.d)) {
             hoy[n] = valido.de + ' ' + ('0' + valido.d.getHours()).slice(-2) + ':' + ('0' + valido.d.getMinutes()).slice(-2);
           }
@@ -1032,7 +1027,7 @@
       t.push('Alguna emergencia: ' + (G.emergencia ? 'sí' : 'no'));
       t.push('Casos en mano: ' + enManoTxt(G.enMano, false));
       return {dia: new Date(DIA.getTime()), hoy: esDiaHoy(), texto: t.join('\n'), sinSla: !venc, sinVerif: !vh,
-              detalle: (verificadosHoy.historial ? '' : '⚠️ Sin acceso al historial de cambios: no puedo ver los rechazos. ') + 'Resueltos Lineales: ' + (L.resueltosDet.join(', ') || 'ninguno') + ' · GPON: ' + (G.resueltosDet.join(', ') || 'ninguno')};
+              detalle: 'Resueltos Lineales: ' + (L.resueltosDet.join(', ') || 'ninguno') + ' · GPON: ' + (G.resueltosDet.join(', ') || 'ninguno')};
     }
 
     // ---------- pantalla ----------
