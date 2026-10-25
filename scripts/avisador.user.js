@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Mobisond · Avisador
 // @namespace    mobisond
-// @version      2.76
+// @version      2.77
 // @description  Avisa los casos nuevos (celular, campana y grupo de Telegram), los Lineales sin notas hace 25 min, los SLA y los aceptados; botón de resumen de turno y comandos del bot.
 // @match        https://*.service-now.com/*
 // @grant        GM_xmlhttpRequest
@@ -857,6 +857,16 @@
 
     function dv(reg, campo) { var v = reg[campo]; return v ? (v.display_value || '') : ''; }
     function val(reg, campo) { var v = reg[campo]; return v ? (v.value || '') : ''; }
+    // Consultas con muchos sys_id: se parten en tandas (una URL con cientos de ids es demasiado larga y ServiceNow
+    // la rechaza). armar(ids) devuelve la consulta de cada tanda; se juntan todos los resultados.
+    function apiIN(tabla, ids, armar, campos, tam) {
+      tam = tam || 80;
+      var tandas = [];
+      for (var i = 0; i < ids.length; i += tam) tandas.push(ids.slice(i, i + tam));
+      return tandas.reduce(function (prom, t) {
+        return prom.then(function (acum) { return api(tabla, armar(t), campos).then(function (r) { return acum.concat(r); }); });
+      }, Promise.resolve([]));
+    }
 
     function cliente(reg) {
       var so = dv(reg, 'service_offering');
@@ -903,8 +913,9 @@
           var p = val(r, 'parent'); if (p) { ids.push(p); dePadre[p] = dv(r, 'number'); }
         });
         if (!ids.length) return {casos: casos, vencidos: {}};
-        var qs = 'taskIN' + ids.join(',') + '^has_breached=true';   // el NETO se filtra abajo, por nombre
-        return api('task_sla', qs, 'task,sla,stage,has_breached,planned_end_time,original_breach_time').then(function (slas) {
+        // el NETO se filtra abajo, por nombre
+        return apiIN('task_sla', ids, function (t) { return 'taskIN' + t.join(',') + '^has_breached=true'; },
+                     'task,sla,stage,has_breached,planned_end_time,original_breach_time').then(function (slas) {
           var porId = {};
           casos.forEach(function (r) { porId[val(r, 'sys_id')] = dv(r, 'number'); });
           var venc = {};
@@ -950,7 +961,7 @@
       if (!ids.length) return Promise.resolve({});
       var hist = {}, leido = false; verificadosHoy.historial = false;              // número de WOT -> [{d, t: 'V'|'R', de}]
       var anotar = function (n, d, t, de) { if (n && d && !isNaN(d)) (hist[n] = hist[n] || []).push({d: d, t: t, de: de}); };
-      var porAudit = api('sys_audit', 'fieldname=u_pause_reason^documentkeyIN' + ids.join(','),
+      var porAudit = apiIN('sys_audit', ids, function (t) { return 'fieldname=u_pause_reason^documentkeyIN' + t.join(','); },
                          'documentkey,oldvalue,newvalue,sys_created_on').then(function (as) {
         leido = true; verificadosHoy.historial = true;
         as.forEach(function (a) {
@@ -960,7 +971,7 @@
           else if (/rechaz|no acept/i.test(nuevo) || (/verific/i.test(viejo) && !nuevo.trim())) anotar(n, d, 'R', 'historial');
         });
       }, function () {});
-      var porComentario = padres.length ? api('wm_order', 'sys_idIN' + padres.join(','), 'sys_id,comments,work_notes').then(function (wos) {
+      var porComentario = padres.length ? apiIN('wm_order', padres, function (t) { return 'sys_idIN' + t.join(','); }, 'sys_id,comments,work_notes', 40).then(function (wos) {
         leido = true;
         wos.forEach(function (w) {
           // cada entrada empieza con "fecha hora - Autor (Comentarios adicionales)".
@@ -1184,7 +1195,7 @@
           ids.push(val(r, 'sys_id')); porId[val(r, 'sys_id')] = dv(r, 'number');
           var p = val(r, 'parent'); if (p) { ids.push(p); dePadre[p] = dv(r, 'number'); }
         });
-        var slas = ids.length ? api('task_sla', 'taskIN' + ids.join(',') + '^has_breached=true', 'task,sla,stage,planned_end_time,original_breach_time')
+        var slas = ids.length ? apiIN('task_sla', ids, function (t) { return 'taskIN' + t.join(',') + '^has_breached=true'; }, 'task,sla,stage,planned_end_time,original_breach_time')
           .catch(function () { return null; }) : Promise.resolve([]);
         return Promise.all([ids.length ? primerasVerif(casos) : Promise.resolve({}), slas]).then(function (res) {
           var prim = res[0] || {}, venc = {};
