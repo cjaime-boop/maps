@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Mobisond · Avisador
 // @namespace    mobisond
-// @version      2.61
+// @version      2.62
 // @description  Avisa los casos nuevos (celular, campana y grupo de Telegram), los Lineales sin notas hace 25 min, los SLA y los aceptados; botón de resumen de turno y comandos del bot.
 // @match        https://*.service-now.com/*
 // @grant        GM_xmlhttpRequest
@@ -928,8 +928,7 @@
             else { abierto = null; valido = null; }                                // rechazo: se anula el intento
           });
           if (valido && hoyLocal(valido.d)) {
-            hoy[n] = valido.de + ' ' + ('0' + valido.d.getHours()).slice(-2) + ':' + ('0' + valido.d.getMinutes()).slice(-2) +
-                     (ev.some(function (e) { return e.t === 'R'; }) ? ', tuvo rechazo antes' : '');
+            hoy[n] = valido.de + ' ' + ('0' + valido.d.getHours()).slice(-2) + ':' + ('0' + valido.d.getMinutes()).slice(-2);
           }
         });
         return hoy;
