@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Mobisond · Avisador
 // @namespace    mobisond
-// @version      2.75
+// @version      2.76
 // @description  Avisa los casos nuevos (celular, campana y grupo de Telegram), los Lineales sin notas hace 25 min, los SLA y los aceptados; botón de resumen de turno y comandos del bot.
 // @match        https://*.service-now.com/*
 // @grant        GM_xmlhttpRequest
@@ -595,6 +595,18 @@
       }, function (e) { unaVezAlGrupo('cmd:' + p.id, 'No pude armar el resumen semanal (' + esc(e.message) + ').', p.msg, p.chat); listo('error ServiceNow ' + e.message); });
       return;
     }
+    if (p.cmd === '/mes') {
+      // "/mes" = mes en curso; "/mes 09-2026" o "/mes 9/2026" = ese mes; el automático del 1° (pedido sin mensaje) = mes pasado
+      var am = /(\d{1,2})[\/.-](\d{4})/.exec((p.texto || '').split(/\s+/).slice(1).join(' ')), autoMes = p.id < 0 && !p.msg;
+      var hoyM = new Date(); hoyM.setHours(0, 0, 0, 0);
+      var fm = am ? new Date(+am[2], +am[1] - 1, 1) : (autoMes ? undefined : hoyM);
+      var mesTxt = (am && (+am[1] < 1 || +am[1] > 12)) ? Promise.resolve('No entendí el mes. Usalo así: <code>/mes 09-2026</code>')
+        : fm && fm > hoyM ? Promise.resolve('Ese mes todavía no llegó 🙂') : RESUMEN.mes(fm);
+      mesTxt.then(function (t) {
+        unaVezAlGrupo('cmd:' + p.id, t, p.msg, p.chat, function (ok) { listo(ok ? 'contestado' : 'no se pudo contestar'); });
+      }, function (e) { unaVezAlGrupo('cmd:' + p.id, 'No pude armar el resumen mensual (' + esc(e.message) + ').', p.msg, p.chat); listo('error ServiceNow ' + e.message); });
+      return;
+    }
     if (p.cmd === '/status') {
       resumenTelegram((p.texto || '').trim().split(/\s+/).slice(1).join(' ')).then(function (t) {
         unaVezAlGrupo('cmd:' + p.id, t, p.msg, p.chat, function (ok) { listo(ok ? 'contestado' : 'no se pudo contestar'); });
@@ -701,12 +713,13 @@
   function comandos() {
     if (!hayGrupo() || !soyLider()) return;
     atenderPendientes();
-    if (GM_getValue('tg_cmds', 0) < 7) {     // menú de comandos del bot (aparece al escribir "/" en el grupo)
+    if (GM_getValue('tg_cmds', 0) < 8) {     // menú de comandos del bot (aparece al escribir "/" en el grupo)
       tg('setMyCommands', {commands: [{command: 'bandeja', description: 'Casos abiertos de Lineales y GPON'},
                                       {command: 'caso', description: 'Detalle de un caso: /caso WO0096818'},
                                       {command: 'activos', description: 'Quién está activo ahora y quién entra'},
                                       {command: 'status', description: 'Resumen del día (Lineales y GPON)'},
-                                      {command: 'semana', description: 'Resumen de esta semana (o /semana 13-10-2026)'}]}, function () { GM_setValue('tg_cmds', 7); });
+                                      {command: 'semana', description: 'Resumen de esta semana (o /semana 13-10-2026)'},
+                                      {command: 'mes', description: 'Resumen de este mes (o /mes 09-2026)'}]}, function () { GM_setValue('tg_cmds', 8); });
     }
     if (modoBot === null) {                    // ¿el bot está conectado a Supabase?
       modoBot = 'esperando';
@@ -1147,19 +1160,18 @@
         ta.value = 'No pude traer los casos.\n\n' + e.message;
       });
     }
-    // ---------- resumen semanal (/semana y automático los lunes) ----------
-    // Semana de lunes a domingo. Sin fecha: la semana pasada (el automático de los lunes). Con fecha: la semana que
-    // la contiene (/semana a mano pasa hoy = semana en curso, del lunes hasta hoy).
-    function semana(fechaRef) {
-      var ref = fechaRef ? new Date(fechaRef.getTime()) : new Date(Date.now() - 7 * 864e5);
-      ref.setHours(0, 0, 0, 0);
-      var lunes = new Date(ref.getTime()); lunes.setDate(lunes.getDate() - ((lunes.getDay() + 6) % 7));
-      var domingo = new Date(lunes.getTime()); domingo.setDate(domingo.getDate() + 6);
-      var finSem = new Date(domingo.getTime()); finSem.setHours(23, 59, 59, 999);
-      var ini = "javascript:gs.dateGenerate('" + iso(lunes) + "','start')", fin = "javascript:gs.dateGenerate('" + iso(domingo) + "','end')";
-      var enSemana = function (d) { return d && d >= lunes && d <= finSem; };
-      var deUtc = function (t) { return t ? new Date(t.replace(' ', 'T') + 'Z') : null; };
-      var dm = function (d) { return ('0' + d.getDate()).slice(-2) + '/' + ('0' + (d.getMonth() + 1)).slice(-2); };
+    // ---------- resúmenes de período: /semana (y automático los lunes) y /mes (y automático el 1°) ----------
+    var DIAS_SEM = ['domingo', 'lunes', 'martes', 'miércoles', 'jueves', 'viernes', 'sábado'];
+    var MESES = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
+    function dm(d) { return ('0' + d.getDate()).slice(-2) + '/' + ('0' + (d.getMonth() + 1)).slice(-2); }
+    function deUtc(t) { return t ? new Date(t.replace(' ', 'T') + 'Z') : null; }
+    function lunesDe(d) { var l = new Date(d.getTime()); l.setHours(0, 0, 0, 0); l.setDate(l.getDate() - ((l.getDay() + 6) % 7)); return l; }
+
+    // Junta los números de un período [desde, hasta] (fechas locales, días completos)
+    function periodo(desde, hasta) {
+      var finP = new Date(hasta.getTime()); finP.setHours(23, 59, 59, 999);
+      var dentro = function (d) { return d && d >= desde && d <= finP; };
+      var ini = "javascript:gs.dateGenerate('" + iso(desde) + "','start')", fin = "javascript:gs.dateGenerate('" + iso(hasta) + "','end')";
       var q = grupoQ() + '^opened_at<=' + fin + '^active=true^ORclosed_at>=' + ini;
       var campos = 'sys_id,number,parent,active,state,priority,opened_at,closed_at,assignment_group,service_offering,cmdb_ci';
       return api('wm_task', q, campos).then(function (casos) {
@@ -1174,74 +1186,128 @@
         });
         var slas = ids.length ? api('task_sla', 'taskIN' + ids.join(',') + '^has_breached=true', 'task,sla,stage,planned_end_time,original_breach_time')
           .catch(function () { return null; }) : Promise.resolve([]);
-        return Promise.all([primerasVerif(casos), slas]).then(function (res) {
+        return Promise.all([ids.length ? primerasVerif(casos) : Promise.resolve({}), slas]).then(function (res) {
           var prim = res[0] || {}, venc = {};
           (res[1] || []).forEach(function (sv) {
             if (!/neto/i.test(dv(sv, 'sla'))) return;
             if (/cancel/i.test(val(sv, 'stage') + ' ' + dv(sv, 'stage'))) return;   // SLA cancelado: no cuenta
             var d = deUtc(val(sv, 'original_breach_time') || val(sv, 'planned_end_time'));
             var n = porId[val(sv, 'task')] || dePadre[val(sv, 'task')];
-            if (n && enSemana(d) && d.getTime() <= Date.now()) venc[n] = 1;
+            if (n && dentro(d) && d.getTime() <= Date.now()) venc[n] = 1;
           });
-          var DIAS = ['domingo', 'lunes', 'martes', 'miércoles', 'jueves', 'viernes', 'sábado'];
           var calc = function (proy) {
             var r = {ing: 0, res: 0, venc: [], emerg: 0, clientes: [], porDia: {}};
             casos.forEach(function (c) {
               if (proyecto(c) !== proy) return;
               var n = dv(c, 'number'), ab = deUtc(val(c, 'opened_at'));
-              if (enSemana(ab)) {
+              if (dentro(ab)) {
                 r.ing++;
                 if (/^[12]$/.test(val(c, 'priority')) || /^[12]\b/.test(dv(c, 'priority'))) r.emerg++;
                 if (proy === 'lineales') r.clientes.push(cliente(c) || 'otro');
                 var k = iso(ab); r.porDia[k] = (r.porDia[k] || 0) + 1;
               }
-              if (prim[n] && enSemana(prim[n].d)) r.res++;
+              if (prim[n] && dentro(prim[n].d)) r.res++;
               if (venc[n]) r.venc.push(dv(c, 'parent') || n);
             });
+            r.pct = r.res ? Math.round((r.res - Math.min(r.venc.length, r.res)) * 100 / r.res) : null;
             return r;
           };
-          var L = calc('lineales'), G = calc('gpon');
-          var vencTxt = function (r) { return r.venc.length ? r.venc.length + ' / ' + r.venc.join(' / ') : '0'; };
-          // % en término: de los resueltos, cuántos no se vencieron
-          var cumpl = function (r) {
-            if (!r.res) return 'En término: — (sin resueltos)';
-            var v = Math.min(r.venc.length, r.res);
-            return 'En término: ' + Math.round((r.res - v) * 100 / r.res) + '% (' + v + (v === 1 ? ' vencido' : ' vencidos') + ' de ' + r.res + ' resueltos)';
-          };
-          var diaCargado = function (r) {
-            var top = Object.keys(r.porDia).sort(function (a, b) { return r.porDia[b] - r.porDia[a]; })[0];
-            if (!top) return null;
-            var x = top.split('-'), dd = new Date(+x[0], x[1] - 1, +x[2]);
-            return 'Día más cargado: ' + DIAS[dd.getDay()] + ' ' + dm(dd) + ' (' + r.porDia[top] + (r.porDia[top] === 1 ? ' caso)' : ' casos)');
-          };
-          var hoy0 = new Date(); hoy0.setHours(0, 0, 0, 0);
-          var encurso = domingo >= hoy0;           // semana en curso: va del lunes hasta hoy
-          var out = ['📅 <b>Resumen semanal</b> · ' + dm(lunes) + ' al ' + (encurso ? dm(hoy0) + ' <i>(semana en curso)</i>' : dm(domingo)), '', '🔧 <b>Lineales</b>', '',
-                     'Ingresados: ' + L.ing, 'Resueltos: ' + L.res, 'Vencidos: ' + esc(vencTxt(L)), cumpl(L)];
-          if (L.clientes.length) out.push('Por cliente: ' + esc(contar(L.clientes).sort(function (a, b) { return b[1] - a[1]; })
-                                                   .map(function (p) { return p[1] + ' ' + p[0]; }).join(' · ')));
-          if (diaCargado(L)) out.push(diaCargado(L));
-          out.push('', '━━━━━━━━━━━━━━━━━━━━', '', '📡 <b>GPON</b>', '',
-                   'Ingresados: ' + G.ing, 'Resueltos: ' + G.res, 'Vencidos: ' + esc(vencTxt(G)), cumpl(G), 'Emergencias (P1/P2): ' + G.emerg);
-          if (diaCargado(G)) out.push(diaCargado(G));
-          // CIs que más se repitieron (casos abiertos en la semana, los dos proyectos)
-          var cis = contar(casos.filter(function (c) { return enSemana(deUtc(val(c, 'opened_at'))) && dv(c, 'cmdb_ci'); })
+          var cis = contar(casos.filter(function (c) { return dentro(deUtc(val(c, 'opened_at'))) && dv(c, 'cmdb_ci'); })
                                 .map(function (c) { return dv(c, 'cmdb_ci'); }))
-                    .filter(function (p) { return p[1] > 1; }).sort(function (a, b) { return b[1] - a[1]; }).slice(0, 5);
-          if (cis.length) {
-            out.push('', '━━━━━━━━━━━━━━━━━━━━', '', '🔁 <b>CIs que más se repitieron</b>');
-            cis.forEach(function (p) { out.push('• ' + esc(p[0]) + ' · ' + p[1] + ' casos'); });
-          }
-          if (!res[0]) out.push('', '⚠️ <i>No pude ver los pases a verificación: "Resueltos" puede estar incompleto</i>');
-          if (res[1] === null) out.push('⚠️ <i>No pude leer los SLA: "Vencidos" queda incompleto</i>');
-          return out.join('\n');
+                    .filter(function (p) { return p[1] > 1; }).sort(function (a, b) { return b[1] - a[1]; });
+          return {L: calc('lineales'), G: calc('gpon'), cis: cis, sinVerif: !res[0], sinSla: res[1] === null};
         });
+      });
+    }
+    // textos comunes
+    function vencTxtP(r) { return r.venc.length ? r.venc.length + ' / ' + r.venc.join(' / ') : '0'; }
+    function cumplTxt(r) {
+      if (r.pct === null) return 'En término: — (sin resueltos)';
+      var v = Math.min(r.venc.length, r.res);
+      return 'En término: ' + r.pct + '% (' + v + (v === 1 ? ' vencido' : ' vencidos') + ' de ' + r.res + ' resueltos)';
+    }
+    function diaCargado(r) {
+      var top = Object.keys(r.porDia).sort(function (a, b) { return r.porDia[b] - r.porDia[a]; })[0];
+      if (!top) return null;
+      var x = top.split('-'), dd = new Date(+x[0], x[1] - 1, +x[2]);
+      return 'Día más cargado: ' + DIAS_SEM[dd.getDay()] + ' ' + dm(dd) + ' (' + r.porDia[top] + (r.porDia[top] === 1 ? ' caso)' : ' casos)');
+    }
+    function semanaCargada(r) {
+      var porSem = {};
+      Object.keys(r.porDia).forEach(function (k) { var x = k.split('-'), l = iso(lunesDe(new Date(+x[0], x[1] - 1, +x[2]))); porSem[l] = (porSem[l] || 0) + r.porDia[k]; });
+      var top = Object.keys(porSem).sort(function (a, b) { return porSem[b] - porSem[a]; })[0];
+      if (!top) return null;
+      var x = top.split('-'), l = new Date(+x[0], x[1] - 1, +x[2]), d = new Date(l.getTime()); d.setDate(d.getDate() + 6);
+      return 'Semana más cargada: ' + dm(l) + ' al ' + dm(d) + ' (' + porSem[top] + (porSem[top] === 1 ? ' caso)' : ' casos)');
+    }
+    function porCliente(r) {
+      return r.clientes.length ? 'Por cliente: ' + esc(contar(r.clientes).sort(function (a, b) { return b[1] - a[1]; })
+                                                   .map(function (p) { return p[1] + ' ' + p[0]; }).join(' · ')) : null;
+    }
+    function avisosDatos(d) {
+      var o = [];
+      if (d.sinVerif) o.push('⚠️ <i>No pude ver los pases a verificación: "Resueltos" puede estar incompleto</i>');
+      if (d.sinSla) o.push('⚠️ <i>No pude leer los SLA: "Vencidos" queda incompleto</i>');
+      return o.length ? ['', o.join('\n')] : [];
+    }
+    var SEP = ['', '━━━━━━━━━━━━━━━━━━━━', ''];
+
+    // Semana de lunes a domingo. Sin fecha: la semana pasada (el automático de los lunes). Con fecha: la semana que
+    // la contiene (/semana a mano pasa hoy = semana en curso, del lunes hasta hoy).
+    function semana(fechaRef) {
+      var ref = fechaRef ? new Date(fechaRef.getTime()) : new Date(Date.now() - 7 * 864e5);
+      var lunes = lunesDe(ref), domingo = new Date(lunes.getTime()); domingo.setDate(domingo.getDate() + 6);
+      return periodo(lunes, domingo).then(function (d) {
+        var L = d.L, G = d.G, hoy0 = new Date(); hoy0.setHours(0, 0, 0, 0);
+        var encurso = domingo >= hoy0;           // semana en curso: va del lunes hasta hoy
+        var out = ['📅 <b>Resumen semanal</b> · ' + dm(lunes) + ' al ' + (encurso ? dm(hoy0) + ' <i>(semana en curso)</i>' : dm(domingo)), '', '🔧 <b>Lineales</b>', '',
+                   'Ingresados: ' + L.ing, 'Resueltos: ' + L.res, 'Vencidos: ' + esc(vencTxtP(L)), cumplTxt(L)];
+        if (porCliente(L)) out.push(porCliente(L));
+        if (diaCargado(L)) out.push(diaCargado(L));
+        out = out.concat(SEP, ['📡 <b>GPON</b>', '', 'Ingresados: ' + G.ing, 'Resueltos: ' + G.res, 'Vencidos: ' + esc(vencTxtP(G)), cumplTxt(G),
+                               'Emergencias (P1/P2): ' + G.emerg]);
+        if (diaCargado(G)) out.push(diaCargado(G));
+        var cis = d.cis.slice(0, 5);
+        if (cis.length) { out = out.concat(SEP, ['🔁 <b>CIs que más se repitieron</b>']); cis.forEach(function (p) { out.push('• ' + esc(p[0]) + ' · ' + p[1] + ' casos'); }); }
+        return out.concat(avisosDatos(d)).join('\n');
+      });
+    }
+
+    // Mes calendario. Sin fecha: el mes pasado (el automático del 1°). Con fecha: ese mes (/mes a mano = mes en curso).
+    // Compara con el mes anterior.
+    function mes(fechaRef) {
+      var hoy0 = new Date(); hoy0.setHours(0, 0, 0, 0);
+      var ref = fechaRef ? new Date(fechaRef.getTime()) : new Date(hoy0.getFullYear(), hoy0.getMonth() - 1, 1);
+      var ini = new Date(ref.getFullYear(), ref.getMonth(), 1), fin = new Date(ref.getFullYear(), ref.getMonth() + 1, 0);
+      var encurso = fin >= hoy0;
+      var iniAnt = new Date(ini.getFullYear(), ini.getMonth() - 1, 1), finAnt = new Date(ini.getFullYear(), ini.getMonth(), 0);
+      return Promise.all([periodo(ini, encurso ? hoy0 : fin), periodo(iniAnt, finAnt).catch(function () { return null; })]).then(function (r) {
+        var d = r[0], a = r[1], L = d.L, G = d.G, mesAnt = MESES[iniAnt.getMonth()];
+        var cmp = function (x, y, pts) {             // ▲ / ▼ / = contra el mes anterior
+          if (y === null || y === undefined || x === null) return '';
+          var dif = x - y;
+          return ' <i>(' + (dif > 0 ? '▲ ' + dif : dif < 0 ? '▼ ' + (-dif) : '=') + (pts && dif ? ' pts' : '') + ' vs ' + mesAnt + ')</i>';
+        };
+        var bloque = function (p, pa, gpon) {
+          var o = ['Ingresados: ' + p.ing + cmp(p.ing, pa && pa.ing), 'Resueltos: ' + p.res, 'Vencidos: ' + esc(vencTxtP(p)),
+                   cumplTxt(p) + cmp(p.pct, pa && pa.pct, true)];
+          if (gpon) o.push('Emergencias (P1/P2): ' + p.emerg);
+          else if (porCliente(p)) o.push(porCliente(p));
+          if (semanaCargada(p)) o.push(semanaCargada(p));
+          if (diaCargado(p)) o.push(diaCargado(p));
+          return o;
+        };
+        var out = ['🗓️ <b>Resumen mensual</b> · ' + MESES[ini.getMonth()] + ' ' + ini.getFullYear() + (encurso ? ' <i>(hasta hoy ' + dm(hoy0) + ')</i>' : ''),
+                   '', '🔧 <b>Lineales</b>', ''].concat(bloque(L, a && a.L), SEP, ['📡 <b>GPON</b>', ''], bloque(G, a && a.G, true));
+        var cis = d.cis.slice(0, 5);
+        if (cis.length) { out = out.concat(SEP, ['🔁 <b>CIs que más se repitieron</b>']); cis.forEach(function (p) { out.push('• ' + esc(p[0]) + ' · ' + p[1] + ' casos'); }); }
+        return out.concat(avisosDatos(d)).join('\n');
       });
     }
     function esc(t) { return String(t).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
 
     if (window.top === window.self) montar();
-    return {armar: armar, semana: semana};
+    return {armar: armar, semana: semana, mes: mes};
   })();
   // el resumen para Telegram: va en un recuadro que se copia con un toque, tal cual (con los * de WhatsApp)
   // "/status", "/status 09-04-2026", "/status 9/4" (sin año = este año)
