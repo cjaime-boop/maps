@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Mobisond · Avisador
 // @namespace    mobisond
-// @version      2.72
+// @version      2.73
 // @description  Avisa los casos nuevos (celular, campana y grupo de Telegram), los Lineales sin notas hace 25 min, los SLA y los aceptados; botón de resumen de turno y comandos del bot.
 // @match        https://*.service-now.com/*
 // @grant        GM_xmlhttpRequest
@@ -584,7 +584,12 @@
     }
     if (p.cmd === '/semana') {
       var fs = fechaDeTexto((p.texto || '').trim().split(/\s+/).slice(1).join(' '));
-      var semanaTxt = fs === 'mal' ? Promise.resolve('No entendí la fecha. Usalo así: <code>/semana 13-10-2026</code>') : RESUMEN.semana(fs || undefined);
+      // /semana a mano = semana en curso; el automático de los lunes (pedido sin mensaje) = semana pasada
+      var automatico = p.id < 0 && !p.msg;
+      var hoySem = new Date(); hoySem.setHours(0, 0, 0, 0);
+      var semanaTxt = fs === 'mal' ? Promise.resolve('No entendí la fecha. Usalo así: <code>/semana 13-10-2026</code>')
+        : fs && fs > hoySem ? Promise.resolve('Esa fecha todavía no llegó 🙂')
+        : RESUMEN.semana(fs || (automatico ? undefined : hoySem));
       semanaTxt.then(function (t) {
         unaVezAlGrupo('cmd:' + p.id, t, p.msg, p.chat, function (ok) { listo(ok ? 'contestado' : 'no se pudo contestar'); });
       }, function (e) { unaVezAlGrupo('cmd:' + p.id, 'No pude armar el resumen semanal (' + esc(e.message) + ').', p.msg, p.chat); listo('error ServiceNow ' + e.message); });
@@ -696,12 +701,12 @@
   function comandos() {
     if (!hayGrupo() || !soyLider()) return;
     atenderPendientes();
-    if (GM_getValue('tg_cmds', 0) < 6) {     // menú de comandos del bot (aparece al escribir "/" en el grupo)
+    if (GM_getValue('tg_cmds', 0) < 7) {     // menú de comandos del bot (aparece al escribir "/" en el grupo)
       tg('setMyCommands', {commands: [{command: 'bandeja', description: 'Casos abiertos de Lineales y GPON'},
                                       {command: 'caso', description: 'Detalle de un caso: /caso WO0096818'},
                                       {command: 'activos', description: 'Quién está activo ahora y quién entra'},
                                       {command: 'status', description: 'Resumen del día (Lineales y GPON)'},
-                                      {command: 'semana', description: 'Resumen de la semana pasada (o /semana 13-10-2026)'}]}, function () { GM_setValue('tg_cmds', 6); });
+                                      {command: 'semana', description: 'Resumen de esta semana (o /semana 13-10-2026)'}]}, function () { GM_setValue('tg_cmds', 7); });
     }
     if (modoBot === null) {                    // ¿el bot está conectado a Supabase?
       modoBot = 'esperando';
@@ -1142,7 +1147,8 @@
       });
     }
     // ---------- resumen semanal (/semana y automático los lunes) ----------
-    // Semana de lunes a domingo. Sin fecha: la semana pasada. Con fecha: la semana que la contiene.
+    // Semana de lunes a domingo. Sin fecha: la semana pasada (el automático de los lunes). Con fecha: la semana que
+    // la contiene (/semana a mano pasa hoy = semana en curso, del lunes hasta hoy).
     function semana(fechaRef) {
       var ref = fechaRef ? new Date(fechaRef.getTime()) : new Date(Date.now() - 7 * 864e5);
       ref.setHours(0, 0, 0, 0);
@@ -1194,7 +1200,9 @@
           };
           var L = calc('lineales'), G = calc('gpon');
           var vencTxt = function (r) { return r.venc.length ? r.venc.length + ' / ' + r.venc.join(' / ') : '0'; };
-          var out = ['📅 <b>Resumen semanal</b> · ' + dm(lunes) + ' al ' + dm(domingo), '', '🔧 <b>Lineales</b>', '',
+          var hoy0 = new Date(); hoy0.setHours(0, 0, 0, 0);
+          var encurso = domingo >= hoy0;           // semana en curso: va del lunes hasta hoy
+          var out = ['📅 <b>Resumen semanal</b> · ' + dm(lunes) + ' al ' + (encurso ? dm(hoy0) + ' <i>(semana en curso)</i>' : dm(domingo)), '', '🔧 <b>Lineales</b>', '',
                      'Ingresados: ' + L.ing, 'Resueltos: ' + L.res, 'Vencidos: ' + esc(vencTxt(L))];
           if (L.clientes.length) out.push('Por cliente: ' + esc(contar(L.clientes).sort(function (a, b) { return b[1] - a[1]; })
                                                    .map(function (p) { return p[1] + ' ' + p[0]; }).join(' · ')));
