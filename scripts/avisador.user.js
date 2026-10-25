@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Mobisond · Avisador
 // @namespace    mobisond
-// @version      2.67
+// @version      2.69
 // @description  Avisa los casos nuevos (celular, campana y grupo de Telegram), los Lineales sin notas hace 25 min, los SLA y los aceptados; botón de resumen de turno y comandos del bot.
 // @match        https://*.service-now.com/*
 // @grant        GM_xmlhttpRequest
@@ -329,6 +329,9 @@
     var sub = dv(r, 'substate');
     return sub ? /paus/i.test(sub) : !!dv(r, 'u_pause_reason').trim();
   }
+  // Estado "Aceptado" / "En camino": el técnico ya tomó el caso (no está sin atender). Ojo: es el ESTADO,
+  // distinto del motivo de pausa "Aceptado por el cliente".
+  function enCamino(r) { return /^(accepted|aceptad[oa]|en camino|en route|on route|in route|en ruta)\b/i.test(dv(r, 'state').trim()); }
   // "Aceptado por el cliente": el caso sigue En curso pero ya está resuelto, esperando el cierre
   function aceptado(r) { var t = dv(r, 'u_pause_reason') + ' ' + dv(r, 'substate'); return /acept/i.test(t) && !/no acept/i.test(t); }   // ojo: "No aceptado por el cliente" es un rechazo
   function proyecto(r) {
@@ -506,10 +509,11 @@
       var out = ['📋 <b>Bandeja</b> · ' + hhmm(Date.now())];
       ['Lineales', 'GPON'].forEach(function (pr) {
         var cs = casos.filter(function (r) { return proyecto(r) === pr; });
-        var curso = [], verif = [], pausa = [], sin = [], acep = [];
+        var curso = [], verif = [], pausa = [], sin = [], acep = [], camino = [];
         cs.forEach(function (r) {
           var motivo = dv(r, 'u_pause_reason').trim();
-          if (!enCurso(r)) sin.push(r);
+          if (enCamino(r)) camino.push(r);
+          else if (!enCurso(r)) sin.push(r);
           else if (aceptado(r)) acep.push(r);
           else if (pausado(r) && /verificaci/i.test(motivo)) verif.push(r);
           else if (pausado(r)) pausa.push(r);
@@ -529,6 +533,7 @@
         out.push('', (pr === 'Lineales' ? '🔧' : '📡') + ' <b>' + pr + '</b>', '', cs.length + (cs.length === 1 ? ' abierto' : ' abiertos'));
         if (!cs.length) return;
         grupo('▶️ En curso', curso, function (r) { return dv(r, 'assigned_to'); });
+        grupo('🚗 Aceptados / En camino', camino, function (r) { return dv(r, 'state') + ' · ' + (dv(r, 'assigned_to') || 'sin asignar'); });
         grupo('⏸️ Pausados', pausa, function (r) { return dv(r, 'u_pause_reason'); });
         grupo('🔍 Verificación del cliente', verif);
         grupo('✅ Aceptados por el cliente', acep);
@@ -972,7 +977,7 @@
         var estado = dv(c, 'state');
         if (pausa && VERIFICACION.test(pausa)) r.verificacion++;
         else if (pausa) r.pausas.push(pausa);
-        else if (/work in progress|en curso/i.test(estado)) r.enMano.push(cliente(c));
+        else if (/work in progress|en curso/i.test(estado) || enCamino(c)) r.enMano.push(cliente(c));   // aceptado / en camino = en mano
         else { r.sinAtender++; if (cliente(c) === 'CLR') r.claroSin++; }
       });
       if (!venc) r.vencidos = '?';
