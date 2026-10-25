@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Mobisond · Avisador
 // @namespace    mobisond
-// @version      2.70
+// @version      2.71
 // @description  Avisa los casos nuevos (celular, campana y grupo de Telegram), los Lineales sin notas hace 25 min, los SLA y los aceptados; botón de resumen de turno y comandos del bot.
 // @match        https://*.service-now.com/*
 // @grant        GM_xmlhttpRequest
@@ -760,6 +760,8 @@
   // Si nadie tiene la lista vigilada, igual se avisan al grupo los casos que entran: la pestaña que atiende
   // le pregunta a ServiceNow cada 30 s por los WOT de Mobisond abiertos en los últimos 15 min.
   // Usa la misma clave que el aviso de la lista (el sys_id), así Supabase no deja que salga dos veces.
+  // En la misma consulta se ve si alguno lleva 7 min en Pending Dispatch sin asignar.
+  var PENDIENTE_MIN = 7;               // minutos en Pending Dispatch sin asignar antes de avisar
   function casosPorDetras() {
     if (!hayGrupo() || !soyLider()) return;
     var ahora = Date.now();
@@ -767,7 +769,16 @@
     GM_setValue('ult_nuevos', ahora);
     var q = 'active=true^opened_at>javascript:gs.minutesAgoStart(15)^assignment_group.nameSTARTSWITH' + GRUPOS.lineales +
             '^ORassignment_group.nameSTARTSWITH' + GRUPOS.gpon;
-    api('wm_task', q, 'sys_id,number,parent,priority,cmdb_ci,short_description,opened_at').then(function (rs) {
+    api('wm_task', q, 'sys_id,number,parent,priority,cmdb_ci,short_description,opened_at,state,assigned_to').then(function (rs) {
+      // SIN ASIGNAR: sigue en Pending Dispatch, sin nadie asignado, 7 min (o más) después de entrar -> avisa una vez
+      rs.forEach(function (r) {
+        var min = (ahora - utc(vl(r, 'opened_at'))) / 60000;
+        if (min >= PENDIENTE_MIN && /pending dispatch|pendiente/i.test(dv(r, 'state')) && !vl(r, 'assigned_to')) {
+          var prio = dv(r, 'priority');
+          unaVezAlGrupo('pend:' + vl(r, 'sys_id'), '⏰ <b>Caso sin asignar hace ' + Math.floor(min) + ' min</b>\n<i>Sigue en Pending Dispatch</i>' +
+            (prio ? '\n\n' + colorPrio(prio) + ' <b>' + esc(prio) + '</b>' : '') + cuerpo(r));
+        }
+      });
       var avisados = GM_getValue('nuevos_avisados', {});
       Object.keys(avisados).forEach(function (k) { if (ahora - avisados[k] > 60 * 60000) delete avisados[k]; });
       rs.forEach(function (r) {
