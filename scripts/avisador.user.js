@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Mobisond · Avisador
 // @namespace    mobisond
-// @version      2.73
+// @version      2.74
 // @description  Avisa los casos nuevos (celular, campana y grupo de Telegram), los Lineales sin notas hace 25 min, los SLA y los aceptados; botón de resumen de turno y comandos del bot.
 // @match        https://*.service-now.com/*
 // @grant        GM_xmlhttpRequest
@@ -891,7 +891,7 @@
         });
         if (!ids.length) return {casos: casos, vencidos: {}};
         var qs = 'taskIN' + ids.join(',') + '^has_breached=true';   // el NETO se filtra abajo, por nombre
-        return api('task_sla', qs, 'task,sla,has_breached,planned_end_time,original_breach_time').then(function (slas) {
+        return api('task_sla', qs, 'task,sla,stage,has_breached,planned_end_time,original_breach_time').then(function (slas) {
           var porId = {};
           casos.forEach(function (r) { porId[val(r, 'sys_id')] = dv(r, 'number'); });
           var venc = {};
@@ -900,6 +900,7 @@
             // vencido = el SLA se venció HOY (no importa qué día entró el caso).
             // Se usa el momento original del vencimiento: si el caso estuvo pausado, el otro campo se corre y daba falsos vencidos.
             if (!/neto/i.test(dv(s, 'sla'))) return;
+            if (/cancel/i.test(val(s, 'stage') + ' ' + dv(s, 'stage'))) return;   // SLA cancelado (lo reemplazó otro): no cuenta
             var cuando = val(s, 'original_breach_time') || val(s, 'planned_end_time');
             if (!cuando || !esHoy(cuando) || new Date(cuando.replace(' ', 'T') + 'Z').getTime() > ahora) return;
             var t = val(s, 'task'); var n = porId[t] || dePadre[t]; if (n) venc[n] = 1;
@@ -1171,12 +1172,13 @@
           ids.push(val(r, 'sys_id')); porId[val(r, 'sys_id')] = dv(r, 'number');
           var p = val(r, 'parent'); if (p) { ids.push(p); dePadre[p] = dv(r, 'number'); }
         });
-        var slas = ids.length ? api('task_sla', 'taskIN' + ids.join(',') + '^has_breached=true', 'task,sla,planned_end_time,original_breach_time')
+        var slas = ids.length ? api('task_sla', 'taskIN' + ids.join(',') + '^has_breached=true', 'task,sla,stage,planned_end_time,original_breach_time')
           .catch(function () { return null; }) : Promise.resolve([]);
         return Promise.all([primerasVerif(casos), slas]).then(function (res) {
           var prim = res[0] || {}, venc = {};
           (res[1] || []).forEach(function (sv) {
             if (!/neto/i.test(dv(sv, 'sla'))) return;
+            if (/cancel/i.test(val(sv, 'stage') + ' ' + dv(sv, 'stage'))) return;   // SLA cancelado: no cuenta
             var d = deUtc(val(sv, 'original_breach_time') || val(sv, 'planned_end_time'));
             var n = porId[val(sv, 'task')] || dePadre[val(sv, 'task')];
             if (n && enSemana(d) && d.getTime() <= Date.now()) venc[n] = 1;
