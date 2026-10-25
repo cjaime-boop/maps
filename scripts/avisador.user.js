@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Mobisond · Avisador
 // @namespace    mobisond
-// @version      2.74
+// @version      2.75
 // @description  Avisa los casos nuevos (celular, campana y grupo de Telegram), los Lineales sin notas hace 25 min, los SLA y los aceptados; botón de resumen de turno y comandos del bot.
 // @match        https://*.service-now.com/*
 // @grant        GM_xmlhttpRequest
@@ -1202,16 +1202,28 @@
           };
           var L = calc('lineales'), G = calc('gpon');
           var vencTxt = function (r) { return r.venc.length ? r.venc.length + ' / ' + r.venc.join(' / ') : '0'; };
+          // % en término: de los resueltos, cuántos no se vencieron
+          var cumpl = function (r) {
+            if (!r.res) return 'En término: — (sin resueltos)';
+            var v = Math.min(r.venc.length, r.res);
+            return 'En término: ' + Math.round((r.res - v) * 100 / r.res) + '% (' + v + (v === 1 ? ' vencido' : ' vencidos') + ' de ' + r.res + ' resueltos)';
+          };
+          var diaCargado = function (r) {
+            var top = Object.keys(r.porDia).sort(function (a, b) { return r.porDia[b] - r.porDia[a]; })[0];
+            if (!top) return null;
+            var x = top.split('-'), dd = new Date(+x[0], x[1] - 1, +x[2]);
+            return 'Día más cargado: ' + DIAS[dd.getDay()] + ' ' + dm(dd) + ' (' + r.porDia[top] + (r.porDia[top] === 1 ? ' caso)' : ' casos)');
+          };
           var hoy0 = new Date(); hoy0.setHours(0, 0, 0, 0);
           var encurso = domingo >= hoy0;           // semana en curso: va del lunes hasta hoy
           var out = ['📅 <b>Resumen semanal</b> · ' + dm(lunes) + ' al ' + (encurso ? dm(hoy0) + ' <i>(semana en curso)</i>' : dm(domingo)), '', '🔧 <b>Lineales</b>', '',
-                     'Ingresados: ' + L.ing, 'Resueltos: ' + L.res, 'Vencidos: ' + esc(vencTxt(L))];
+                     'Ingresados: ' + L.ing, 'Resueltos: ' + L.res, 'Vencidos: ' + esc(vencTxt(L)), cumpl(L)];
           if (L.clientes.length) out.push('Por cliente: ' + esc(contar(L.clientes).sort(function (a, b) { return b[1] - a[1]; })
                                                    .map(function (p) { return p[1] + ' ' + p[0]; }).join(' · ')));
-          var top = Object.keys(L.porDia).sort(function (a, b) { return L.porDia[b] - L.porDia[a]; })[0];
-          if (top) { var x = top.split('-'), dd = new Date(+x[0], x[1] - 1, +x[2]); out.push('Día más cargado: ' + DIAS[dd.getDay()] + ' ' + dm(dd) + ' (' + L.porDia[top] + ' casos)'); }
+          if (diaCargado(L)) out.push(diaCargado(L));
           out.push('', '━━━━━━━━━━━━━━━━━━━━', '', '📡 <b>GPON</b>', '',
-                   'Ingresados: ' + G.ing, 'Resueltos: ' + G.res, 'Vencidos: ' + esc(vencTxt(G)), 'Emergencias (P1/P2): ' + G.emerg);
+                   'Ingresados: ' + G.ing, 'Resueltos: ' + G.res, 'Vencidos: ' + esc(vencTxt(G)), cumpl(G), 'Emergencias (P1/P2): ' + G.emerg);
+          if (diaCargado(G)) out.push(diaCargado(G));
           // CIs que más se repitieron (casos abiertos en la semana, los dos proyectos)
           var cis = contar(casos.filter(function (c) { return enSemana(deUtc(val(c, 'opened_at'))) && dv(c, 'cmdb_ci'); })
                                 .map(function (c) { return dv(c, 'cmdb_ci'); }))
