@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Mobisond · Avisador
 // @namespace    mobisond
-// @version      2.54
+// @version      2.55
 // @description  Avisa los casos nuevos (celular, campana y grupo de Telegram), los Lineales sin notas hace 25 min, los SLA y los aceptados; botón de resumen de turno y comandos del bot.
 // @match        https://*.service-now.com/*
 // @grant        GM_xmlhttpRequest
@@ -502,8 +502,8 @@
           else if (pausado(r)) pausa.push(r);
           else curso.push(r);
         });
-        var fila = function (r, abajo, alLado) {      // abajo: renglón en cursiva debajo; alLado: en cursiva en el mismo renglón
-          var t = '• ' + esc(woDe(r)) + ' · ' + esc(dv(r, 'cmdb_ci') || 'sin CI') + (alLado ? ' · <i>' + esc(alLado) + '</i>' : '');
+        var fila = function (r, abajo, alLado) {      // WO en negrita; abajo con sangría el CI y (en cursiva) el detalle
+          var t = '• <b>' + esc(woDe(r)) + '</b>\n   ' + esc(dv(r, 'cmdb_ci') || 'sin CI') + (alLado ? ' · <i>' + esc(alLado) + '</i>' : '');
           if (abajo) t += '\n   <i>' + esc(abajo) + '</i>';
           return t;
         };
@@ -512,7 +512,8 @@
           out.push('', '<b>' + titulo + ' (' + lista.length + ')</b>');
           lista.forEach(function (r) { out.push(fila(r, abajo && abajo(r), alLado && alLado(r))); });
         };
-        out.push('', (pr === 'Lineales' ? '🔧' : '📡') + ' <b>' + pr + '</b> · ' + cs.length + (cs.length === 1 ? ' abierto' : ' abiertos'));
+        if (pr === 'GPON') out.push('', '━━━━━━━━━━━━━━━━━━━━');      // separador entre Lineales y GPON
+        out.push('', (pr === 'Lineales' ? '🔧' : '📡') + ' <b>' + pr + '</b>', cs.length + (cs.length === 1 ? ' abierto' : ' abiertos'));
         if (!cs.length) return;
         grupo('▶️ En curso', curso, function (r) { return dv(r, 'assigned_to'); });
         grupo('⏸️ Pausados', pausa, function (r) { return dv(r, 'u_pause_reason'); });
