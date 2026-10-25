@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Mobisond · Avisador
 // @namespace    mobisond
-// @version      2.65
+// @version      2.66
 // @description  Avisa los casos nuevos (celular, campana y grupo de Telegram), los Lineales sin notas hace 25 min, los SLA y los aceptados; botón de resumen de turno y comandos del bot.
 // @match        https://*.service-now.com/*
 // @grant        GM_xmlhttpRequest
@@ -656,10 +656,11 @@
     if (!id) { id = 'pc-' + Math.random().toString(36).slice(2, 10); GM_setValue('pc_id', id); }
     return id;
   }
-  var tomando = false;
+  var tomando = false, ultTomar = 0;
+  var CADA_TOMAR_MS = 10000;          // cada cuánto se le pregunta a Supabase por pedidos del bot (y se avisa "estoy viva")
   function tomarDeSupabase() {
-    if (tomando) return;
-    tomando = true;
+    if (tomando || Date.now() - ultTomar < CADA_TOMAR_MS - 500) return;
+    tomando = true; ultTomar = Date.now();
     sbRpc('bot_tomar', {p_pc: pcId()}).then(function (filas) {
       tomando = false;
       if (!filas || !filas.length) return;
