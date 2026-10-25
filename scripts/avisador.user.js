@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Mobisond · Avisador
 // @namespace    mobisond
-// @version      2.50
+// @version      2.51
 // @description  Avisa los casos nuevos (celular, campana y grupo de Telegram), los casos Lineales sin notas de trabajo hace 25 min y los SLA a 1 hora de vencer.
 // @match        https://*.service-now.com/*
 // @grant        GM_xmlhttpRequest
@@ -300,6 +300,7 @@
   //  1) Lineales en curso, sin pausa, sin notas de trabajo DE MOBISOND hace 25 min -> avisa UNA vez (hasta que haya otra nota).
   //  2) Lineales y GPON en curso, con el SLA NETO corriendo y a 1 hora o menos de vencer -> avisa una vez.
   //  3) Lineales y GPON en curso, cuando se les vence el SLA NETO -> avisa una vez.
+  //  4) Lineales y GPON, cuando un caso pasa a "Aceptado por el cliente" -> avisa una vez.
   var GRUPOS = {lineales: 'C-TL-MOBISOND', gpon: 'C-GZ1-MOBI'};
   var SILENCIO_MIN = 25, SLA_MIN = 60, CADA_MS = 2 * 60 * 1000;
 
@@ -326,6 +327,8 @@
     var sub = dv(r, 'substate');
     return sub ? /paus/i.test(sub) : !!dv(r, 'u_pause_reason').trim();
   }
+  // "Aceptado por el cliente": el caso sigue En curso pero ya está resuelto, esperando el cierre
+  function aceptado(r) { return /acept/i.test(dv(r, 'u_pause_reason') + ' ' + dv(r, 'substate')); }
   function proyecto(r) {
     var g = dv(r, 'assignment_group').toUpperCase();
     return g.indexOf(GRUPOS.lineales) === 0 ? 'Lineales' : g.indexOf(GRUPOS.gpon) === 0 ? 'GPON' : '';
@@ -425,8 +428,20 @@
       GM_setValue('ctl_visto', nuevoVisto);
       if (!casos.length) return;
 
-      // 1) sin notas de trabajo (solo Lineales, sin pausa)
-      var lin = casos.filter(function (r) { return proyecto(r) === 'Lineales' && !pausado(r); });
+      // 0) casos que pasaron a "Aceptado por el cliente" (Lineales y GPON). La primera vez solo se anotan los que ya estaban.
+      var acept = GM_getValue('acept_vistos', {}), primeraVez = !GM_getValue('acept_iniciado', false), aceptNuevo = {};
+      casos.filter(aceptado).forEach(function (r) {
+        var id = vl(r, 'sys_id');
+        aceptNuevo[id] = acept[id] || ahora;
+        if (!acept[id] && !primeraVez) {
+          unaVezAlGrupo('acept:' + id, '✅ <b>¡Caso aceptado por el cliente!</b> 🎉' + cuerpo(r, '👷 ' + esc(dv(r, 'assigned_to') || 'sin asignar')));
+        }
+      });
+      GM_setValue('acept_vistos', aceptNuevo);
+      GM_setValue('acept_iniciado', true);
+
+      // 1) sin notas de trabajo (solo Lineales, sin pausa ni aceptados)
+      var lin = casos.filter(function (r) { return proyecto(r) === 'Lineales' && !pausado(r) && !aceptado(r); });
       if (lin.length) ultimasNotas(lin).then(function (notas) {
         lin.forEach(function (r) {
           var id = vl(r, 'sys_id'), v = nuevoVisto[id];
@@ -477,10 +492,11 @@
       var out = ['📋 <b>Bandeja</b> · ' + hhmm(Date.now())];
       ['Lineales', 'GPON'].forEach(function (pr) {
         var cs = casos.filter(function (r) { return proyecto(r) === pr; });
-        var curso = [], verif = [], pausa = [], sin = [];
+        var curso = [], verif = [], pausa = [], sin = [], acep = [];
         cs.forEach(function (r) {
           var motivo = dv(r, 'u_pause_reason').trim();
           if (!enCurso(r)) sin.push(r);
+          else if (aceptado(r)) acep.push(r);
           else if (pausado(r) && /verificaci/i.test(motivo)) verif.push(r);
           else if (pausado(r)) pausa.push(r);
           else curso.push(r);
@@ -500,6 +516,7 @@
         grupo('▶️ En curso', curso, function (r) { return dv(r, 'assigned_to'); });
         grupo('⏸️ Pausados', pausa, function (r) { return dv(r, 'u_pause_reason'); });
         grupo('🔍 Verificación del cliente', verif);
+        grupo('✅ Aceptados por el cliente', acep);
         if (sin.length) grupo('⏳ Sin atender', sin, null, function (r) { return dv(r, 'state'); });
         else out.push('', '⏳ Sin atender: 0');
       });
@@ -573,7 +590,7 @@
         var out = ['🔎 <b>' + esc(woDe(r)) + '</b>', esc(dv(r, 'cmdb_ci') || 'sin CI')];
         if (dv(r, 'short_description')) out.push('<i>' + esc(dv(r, 'short_description')) + '</i>');
         out.push('', '📌 <b>Estado</b>',
-                 esc(dv(r, 'state')) + (pausado(r) ? ' · ⏸️ ' + esc(dv(r, 'u_pause_reason') || 'en pausa') : ''),
+                 esc(dv(r, 'state')) + (aceptado(r) ? ' · ✅ ' + esc(dv(r, 'u_pause_reason') || 'aceptado') : pausado(r) ? ' · ⏸️ ' + esc(dv(r, 'u_pause_reason') || 'en pausa') : ''),
                  color + ' Prioridad ' + esc(prio || '—'),
                  '👷 ' + esc(dv(r, 'assigned_to') || 'sin asignar'));
         out.push('', '📝 <b>Última actividad Mobisond</b>');
