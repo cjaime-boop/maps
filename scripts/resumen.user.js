@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Mobisond · Resumen de turno (WhatsApp)
 // @namespace    mobisond
-// @version      1.7
+// @version      1.8
 // @description  Arma el mensaje de fin de turno (Lineales y GPON) con los números del día, listo para pegar en WhatsApp.
 // @match        https://*.service-now.com/*
 // @grant        GM_registerMenuCommand
@@ -105,10 +105,52 @@
         });
         return {casos: casos, vencidos: venc};
       }, function () { return {casos: casos, vencidos: null}; });   // si no deja leer los SLA, se completa a mano
-    }).then(function (d) { return texto(d.casos, d.vencidos); });
+    }).then(function (d) {
+      return verificadosHoy(d.casos).then(function (vh) { return texto(d.casos, d.vencidos, vh); });
+    });
   }
 
-  function calcular(casos, venc, proy) {
+  // RESUELTOS = casos que hoy pasaron a "Verificación del cliente" (aunque después se hayan cerrado o pasado a
+  // "Aceptado"). Se busca por dos caminos y se juntan:
+  //  a) el historial de cambios (sys_audit) del motivo de pausa, si el usuario tiene permiso para verlo;
+  //  b) el comentario automático que deja ServiceNow en la WO ("Se espera la verificación del cliente").
+  // Devuelve {número de WOT: true} o null si no se pudo leer nada.
+  function fechaEntrada(t) {           // "2026-10-24 05:12:33" o "24/10/2026 05:12:33" (hora local de la PC)
+    var m;
+    if ((m = /(\d{4})-(\d{2})-(\d{2}) (\d{2}):(\d{2}):(\d{2})/.exec(t))) return new Date(+m[1], m[2] - 1, +m[3], +m[4], +m[5], +m[6]);
+    if ((m = /(\d{2})[\/-](\d{2})[\/-](\d{4}) (\d{2}):(\d{2}):(\d{2})/.exec(t))) return new Date(+m[3], m[2] - 1, +m[1], +m[4], +m[5], +m[6]);
+    return null;
+  }
+  function hoyLocal(d) { var h = new Date(); return d && d.getFullYear() === h.getFullYear() && d.getMonth() === h.getMonth() && d.getDate() === h.getDate(); }
+  function verificadosHoy(casos) {
+    var porId = {}, padres = [];
+    casos.forEach(function (c) {
+      porId[val(c, 'sys_id')] = dv(c, 'number');
+      var p = val(c, 'parent'); if (p) { porId[p] = dv(c, 'number'); padres.push(p); }
+    });
+    var ids = Object.keys(porId);
+    if (!ids.length) return Promise.resolve({});
+    var hoy = {}, leido = false;
+    var porAudit = api('sys_audit', 'fieldname=u_pause_reason^documentkeyIN' + ids.join(',') + '^sys_created_onON' + 'Today' + HOY,
+                       'documentkey,newvalue,sys_created_on').then(function (as) {
+      leido = true;
+      as.forEach(function (a) { if (/verific/i.test(val(a, 'newvalue') + ' ' + dv(a, 'newvalue'))) { var n = porId[val(a, 'documentkey')]; if (n) hoy[n] = true; } });
+    }, function () {});
+    var porComentario = padres.length ? api('wm_order', 'sys_idIN' + padres.join(','), 'sys_id,comments,work_notes').then(function (wos) {
+      leido = true;
+      wos.forEach(function (w) {
+        // cada entrada empieza con "fecha hora - Autor (Comentarios adicionales)"; se mira el texto de las de hoy
+        var txt = dv(w, 'comments') + '\n' + dv(w, 'work_notes');
+        var re = /(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}|\d{2}[\/-]\d{2}[\/-]\d{4} \d{2}:\d{2}:\d{2}) - [^\n]*\n([\s\S]*?)(?=\n\s*(?:\d{4}-\d{2}-\d{2}|\d{2}[\/-]\d{2}[\/-]\d{4}) \d{2}:\d{2}:\d{2} - |$)/g, m;
+        while ((m = re.exec(txt))) {
+          if (hoyLocal(fechaEntrada(m[1])) && /espera la verificaci[oó]n del cliente/i.test(m[2])) { var n = porId[val(w, 'sys_id')]; if (n) hoy[n] = true; }
+        }
+      });
+    }, function () {}) : Promise.resolve();
+    return Promise.all([porAudit, porComentario]).then(function () { return leido ? hoy : null; });
+  }
+
+  function calcular(casos, venc, proy, vh) {
     var r = {ingresados: 0, resueltos: 0, acumulados: 0, verificacion: 0, pausas: [], sinAtender: 0, claroSin: 0,
              enMano: [], vencidos: 0, vencidosWO: [], emergencia: false};
     casos.forEach(function (c) {
@@ -120,7 +162,8 @@
         r.ingresados++;
         if (/^[12]\b/.test(dv(c, 'priority')) || /^[12]$/.test(val(c, 'priority'))) r.emergencia = true;
       }
-      if (!abierto && val(c, 'closed_at') && esHoy(val(c, 'closed_at')) && !/cancel/i.test(dv(c, 'state'))) r.resueltos++;
+      // resueltos: los que hoy pasaron a "Verificación del cliente" (si no se pudo leer, los cerrados hoy)
+      if (vh ? vh[n] : (!abierto && val(c, 'closed_at') && esHoy(val(c, 'closed_at')))) r.resueltos++;
       if (venc && venc[n]) {
         r.vencidos++;
         var wo = dv(c, 'parent') || n.replace(/^WOT/i, 'WO');
@@ -163,9 +206,9 @@
     return r.vencidos + ' / ' + r.vencidosWO.join(' / ');
   }
 
-  function texto(casos, venc) {
-    var L = calcular(casos, venc, 'lineales');
-    var G = calcular(casos, venc, 'gpon');
+  function texto(casos, venc, vh) {
+    var L = calcular(casos, venc, 'lineales', vh);
+    var G = calcular(casos, venc, 'gpon', vh);
     var t = [];
     t.push(saludo() + ';', '', '*Lineales*', '');
     t.push('Casos ingresados: ' + L.ingresados);
@@ -191,7 +234,7 @@
     t.push('Casos sin atender: ' + G.sinAtender);
     t.push('Alguna emergencia: ' + (G.emergencia ? 'sí' : 'no'));
     t.push('Casos en mano: ' + enManoTxt(G.enMano, false));
-    return {texto: t.join('\n'), sinSla: !venc};
+    return {texto: t.join('\n'), sinSla: !venc, sinVerif: !vh};
   }
 
   // ---------- pantalla ----------
@@ -241,7 +284,10 @@
     };
     armar().then(function (r) {
       ta.value = r.texto;
-      if (r.sinSla) { sub.textContent = 'No pude leer los SLA: completá "Casos vencidos" a mano (está con ?)'; sub.className = 'sub av'; }
+      var avisos = [];
+      if (r.sinSla) avisos.push('No pude leer los SLA: completá "Casos vencidos" a mano (está con ?)');
+      if (r.sinVerif) avisos.push('No pude ver qué casos pasaron hoy a verificación: "resueltos" son los cerrados hoy');
+      if (avisos.length) { sub.textContent = avisos.join(' · '); sub.className = 'sub av'; }
     }, function (e) {
       ta.value = 'No pude traer los casos.\n\n' + e.message;
     });
