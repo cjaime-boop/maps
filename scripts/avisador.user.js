@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Mobisond · Avisador
 // @namespace    mobisond
-// @version      2.52
+// @version      2.53
 // @description  Avisa los casos nuevos (celular, campana y grupo de Telegram), los Lineales sin notas hace 25 min, los SLA y los aceptados; botón de resumen de turno y comandos del bot.
 // @match        https://*.service-now.com/*
 // @grant        GM_xmlhttpRequest
@@ -1007,12 +1007,7 @@
       '#mbs-res .b1{flex:1;background:#1b5b8b;color:#fff;border:0}#mbs-res .b2{background:#fff;border:1px solid #cfd6de;color:#1f2937}';
     document.head.appendChild(css);
 
-    var btn = document.createElement('button');
-    btn.id = 'mbs-res-btn';
-    btn.textContent = '📋 Resumen de turno';
-    btn.onclick = abrir;
-    document.body.appendChild(btn);
-    GM_registerMenuCommand('Resumen de turno', abrir);
+    GM_registerMenuCommand('📋 Resumen de turno', abrir);   // sin botón flotante: se abre desde el menú
     }
 
     function abrir() {
