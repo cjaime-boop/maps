@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Mobisond · Avisador
 // @namespace    mobisond
-// @version      2.58
+// @version      2.59
 // @description  Avisa los casos nuevos (celular, campana y grupo de Telegram), los Lineales sin notas hace 25 min, los SLA y los aceptados; botón de resumen de turno y comandos del bot.
 // @match        https://*.service-now.com/*
 // @grant        GM_xmlhttpRequest
@@ -896,11 +896,12 @@
       var porComentario = padres.length ? api('wm_order', 'sys_idIN' + padres.join(','), 'sys_id,comments,work_notes').then(function (wos) {
         leido = true;
         wos.forEach(function (w) {
-          // cada entrada empieza con "fecha hora - Autor (Comentarios adicionales)"; se mira el texto de las de hoy
+          // cada entrada empieza con "fecha hora - Autor (Comentarios adicionales)"; se mira el texto de las de hoy.
+          // "Caso hijo … cerrado, verifique…" no es un pase a verificación: se descarta.
           var txt = dv(w, 'comments') + '\n' + dv(w, 'work_notes');
           var re = /(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}|\d{2}[\/-]\d{2}[\/-]\d{4} \d{2}:\d{2}:\d{2}) - [^\n]*\n([\s\S]*?)(?=\n\s*(?:\d{4}-\d{2}-\d{2}|\d{2}[\/-]\d{2}[\/-]\d{4}) \d{2}:\d{2}:\d{2} - |$)/g, m;
           while ((m = re.exec(txt))) {
-            if (hoyLocal(fechaEntrada(m[1])) && /espera la verificaci[oó]n del cliente/i.test(m[2])) { var n = porId[val(w, 'sys_id')]; if (n && !hoy[n]) hoy[n] = 'comentario ' + m[1].slice(-8, -3); }
+            if (hoyLocal(fechaEntrada(m[1])) && /espera la verificaci[oó]n del cliente/i.test(m[2]) && !/hijo/i.test(m[2])) { var n = porId[val(w, 'sys_id')]; if (n && !hoy[n]) hoy[n] = 'comentario ' + m[1].slice(-8, -3); }
           }
         });
       }, function () {}) : Promise.resolve();
