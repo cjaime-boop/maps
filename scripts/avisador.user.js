@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Mobisond · Avisador
 // @namespace    mobisond
-// @version      2.69
+// @version      2.70
 // @description  Avisa los casos nuevos (celular, campana y grupo de Telegram), los Lineales sin notas hace 25 min, los SLA y los aceptados; botón de resumen de turno y comandos del bot.
 // @match        https://*.service-now.com/*
 // @grant        GM_xmlhttpRequest
@@ -331,7 +331,7 @@
   }
   // Estado "Aceptado" / "En camino": el técnico ya tomó el caso (no está sin atender). Ojo: es el ESTADO,
   // distinto del motivo de pausa "Aceptado por el cliente".
-  function enCamino(r) { return /^(accepted|aceptad[oa]|en camino|en route|on route|in route|en ruta)\b/i.test(dv(r, 'state').trim()); }
+  function enCamino(r) { return /^(accepted|aceptad[oa]|on travel|travel|en camino|en viaje|de viaje|viajando|en route|on route|in route|en ruta)\b/i.test(dv(r, 'state').trim()); }   // "Accepted" / "On Travel" (inglés) o "Aceptado" / "En camino" / "En viaje" (español)
   // "Aceptado por el cliente": el caso sigue En curso pero ya está resuelto, esperando el cierre
   function aceptado(r) { var t = dv(r, 'u_pause_reason') + ' ' + dv(r, 'substate'); return /acept/i.test(t) && !/no acept/i.test(t); }   // ojo: "No aceptado por el cliente" es un rechazo
   function proyecto(r) {
