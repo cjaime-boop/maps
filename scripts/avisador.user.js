@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Mobisond · Avisador
 // @namespace    mobisond
-// @version      2.55
+// @version      2.56
 // @description  Avisa los casos nuevos (celular, campana y grupo de Telegram), los Lineales sin notas hace 25 min, los SLA y los aceptados; botón de resumen de turno y comandos del bot.
 // @match        https://*.service-now.com/*
 // @grant        GM_xmlhttpRequest
@@ -513,7 +513,7 @@
           lista.forEach(function (r) { out.push(fila(r, abajo && abajo(r), alLado && alLado(r))); });
         };
         if (pr === 'GPON') out.push('', '━━━━━━━━━━━━━━━━━━━━');      // separador entre Lineales y GPON
-        out.push('', (pr === 'Lineales' ? '🔧' : '📡') + ' <b>' + pr + '</b>', cs.length + (cs.length === 1 ? ' abierto' : ' abiertos'));
+        out.push('', (pr === 'Lineales' ? '🔧' : '📡') + ' <b>' + pr + '</b>', '', cs.length + (cs.length === 1 ? ' abierto' : ' abiertos'));
         if (!cs.length) return;
         grupo('▶️ En curso', curso, function (r) { return dv(r, 'assigned_to'); });
         grupo('⏸️ Pausados', pausa, function (r) { return dv(r, 'u_pause_reason'); });
