@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Mobisond · Avisador
 // @namespace    mobisond
-// @version      2.60
+// @version      2.61
 // @description  Avisa los casos nuevos (celular, campana y grupo de Telegram), los Lineales sin notas hace 25 min, los SLA y los aceptados; botón de resumen de turno y comandos del bot.
 // @match        https://*.service-now.com/*
 // @grant        GM_xmlhttpRequest
@@ -879,8 +879,11 @@
       return null;
     }
     function hoyLocal(d) { var h = DIA; return d && d.getFullYear() === h.getFullYear() && d.getMonth() === h.getMonth() && d.getDate() === h.getDate(); }
-    // Cuenta el PRIMER pase a verificación de cada caso: si ese primero fue el día del resumen, es resuelto ese día.
-    // Los avisos que aparecen después (duplicados por casos hijos, re-verificaciones) no lo vuelven a contar.
+    // RESUELTO = el pase a verificación que "quedó": se arma la historia de cada caso con
+    //   V = pase a verificación ("Se espera la verificación del cliente" / motivo de pausa -> Verificación)
+    //   R = rechazo ("Rechazado por el cliente" / motivo de pausa: Verificación -> sin pausa)
+    // Un V abre un intento; los V repetidos sin un R en el medio (duplicados de casos hijos) no cuentan;
+    // un R anula el intento abierto. Cuenta el último intento que no fue rechazado, el día de su V.
     function verificadosHoy(casos) {
       var porId = {}, padres = [];
       casos.forEach(function (c) {
@@ -889,15 +892,16 @@
       });
       var ids = Object.keys(porId);
       if (!ids.length) return Promise.resolve({});
-      var primero = {}, leido = false;           // número de WOT -> {d: fecha del primer pase, de: 'historial' | 'comentario'}
-      var anotar = function (n, d, de) { if (n && d && (!primero[n] || d < primero[n].d)) primero[n] = {d: d, de: de}; };
+      var hist = {}, leido = false;              // número de WOT -> [{d, t: 'V'|'R', de}]
+      var anotar = function (n, d, t, de) { if (n && d && !isNaN(d)) (hist[n] = hist[n] || []).push({d: d, t: t, de: de}); };
       var porAudit = api('sys_audit', 'fieldname=u_pause_reason^documentkeyIN' + ids.join(','),
-                         'documentkey,newvalue,sys_created_on').then(function (as) {
+                         'documentkey,oldvalue,newvalue,sys_created_on').then(function (as) {
         leido = true;
         as.forEach(function (a) {
-          if (/verific/i.test(val(a, 'newvalue') + ' ' + dv(a, 'newvalue'))) {
-            anotar(porId[val(a, 'documentkey')], new Date(val(a, 'sys_created_on').replace(' ', 'T') + 'Z'), 'historial');
-          }
+          var nuevo = val(a, 'newvalue') + ' ' + dv(a, 'newvalue'), viejo = val(a, 'oldvalue') + ' ' + dv(a, 'oldvalue');
+          var d = new Date(val(a, 'sys_created_on').replace(' ', 'T') + 'Z'), n = porId[val(a, 'documentkey')];
+          if (/verific/i.test(nuevo)) anotar(n, d, 'V', 'historial');
+          else if (/rechaz/i.test(nuevo) || (/verific/i.test(viejo) && !nuevo.trim())) anotar(n, d, 'R', 'historial');
         });
       }, function () {});
       var porComentario = padres.length ? api('wm_order', 'sys_idIN' + padres.join(','), 'sys_id,comments,work_notes').then(function (wos) {
@@ -908,16 +912,25 @@
           var txt = dv(w, 'comments') + '\n' + dv(w, 'work_notes');
           var re = /(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}|\d{2}[\/-]\d{2}[\/-]\d{4} \d{2}:\d{2}:\d{2}) - [^\n]*\n([\s\S]*?)(?=\n\s*(?:\d{4}-\d{2}-\d{2}|\d{2}[\/-]\d{2}[\/-]\d{4}) \d{2}:\d{2}:\d{2} - |$)/g, m;
           while ((m = re.exec(txt))) {
-            if (/espera la verificaci[oó]n del cliente/i.test(m[2]) && !/hijo/i.test(m[2])) anotar(porId[val(w, 'sys_id')], fechaEntrada(m[1]), 'comentario');
+            var n = porId[val(w, 'sys_id')];
+            if (/rechazad[oa] por el cliente/i.test(m[2])) anotar(n, fechaEntrada(m[1]), 'R', 'comentario');
+            else if (/espera la verificaci[oó]n del cliente/i.test(m[2]) && !/hijo/i.test(m[2])) anotar(n, fechaEntrada(m[1]), 'V', 'comentario');
           }
         });
       }, function () {}) : Promise.resolve();
       return Promise.all([porAudit, porComentario]).then(function () {
         if (!leido) return null;
         var hoy = {};
-        Object.keys(primero).forEach(function (n) {
-          var p = primero[n];
-          if (hoyLocal(p.d)) hoy[n] = p.de + ' ' + ('0' + p.d.getHours()).slice(-2) + ':' + ('0' + p.d.getMinutes()).slice(-2);
+        Object.keys(hist).forEach(function (n) {
+          var ev = hist[n].sort(function (a, b) { return a.d - b.d; }), abierto = null, valido = null;
+          ev.forEach(function (e) {
+            if (e.t === 'V') { if (!abierto) abierto = e; valido = abierto; }       // V repetido sin rechazo: sigue el mismo intento
+            else { abierto = null; valido = null; }                                // rechazo: se anula el intento
+          });
+          if (valido && hoyLocal(valido.d)) {
+            hoy[n] = valido.de + ' ' + ('0' + valido.d.getHours()).slice(-2) + ':' + ('0' + valido.d.getMinutes()).slice(-2) +
+                     (ev.some(function (e) { return e.t === 'R'; }) ? ', tuvo rechazo antes' : '');
+          }
         });
         return hoy;
       });
