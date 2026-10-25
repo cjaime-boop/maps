@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Mobisond · Avisador
 // @namespace    mobisond
-// @version      2.53
+// @version      2.54
 // @description  Avisa los casos nuevos (celular, campana y grupo de Telegram), los Lineales sin notas hace 25 min, los SLA y los aceptados; botón de resumen de turno y comandos del bot.
 // @match        https://*.service-now.com/*
 // @grant        GM_xmlhttpRequest
@@ -995,7 +995,7 @@
       '#mbs-res-btn{position:fixed;right:18px;bottom:18px;z-index:2147483000;background:#1b5b8b;color:#fff;font:700 13px "Segoe UI",Arial;' +
       'border:0;border-radius:22px;padding:9px 15px;box-shadow:0 3px 10px rgba(0,0,0,.25);cursor:pointer;opacity:.9}' +
       '#mbs-res-btn:hover{opacity:1}' +
-      '#mbs-res{position:fixed;right:18px;bottom:64px;z-index:2147483001;width:380px;max-height:calc(100vh - 90px);display:flex;flex-direction:column;' +
+      '#mbs-res{position:fixed;right:18px;bottom:18px;z-index:2147483001;width:380px;max-height:calc(100vh - 40px);display:flex;flex-direction:column;' +
       'background:#fff;color:#1f2937;border:1px solid #cfd6de;border-radius:10px;box-shadow:0 8px 28px rgba(0,0,0,.18);font:13px "Segoe UI",Arial}' +
       '#mbs-res .h{display:flex;align-items:center;padding:10px 12px;border-bottom:1px solid #eef0f2}' +
       '#mbs-res .h b{font-size:14px}#mbs-res .h span{margin-left:auto;color:#9ca3af;cursor:pointer;font-size:16px}' +
