@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Mobisond · Avisador
 // @namespace    mobisond
-// @version      2.56
+// @version      2.57
 // @description  Avisa los casos nuevos (celular, campana y grupo de Telegram), los Lineales sin notas hace 25 min, los SLA y los aceptados; botón de resumen de turno y comandos del bot.
 // @match        https://*.service-now.com/*
 // @grant        GM_xmlhttpRequest
@@ -886,7 +886,7 @@
       var porAudit = api('sys_audit', 'fieldname=u_pause_reason^documentkeyIN' + ids.join(',') + '^sys_created_onON' + 'Today' + HOY,
                          'documentkey,newvalue,sys_created_on').then(function (as) {
         leido = true;
-        as.forEach(function (a) { if (/verific/i.test(val(a, 'newvalue') + ' ' + dv(a, 'newvalue'))) { var n = porId[val(a, 'documentkey')]; if (n) hoy[n] = true; } });
+        as.forEach(function (a) { if (/verific/i.test(val(a, 'newvalue') + ' ' + dv(a, 'newvalue'))) { var n = porId[val(a, 'documentkey')]; if (n) hoy[n] = 'historial'; } });
       }, function () {});
       var porComentario = padres.length ? api('wm_order', 'sys_idIN' + padres.join(','), 'sys_id,comments,work_notes').then(function (wos) {
         leido = true;
@@ -895,7 +895,7 @@
           var txt = dv(w, 'comments') + '\n' + dv(w, 'work_notes');
           var re = /(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}|\d{2}[\/-]\d{2}[\/-]\d{4} \d{2}:\d{2}:\d{2}) - [^\n]*\n([\s\S]*?)(?=\n\s*(?:\d{4}-\d{2}-\d{2}|\d{2}[\/-]\d{2}[\/-]\d{4}) \d{2}:\d{2}:\d{2} - |$)/g, m;
           while ((m = re.exec(txt))) {
-            if (hoyLocal(fechaEntrada(m[1])) && /espera la verificaci[oó]n del cliente/i.test(m[2])) { var n = porId[val(w, 'sys_id')]; if (n) hoy[n] = true; }
+            if (hoyLocal(fechaEntrada(m[1])) && /espera la verificaci[oó]n del cliente/i.test(m[2])) { var n = porId[val(w, 'sys_id')]; if (n && !hoy[n]) hoy[n] = 'comentario ' + m[1].slice(-8, -3); }
           }
         });
       }, function () {}) : Promise.resolve();
@@ -903,7 +903,7 @@
     }
 
     function calcular(casos, venc, proy, vh) {
-      var r = {ingresados: 0, resueltos: 0, acumulados: 0, verificacion: 0, pausas: [], sinAtender: 0, claroSin: 0,
+      var r = {resueltosDet: [], ingresados: 0, resueltos: 0, acumulados: 0, verificacion: 0, pausas: [], sinAtender: 0, claroSin: 0,
                enMano: [], vencidos: 0, vencidosWO: [], emergencia: false};
       casos.forEach(function (c) {
         if (proyecto(c) !== proy) return;
@@ -915,7 +915,10 @@
           if (/^[12]\b/.test(dv(c, 'priority')) || /^[12]$/.test(val(c, 'priority'))) r.emergencia = true;
         }
         // resueltos: los que hoy pasaron a "Verificación del cliente" (si no se pudo leer, los cerrados hoy)
-        if (vh ? vh[n] : (!abierto && val(c, 'closed_at') && esHoy(val(c, 'closed_at')))) r.resueltos++;
+        if (vh ? vh[n] : (!abierto && val(c, 'closed_at') && esHoy(val(c, 'closed_at')))) {
+          r.resueltos++;
+          r.resueltosDet.push((dv(c, 'parent') || n) + (vh && typeof vh[n] === 'string' ? ' (' + vh[n] + ')' : ' (cerrado hoy)'));
+        }
         if (venc && venc[n]) {
           r.vencidos++;
           var wo = dv(c, 'parent') || n.replace(/^WOT/i, 'WO');
@@ -986,7 +989,7 @@
       t.push('Casos sin atender: ' + G.sinAtender);
       t.push('Alguna emergencia: ' + (G.emergencia ? 'sí' : 'no'));
       t.push('Casos en mano: ' + enManoTxt(G.enMano, false));
-      return {texto: t.join('\n'), sinSla: !venc, sinVerif: !vh};
+      return {texto: t.join('\n'), sinSla: !venc, sinVerif: !vh, detalle: 'Resueltos Lineales: ' + (L.resueltosDet.join(', ') || 'ninguno') + ' · GPON: ' + (G.resueltosDet.join(', ') || 'ninguno')};
     }
 
     // ---------- pantalla ----------
@@ -1037,6 +1040,7 @@
         if (r.sinSla) avisos.push('No pude leer los SLA: completá "Casos vencidos" a mano (está con ?)');
         if (r.sinVerif) avisos.push('No pude ver qué casos pasaron hoy a verificación: "resueltos" son los cerrados hoy');
         if (avisos.length) { sub.textContent = avisos.join(' · '); sub.className = 'sub av'; }
+        var det = document.createElement('div'); det.className = 'sub'; det.textContent = r.detalle; sub.after(det);   // para revisar qué contó
       }, function (e) {
         ta.value = 'No pude traer los casos.\n\n' + e.message;
       });
