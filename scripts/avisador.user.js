@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Mobisond · Avisador
 // @namespace    mobisond
-// @version      2.59
+// @version      2.60
 // @description  Avisa los casos nuevos (celular, campana y grupo de Telegram), los Lineales sin notas hace 25 min, los SLA y los aceptados; botón de resumen de turno y comandos del bot.
 // @match        https://*.service-now.com/*
 // @grant        GM_xmlhttpRequest
@@ -879,6 +879,8 @@
       return null;
     }
     function hoyLocal(d) { var h = DIA; return d && d.getFullYear() === h.getFullYear() && d.getMonth() === h.getMonth() && d.getDate() === h.getDate(); }
+    // Cuenta el PRIMER pase a verificación de cada caso: si ese primero fue el día del resumen, es resuelto ese día.
+    // Los avisos que aparecen después (duplicados por casos hijos, re-verificaciones) no lo vuelven a contar.
     function verificadosHoy(casos) {
       var porId = {}, padres = [];
       casos.forEach(function (c) {
@@ -887,25 +889,38 @@
       });
       var ids = Object.keys(porId);
       if (!ids.length) return Promise.resolve({});
-      var hoy = {}, leido = false;
-      var porAudit = api('sys_audit', 'fieldname=u_pause_reason^documentkeyIN' + ids.join(',') + '^sys_created_onON' + rangoDia(),
+      var primero = {}, leido = false;           // número de WOT -> {d: fecha del primer pase, de: 'historial' | 'comentario'}
+      var anotar = function (n, d, de) { if (n && d && (!primero[n] || d < primero[n].d)) primero[n] = {d: d, de: de}; };
+      var porAudit = api('sys_audit', 'fieldname=u_pause_reason^documentkeyIN' + ids.join(','),
                          'documentkey,newvalue,sys_created_on').then(function (as) {
         leido = true;
-        as.forEach(function (a) { if (/verific/i.test(val(a, 'newvalue') + ' ' + dv(a, 'newvalue'))) { var n = porId[val(a, 'documentkey')]; if (n) hoy[n] = 'historial'; } });
+        as.forEach(function (a) {
+          if (/verific/i.test(val(a, 'newvalue') + ' ' + dv(a, 'newvalue'))) {
+            anotar(porId[val(a, 'documentkey')], new Date(val(a, 'sys_created_on').replace(' ', 'T') + 'Z'), 'historial');
+          }
+        });
       }, function () {});
       var porComentario = padres.length ? api('wm_order', 'sys_idIN' + padres.join(','), 'sys_id,comments,work_notes').then(function (wos) {
         leido = true;
         wos.forEach(function (w) {
-          // cada entrada empieza con "fecha hora - Autor (Comentarios adicionales)"; se mira el texto de las de hoy.
+          // cada entrada empieza con "fecha hora - Autor (Comentarios adicionales)".
           // "Caso hijo … cerrado, verifique…" no es un pase a verificación: se descarta.
           var txt = dv(w, 'comments') + '\n' + dv(w, 'work_notes');
           var re = /(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}|\d{2}[\/-]\d{2}[\/-]\d{4} \d{2}:\d{2}:\d{2}) - [^\n]*\n([\s\S]*?)(?=\n\s*(?:\d{4}-\d{2}-\d{2}|\d{2}[\/-]\d{2}[\/-]\d{4}) \d{2}:\d{2}:\d{2} - |$)/g, m;
           while ((m = re.exec(txt))) {
-            if (hoyLocal(fechaEntrada(m[1])) && /espera la verificaci[oó]n del cliente/i.test(m[2]) && !/hijo/i.test(m[2])) { var n = porId[val(w, 'sys_id')]; if (n && !hoy[n]) hoy[n] = 'comentario ' + m[1].slice(-8, -3); }
+            if (/espera la verificaci[oó]n del cliente/i.test(m[2]) && !/hijo/i.test(m[2])) anotar(porId[val(w, 'sys_id')], fechaEntrada(m[1]), 'comentario');
           }
         });
       }, function () {}) : Promise.resolve();
-      return Promise.all([porAudit, porComentario]).then(function () { return leido ? hoy : null; });
+      return Promise.all([porAudit, porComentario]).then(function () {
+        if (!leido) return null;
+        var hoy = {};
+        Object.keys(primero).forEach(function (n) {
+          var p = primero[n];
+          if (hoyLocal(p.d)) hoy[n] = p.de + ' ' + ('0' + p.d.getHours()).slice(-2) + ':' + ('0' + p.d.getMinutes()).slice(-2);
+        });
+        return hoy;
+      });
     }
 
     function calcular(casos, venc, proy, vh) {
