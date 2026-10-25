@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Mobisond · Avisador
 // @namespace    mobisond
-// @version      2.57
+// @version      2.58
 // @description  Avisa los casos nuevos (celular, campana y grupo de Telegram), los Lineales sin notas hace 25 min, los SLA y los aceptados; botón de resumen de turno y comandos del bot.
 // @match        https://*.service-now.com/*
 // @grant        GM_xmlhttpRequest
@@ -565,7 +565,7 @@
       return;
     }
     if (p.cmd === '/status') {
-      resumenTelegram().then(function (t) {
+      resumenTelegram((p.texto || '').trim().split(/\s+/).slice(1).join(' ')).then(function (t) {
         unaVezAlGrupo('cmd:' + p.id, t, p.msg, p.chat, function (ok) { listo(ok ? 'contestado' : 'no se pudo contestar'); });
       }, function (e) { unaVezAlGrupo('cmd:' + p.id, 'No pude armar el resumen (' + esc(e.message) + ').', p.msg, p.chat); listo('error ServiceNow ' + e.message); });
       return;
@@ -772,7 +772,13 @@
     var CLIENTES = {CL: 'CLR', EDNR: 'EDN', MUNI: 'MUNI', TP: 'TP'};   // cómo se escribe cada cliente en "Casos en mano"
     var VERIFICACION = /verificaci[oó]n del cliente/i;
 
-    var HOY = '@javascript:gs.beginningOfToday()@javascript:gs.endOfToday()';
+    // DÍA del resumen (medianoche local). Por defecto hoy; se cambia con armar(fecha).
+    var DIA = new Date(); DIA.setHours(0, 0, 0, 0);
+    function iso(d) { return d.getFullYear() + '-' + ('0' + (d.getMonth() + 1)).slice(-2) + '-' + ('0' + d.getDate()).slice(-2); }
+    function esDiaHoy() { var h = new Date(); h.setHours(0, 0, 0, 0); return DIA.getTime() === h.getTime(); }
+    function ini() { return "javascript:gs.dateGenerate('" + iso(DIA) + "','start')"; }
+    function fin() { return "javascript:gs.dateGenerate('" + iso(DIA) + "','end')"; }
+    function rangoDia() { return iso(DIA) + '@' + ini() + '@' + fin(); }      // para los "ON" de ServiceNow
 
     function token() {
       var w = unsafeWindow;
@@ -823,12 +829,11 @@
       return orden.map(function (k) { return [k, c[k]]; });
     }
 
-    function armar() {
+    function armar(fecha) {
+      DIA = fecha ? new Date(fecha.getTime()) : new Date(); DIA.setHours(0, 0, 0, 0);
       var g = grupoQ();
-      // casos del día: los que entraron hoy, los que se cerraron hoy y todo lo que sigue abierto
-      var q = g + '^opened_atON' + 'Today' + HOY +
-              '^NQ' + g + '^closed_atON' + 'Today' + HOY +
-              '^NQ' + g + '^active=true';
+      // casos "vivos" ese día: abiertos antes de que termine el día y (todavía abiertos o cerrados desde ese día)
+      var q = g + '^opened_at<=' + fin() + '^active=true^ORclosed_at>=' + ini();
       var campos = 'sys_id,number,parent,active,state,substate,u_pause_reason,priority,opened_at,closed_at,assignment_group,service_offering,cmdb_ci';
       return api('wm_task', q, campos).then(function (casos) {
         var vistos = {};
@@ -873,7 +878,7 @@
       if ((m = /(\d{2})[\/-](\d{2})[\/-](\d{4}) (\d{2}):(\d{2}):(\d{2})/.exec(t))) return new Date(+m[3], m[2] - 1, +m[1], +m[4], +m[5], +m[6]);
       return null;
     }
-    function hoyLocal(d) { var h = new Date(); return d && d.getFullYear() === h.getFullYear() && d.getMonth() === h.getMonth() && d.getDate() === h.getDate(); }
+    function hoyLocal(d) { var h = DIA; return d && d.getFullYear() === h.getFullYear() && d.getMonth() === h.getMonth() && d.getDate() === h.getDate(); }
     function verificadosHoy(casos) {
       var porId = {}, padres = [];
       casos.forEach(function (c) {
@@ -883,7 +888,7 @@
       var ids = Object.keys(porId);
       if (!ids.length) return Promise.resolve({});
       var hoy = {}, leido = false;
-      var porAudit = api('sys_audit', 'fieldname=u_pause_reason^documentkeyIN' + ids.join(',') + '^sys_created_onON' + 'Today' + HOY,
+      var porAudit = api('sys_audit', 'fieldname=u_pause_reason^documentkeyIN' + ids.join(',') + '^sys_created_onON' + rangoDia(),
                          'documentkey,newvalue,sys_created_on').then(function (as) {
         leido = true;
         as.forEach(function (a) { if (/verific/i.test(val(a, 'newvalue') + ' ' + dv(a, 'newvalue'))) { var n = porId[val(a, 'documentkey')]; if (n) hoy[n] = 'historial'; } });
@@ -940,11 +945,12 @@
     // opened_at / closed_at vienen en UTC ("2026-10-24 13:05:00"); se comparan con el día de hoy en la hora de la PC
     function esHoy(utc) {
       var d = new Date(utc.replace(' ', 'T') + 'Z');
-      var h = new Date();
+      var h = DIA;                                     // el día del resumen (hoy, o el elegido)
       return d.getFullYear() === h.getFullYear() && d.getMonth() === h.getMonth() && d.getDate() === h.getDate();
     }
 
     function enManoTxt(lista, conCliente) {
+      if (lista === null) return '—';
       if (!lista.length) return '0';
       if (!conCliente) return String(lista.length);
       var partes = contar(lista.map(function (x) { return x || 'sin cliente'; }));
@@ -964,13 +970,21 @@
     function texto(casos, venc, vh) {
       var L = calcular(casos, venc, 'lineales', vh);
       var G = calcular(casos, venc, 'gpon', vh);
+      if (!esDiaHoy()) {
+        // acumulados, verificación, pausados, sin atender y en mano son "cómo está la bandeja ahora":
+        // de un día anterior no se pueden saber, quedan con —
+        [L, G].forEach(function (r) {
+          r.acumulados = r.verificacion = r.sinAtender = r.claroSin = '—';
+          r.pausas = []; r.pausasTxt = '—'; r.enMano = null;
+        });
+      }
       var t = [];
-      t.push(saludo() + ';', '', '*Lineales*', '');
+      t.push(esDiaHoy() ? saludo() + ';' : 'Resumen del ' + ('0' + DIA.getDate()).slice(-2) + '/' + ('0' + (DIA.getMonth() + 1)).slice(-2) + '/' + DIA.getFullYear(), '', '*Lineales*', '');
       t.push('Casos ingresados: ' + L.ingresados);
       t.push('Casos resueltos: ' + L.resueltos);
       t.push('Casos totales acumulados: ' + L.acumulados);
       t.push('Casos en verificación: ' + L.verificacion);
-      t.push('Casos pausados: ' + L.pausas.length);
+      t.push('Casos pausados: ' + (L.pausasTxt || L.pausas.length));
       contar(L.pausas).forEach(function (p) { t.push('- ' + p[1] + ' ' + p[0]); });
       t.push('');
       t.push('Casos vencidos: ' + vencTxt(L));
@@ -982,14 +996,14 @@
       t.push('Casos resueltos : ' + G.resueltos);
       t.push('Casos acumulados: ' + G.acumulados);
       t.push('Casos en verificacion: ' + G.verificacion);
-      t.push('Casos pausados: ' + G.pausas.length);
+      t.push('Casos pausados: ' + (G.pausasTxt || G.pausas.length));
       contar(G.pausas).forEach(function (p) { t.push('* ' + (p[1] > 1 ? p[1] + ' ' : '') + p[0]); });
       t.push('');
       t.push('Casos vencidos: ' + vencTxt(G));
       t.push('Casos sin atender: ' + G.sinAtender);
       t.push('Alguna emergencia: ' + (G.emergencia ? 'sí' : 'no'));
       t.push('Casos en mano: ' + enManoTxt(G.enMano, false));
-      return {texto: t.join('\n'), sinSla: !venc, sinVerif: !vh, detalle: 'Resueltos Lineales: ' + (L.resueltosDet.join(', ') || 'ninguno') + ' · GPON: ' + (G.resueltosDet.join(', ') || 'ninguno')};
+      return {dia: new Date(DIA.getTime()), hoy: esDiaHoy(), texto: t.join('\n'), sinSla: !venc, sinVerif: !vh, detalle: 'Resueltos Lineales: ' + (L.resueltosDet.join(', ') || 'ninguno') + ' · GPON: ' + (G.resueltosDet.join(', ') || 'ninguno')};
     }
 
     // ---------- pantalla ----------
@@ -1014,27 +1028,34 @@
     GM_registerMenuCommand('📋 Resumen de turno', abrir);   // sin botón flotante: se abre desde el menú
     }
 
-    function abrir() {
+    function abrir(fechaElegida) {
       var p = document.getElementById('mbs-res');
       if (p) p.remove();
       p = document.createElement('div');
       p.id = 'mbs-res';
-      var hoy = new Date();
-      var fecha = ('0' + hoy.getDate()).slice(-2) + '/' + ('0' + (hoy.getMonth() + 1)).slice(-2);
-      p.innerHTML = '<div class="h"><b>Resumen de turno</b><span title="Cerrar">✕</span></div>' +
-        '<div class="sub">Hoy ' + fecha + ' · desde las 00:00 · podés corregir el texto antes de copiar</div>' +
+      var hoy = new Date(); hoy.setHours(0, 0, 0, 0);
+      var dia = fechaElegida instanceof Date ? fechaElegida : hoy;
+      var esHoyElegido = dia.getTime() === hoy.getTime();
+      p.innerHTML = '<div class="h"><b>Resumen de turno</b>' +
+        '<input type="date" class="fecha" style="margin-left:10px;font:12px \'Segoe UI\',Arial;border:1px solid #cfd6de;border-radius:6px;padding:2px 4px" max="' + iso(hoy) + '" value="' + iso(dia) + '">' +
+        '<span title="Cerrar">✕</span></div>' +
+        '<div class="sub">' + (esHoyElegido ? 'Hoy · desde las 00:00' : 'Día anterior: acumulados, pausados y en mano no se pueden saber (—)') + ' · podés corregir el texto antes de copiar</div>' +
         '<textarea spellcheck="false">Buscando los casos del día…</textarea>' +
         '<div class="ft"><button class="b1">Copiar para WhatsApp</button><button class="b2">Actualizar</button></div>';
       document.body.appendChild(p);
       var ta = p.querySelector('textarea'), sub = p.querySelector('.sub'), b1 = p.querySelector('.b1');
       p.querySelector('.h span').onclick = function () { p.remove(); };
-      p.querySelector('.b2').onclick = abrir;
+      p.querySelector('.b2').onclick = function () { abrir(dia); };
+      p.querySelector('.fecha').onchange = function () {
+        var v = this.value; if (!v) return;
+        var x = v.split('-'); abrir(new Date(+x[0], x[1] - 1, +x[2]));
+      };
       b1.onclick = function () {
         GM_setClipboard(ta.value, 'text');
         b1.textContent = '✓ Copiado';
         setTimeout(function () { b1.textContent = 'Copiar para WhatsApp'; }, 1800);
       };
-      armar().then(function (r) {
+      armar(dia).then(function (r) {
         ta.value = r.texto;
         var avisos = [];
         if (r.sinSla) avisos.push('No pude leer los SLA: completá "Casos vencidos" a mano (está con ?)');
@@ -1049,13 +1070,26 @@
     return {armar: armar};
   })();
   // el resumen para Telegram: va en un recuadro que se copia con un toque, tal cual (con los * de WhatsApp)
-  function resumenTelegram() {
-    return RESUMEN.armar().then(function (r) {
+  // "/status", "/status 09-04-2026", "/status 9/4" (sin año = este año)
+  function fechaDeTexto(t) {
+    var m = /(\d{1,2})[\/.-](\d{1,2})(?:[\/.-](\d{2,4}))?/.exec(t || '');
+    if (!m) return null;
+    var a = m[3] ? (+m[3] < 100 ? 2000 + +m[3] : +m[3]) : new Date().getFullYear();
+    var d = new Date(a, +m[2] - 1, +m[1]);
+    return d.getDate() === +m[1] && d.getMonth() === +m[2] - 1 ? d : 'mal';
+  }
+  function resumenTelegram(arg) {
+    var f = fechaDeTexto(arg);
+    var hoy = new Date(); hoy.setHours(0, 0, 0, 0);
+    if (f === 'mal') return Promise.resolve('No entendí la fecha. Usalo así: <code>/status 09-04-2026</code>');
+    if (f && f > hoy) return Promise.resolve('Esa fecha todavía no llegó 🙂');
+    return RESUMEN.armar(f || undefined).then(function (r) {
       var t = '<pre>' + esc(r.texto) + '</pre>';
       var notas = [];
       if (r.sinSla) notas.push('No pude leer los SLA: "Casos vencidos" queda con ?');
       if (r.sinVerif) notas.push('No pude ver los pases a verificación: "resueltos" son los cerrados hoy');
-      return '📊 <b>Resumen del día</b>\n<i>Tocá el recuadro para copiarlo y pegalo en WhatsApp</i>\n\n' + t +
+      var titulo = r.hoy ? '📊 <b>Resumen del día</b>' : '📊 <b>Resumen del ' + ('0' + r.dia.getDate()).slice(-2) + '/' + ('0' + (r.dia.getMonth() + 1)).slice(-2) + '/' + r.dia.getFullYear() + '</b>\n<i>(acumulados, pausados y en mano no se pueden saber de días anteriores)</i>';
+      return titulo + '\n<i>Tocá el recuadro para copiarlo y pegalo en WhatsApp</i>\n\n' + t +
              (notas.length ? '\n\n⚠️ <i>' + esc(notas.join(' · ')) + '</i>' : '');
     });
   }
