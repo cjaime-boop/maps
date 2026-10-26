@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Mobisond · Avisador
 // @namespace    mobisond
-// @version      2.95
+// @version      2.96
 // @description  Avisa los casos nuevos (celular, campana y grupo de Telegram), los Lineales sin notas hace 25 min, los SLA y los aceptados; botón de resumen de turno y comandos del bot.
 // @match        https://*.service-now.com/*
 // @grant        GM_xmlhttpRequest
@@ -459,28 +459,60 @@
     var arg = function (a, b) { return a < -21 && a > -56 && b < -53 && b > -74; }, mejor = null, m;
     var probar = function (re, tipo) {
       re.lastIndex = 0;
-      while ((m = re.exec(txt))) if (arg(+m[1], +m[2]) && (!mejor || m.index >= mejor.i)) mejor = {i: m.index, c: [+m[1], +m[2], tipo]};
+      while ((m = re.exec(txt))) if (arg(+m[1], +m[2]) && (!mejor || m.index >= mejor.i) &&
+               !(mejor && mejor.c[0] === +m[1] && mejor.c[1] === +m[2])) mejor = {i: m.index, c: [+m[1], +m[2], tipo]};   // la misma del link: queda como link
     };
     probar(/!3d(-?\d{1,2}\.\d+)!4d(-?\d{1,3}\.\d+)/g, 'maps');
     probar(/(?:google\.[a-z.]+\/maps|maps\.google\.[a-z.]+)[^\s"']*?(?:[@=]|q=|ll=|query=)(-?\d{1,2}\.\d{3,})(?:,|%2C)\s*(-?\d{1,3}\.\d{3,})/gi, 'maps');
     probar(/(-\d{2}\.\d{4,})\s*[,; ]\s*(-\d{2}\.\d{4,})/g, 'coordenadas');
     return mejor ? mejor.c : null;
   }
+  // Campo "Latitud y longitud" del caso: se averigua solo qué campo es (una vez cada 3 días) mirando una WOT completa
+  var RE_LATLON = /latitud|latitude|longitud|longitude|coordenad|(^|_)(lat|lon|lng)(_|$)/i;
+  function camposLatLon() { var c = GM_getValue('latlon_campos', null); return c && c.campos ? c : null; }
+  function averiguarLatLon(r) {
+    var c = GM_getValue('latlon_campos', null);
+    if (c && Date.now() - c.t < (c.campos.length ? 3 : 1) * 86400000) return;
+    GM_setValue('latlon_campos', {t: Date.now(), tabla: 'wm_task', campos: []});
+    var mirar = function (tabla, id) {
+      return api(tabla, 'sys_id=' + id, '').then(function (x) { return Object.keys(x[0] || {}).filter(function (k) { return RE_LATLON.test(k); }).slice(0, 4); });
+    };
+    mirar('wm_task', vl(r, 'sys_id')).then(function (ks) {
+      if (ks.length || !vl(r, 'parent')) return {tabla: 'wm_task', campos: ks};
+      return mirar('wm_order', vl(r, 'parent')).then(function (k2) { return {tabla: 'wm_order', campos: k2}; });
+    }).then(function (res) { res.t = Date.now(); GM_setValue('latlon_campos', res); botLog('latitud/longitud del caso: ' + (res.campos.join(', ') || 'no encontré el campo')); },
+            function () {});
+  }
+  function latLonDeTexto(t) {          // "-34.58648, -58.846" / "-34,58648 ; -58,846" -> [lat, lon] en Argentina
+    var ns = (String(t || '').match(/-?\d{1,3}[.,]\d{3,}/g) || []).map(function (x) { return +x.replace(',', '.'); });
+    var lat = ns.filter(function (n) { return n < -21 && n > -56; })[0], lon = ns.filter(function (n) { return n < -56 && n > -74 || (n < -53 && n > -74 && n !== lat); })[0];
+    return lat != null && lon != null ? [lat, lon] : null;
+  }
   function subirBandeja(casos) {
     var padres = [], ids = [];
     casos.forEach(function (r) { ids.push(vl(r, 'sys_id')); if (vl(r, 'parent')) { ids.push(vl(r, 'parent')); if (padres.indexOf(vl(r, 'parent')) < 0) padres.push(vl(r, 'parent')); } });
     Promise.all([
-      padres.length ? api('wm_order', 'sys_idIN' + padres.join(','), 'sys_id,work_notes,comments').catch(function () { return []; }) : [],
+      padres.length ? api('wm_order', 'sys_idIN' + padres.join(','), 'sys_id,work_notes,comments' +
+        ((camposLatLon() || {}).tabla === 'wm_order' && camposLatLon().campos.length ? ',' + camposLatLon().campos.join(',') : '')).catch(function () { return []; }) : [],
       ids.length ? api('task_sla', 'active=true^taskIN' + ids.join(','), 'task,sla,stage,has_breached,planned_end_time,business_time_left').catch(function () { return []; }) : []
     ]).then(function (res) {
       var notasDe = {}, slaDe = {};
-      res[0].forEach(function (w) { notasDe[vl(w, 'sys_id')] = notasDelTexto(dv(w, 'work_notes') + '\n' + dv(w, 'comments')); });
+      var woRec = {};
+      res[0].forEach(function (w) { woRec[vl(w, 'sys_id')] = w; notasDe[vl(w, 'sys_id')] = notasDelTexto(dv(w, 'work_notes') + '\n' + dv(w, 'comments')); });
+      var ll = camposLatLon();
+      var latLonCaso = function (r) {                // si las notas no traen coordenadas: el campo del caso
+        if (!ll || !ll.campos.length) return null;
+        var rec = ll.tabla === 'wm_order' ? woRec[vl(r, 'parent')] : r;
+        if (!rec) return null;
+        return latLonDeTexto(ll.campos.map(function (k) { return (vl(rec, k) || dv(rec, k) || ''); }).join(' ; '));
+      };
       res[1].forEach(function (x) { if (/neto/i.test(dv(x, 'sla')) && !/cancel/i.test(vl(x, 'stage'))) slaDe[vl(x, 'task')] = x; });
       var lista = casos.map(function (r) {
         var ns = (notasDe[vl(r, 'parent')] || []).slice().sort(function (a, b) { return b.t - a.t; });
         var nuestra = ns.filter(function (n) { return esNuestro(n.quien); })[0];
         var ubic = null;
         ns.some(function (n) { var c = coordsDeNota(n.txt || ''); if (c) ubic = {lat: c[0], lon: c[1], fuente: c[2], t: n.t}; return !!c; });
+        if (!ubic) { var lc = latLonCaso(r); if (lc) ubic = {lat: lc[0], lon: lc[1], fuente: 'caso'}; }
         var sla = slaDe[vl(r, 'sys_id')] || slaDe[vl(r, 'parent')];
         var estado = enCamino(r) ? 'camino' : !enCurso(r) ? 'sin' : aceptado(r) ? 'aceptado' :
                      pausado(r) && /verificaci/i.test(dv(r, 'u_pause_reason')) ? 'verif' : pausado(r) ? 'pausado' : 'curso';
@@ -506,7 +538,10 @@
     GM_setValue('ult_control', ahora);
     var q = 'active=true^assignment_group.nameSTARTSWITH' + GRUPOS.lineales + '^ORassignment_group.nameSTARTSWITH' + GRUPOS.gpon;
     var campos = 'sys_id,number,parent,state,substate,u_pause_reason,priority,assignment_group,assigned_to,cmdb_ci,short_description,work_start,opened_at';
+    var ll = camposLatLon();
+    if (ll && ll.tabla === 'wm_task' && ll.campos.length) campos += ',' + ll.campos.join(',');
     api('wm_task', q, campos).then(function (casos) {
+      if (casos.length) averiguarLatLon(casos[0]);
       subirBandeja(casos);
       // CAMBIO DE PRIORIDAD (todos los abiertos, también los que todavía no están en curso). La primera vez solo se anotan.
       var prios = GM_getValue('prio_vistos', {}), prioIni = GM_getValue('prio_iniciado', false), priosNuevo = {};
