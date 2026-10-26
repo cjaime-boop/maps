@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Mobisond · Avisador
 // @namespace    mobisond
-// @version      3.4
+// @version      3.5
 // @description  Avisa los casos nuevos (celular, campana y grupo de Telegram), los Lineales sin notas hace 25 min, los SLA y los aceptados; botón de resumen de turno y comandos del bot.
 // @match        https://*.service-now.com/*
 // @grant        GM_xmlhttpRequest
@@ -453,13 +453,6 @@
         notasDelTexto(dv(w, 'work_notes') + '\n' + dv(w, 'comments')).forEach(function (n) { sumar(vl(w, 'sys_id'), n); });
       });
     }, function (e) { console.log('[Mobisond] notas (WO): ' + e.message); });
-    // las notas que se escriben en la tarea (WOT) también cuentan: a veces no se copian a la WO
-    var wots = []; casos.forEach(function (r) { if (vl(r, 'parent')) wots.push(vl(r, 'sys_id')); });
-    var porTextoWot = wots.length ? api('wm_task', 'sys_idIN' + wots.join(','), 'sys_id,parent,work_notes,comments').then(function (ts) {
-      ts.forEach(function (t) {
-        notasDelTexto(dv(t, 'work_notes') + '\n' + dv(t, 'comments')).forEach(function (n) { sumar(vl(t, 'parent'), n); });
-      });
-    }, function (e) { console.log('[Mobisond] notas (WOT): ' + e.message); }) : null;
     var porTabla = api('sys_journal_field', 'element=work_notes^ORelement=comments^element_idIN' + padres.join(','), 'element_id,sys_created_on,sys_created_by').then(function (ns) {
       var usuarios = {};
       ns.forEach(function (n) { if (vl(n, 'sys_created_by')) usuarios[vl(n, 'sys_created_by')] = 1; });
@@ -484,7 +477,7 @@
         });
       });
     }).catch(function (e) { console.log('[Mobisond] adjuntos: ' + (e && e.message)); });
-    return Promise.all([porTexto, porTextoWot, porTabla, porAdjuntos]).then(function () {
+    return Promise.all([porTexto, porTabla, porAdjuntos]).then(function () {
       var u = {};
       Object.keys(mejor).forEach(function (p) { (dePadre[p] || []).forEach(function (id) { u[id] = mejor[p]; }); });
       return u;
