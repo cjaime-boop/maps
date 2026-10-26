@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Mobisond · Avisador
 // @namespace    mobisond
-// @version      3.1
+// @version      3.2
 // @description  Avisa los casos nuevos (celular, campana y grupo de Telegram), los Lineales sin notas hace 25 min, los SLA y los aceptados; botón de resumen de turno y comandos del bot.
 // @match        https://*.service-now.com/*
 // @grant        GM_xmlhttpRequest
@@ -1489,7 +1489,7 @@
         });
         var slas = ids.length ? apiIN('task_sla', ids, function (t) { return 'taskIN' + t.join(',') + '^has_breached=true'; }, 'task,sla,stage,planned_end_time,original_breach_time')
           .catch(function () { return null; }) : Promise.resolve([]);
-        return Promise.all([ids.length ? primerasVerif(casos) : Promise.resolve({}), slas]).then(function (res) {
+        return Promise.all([Promise.resolve({}), slas]).then(function (res) {   // "Resueltos" ya no va: se muestran los cerrados
           var prim = res[0] || {}, venc = {}, vencAlguna = {};
           (res[1] || []).forEach(function (sv) {
             if (!/neto/i.test(dv(sv, 'sla'))) return;
@@ -1500,7 +1500,7 @@
             if (n && dentro(d) && d.getTime() <= Date.now()) venc[n] = 1;
           });
           var calc = function (proy) {
-            var r = {ing: 0, res: 0, venc: [], vencBaja: [], vencCli: [], emerg: 0, clientes: [], porDia: {}, cerr: 0, cerrVenc: 0};
+            var r = {ing: 0, res: 0, venc: [], vencBaja: [], vencCli: [], emerg: 0, clientes: [], porDia: {}, cerr: 0, cerrVenc: 0, cerrTodos: 0};
             casos.forEach(function (c) {
               if (proyecto(c) !== proy) return;
               var n = dv(c, 'number'), ab = deUtc(val(c, 'opened_at'));
@@ -1514,6 +1514,7 @@
               if (venc[n]) (prioBaja(c) ? r.vencBaja : r.venc).push(dv(c, 'parent') || n);   // baja: aparte, no afecta el % en término
               if (venc[n] && !prioBaja(c) && proy === 'lineales') r.vencCli.push(cliente(c) || 'otro');
               // en término: de los CERRADOS en el período (sin cancelados ni prioridad baja), cuántos sin SLA neto vencido
+              if (val(c, 'active') === 'false' && dentro(deUtc(val(c, 'closed_at')))) r.cerrTodos++;   // cerrados en el período (todas las prioridades)
               if (val(c, 'active') === 'false' && dentro(deUtc(val(c, 'closed_at'))) && !prioBaja(c)) {
                 r.cerr++;
                 if (vencAlguna[n]) r.cerrVenc++;
@@ -1525,7 +1526,7 @@
           var cis = contar(casos.filter(function (c) { return dentro(deUtc(val(c, 'opened_at'))) && dv(c, 'cmdb_ci'); })
                                 .map(function (c) { return dv(c, 'cmdb_ci'); }))
                     .filter(function (p) { return p[1] > 1; }).sort(function (a, b) { return b[1] - a[1]; });
-          return {L: calc('lineales'), G: calc('gpon'), cis: cis, sinVerif: !res[0], sinSla: res[1] === null};
+          return {L: calc('lineales'), G: calc('gpon'), cis: cis, sinVerif: false, sinSla: res[1] === null};
         });
       });
     }
@@ -1534,7 +1535,8 @@
     function vencBajaTxt(r) { return r.vencBaja.length ? ['Vencidos (prioridad baja): ' + esc(r.vencBaja.length + ' / ' + r.vencBaja.join(' / '))] : []; }
     function cumplTxt(r) {
       if (r.pct === null) return 'En término: — (sin cerrados)';
-      return 'En término: ' + r.pct + '% (' + (r.cerr - r.cerrVenc) + ' de ' + r.cerr + (r.cerr === 1 ? ' cerrado)' : ' cerrados)');
+      return 'En término: ' + r.pct + '% (' + (r.cerr - r.cerrVenc) + ' de ' + r.cerr + (r.cerr === 1 ? ' cerrado' : ' cerrados') +
+             (r.cerr !== r.cerrTodos ? ', sin prioridad baja)' : ')');
     }
     function diaCargado(r) {
       var top = Object.keys(r.porDia).sort(function (a, b) { return r.porDia[b] - r.porDia[a]; })[0];
@@ -1575,10 +1577,10 @@
         var L = d.L, G = d.G, hoy0 = new Date(); hoy0.setHours(0, 0, 0, 0);
         var encurso = domingo >= hoy0;           // semana en curso: va del lunes hasta hoy
         var out = ['📅 <b>Resumen semanal</b> · ' + dm(lunes) + ' al ' + (encurso ? dm(hoy0) + ' <i>(semana en curso)</i>' : dm(domingo)), '', '🔧 <b>Lineales</b>', '',
-                   'Ingresados: ' + L.ing, 'Resueltos: ' + L.res, 'Vencidos: ' + esc(vencTxtP(L))].concat(vencCliTxt(L), vencBajaTxt(L), [cumplTxt(L)]);
+                   'Ingresados: ' + L.ing, 'Cerrados: ' + L.cerrTodos, 'Vencidos: ' + esc(vencTxtP(L))].concat(vencCliTxt(L), vencBajaTxt(L), [cumplTxt(L)]);
         if (porCliente(L)) out.push(porCliente(L));
         if (diaCargado(L)) out.push(diaCargado(L));
-        out = out.concat(SEP, ['📡 <b>GPON</b>', '', 'Ingresados: ' + G.ing, 'Resueltos: ' + G.res, 'Vencidos: ' + esc(vencTxtP(G))], vencBajaTxt(G), [cumplTxt(G),
+        out = out.concat(SEP, ['📡 <b>GPON</b>', '', 'Ingresados: ' + G.ing, 'Cerrados: ' + G.cerrTodos, 'Vencidos: ' + esc(vencTxtP(G))], vencBajaTxt(G), [cumplTxt(G),
                                'Emergencias (P1/P2): ' + G.emerg]);
         if (diaCargado(G)) out.push(diaCargado(G));
         var cis = d.cis.slice(0, 5);
@@ -1603,7 +1605,7 @@
           return ' <i>(' + (dif > 0 ? '▲ ' + dif : dif < 0 ? '▼ ' + (-dif) : '=') + (pts && dif ? ' pts' : '') + ' vs ' + mesAnt + ')</i>';
         };
         var bloque = function (p, pa, gpon) {
-          var o = ['Ingresados: ' + p.ing + cmp(p.ing, pa && pa.ing), 'Resueltos: ' + p.res, 'Vencidos: ' + esc(vencTxtP(p))]
+          var o = ['Ingresados: ' + p.ing + cmp(p.ing, pa && pa.ing), 'Cerrados: ' + p.cerrTodos + cmp(p.cerrTodos, pa && pa.cerrTodos), 'Vencidos: ' + esc(vencTxtP(p))]
                   .concat(vencCliTxt(p), vencBajaTxt(p), [cumplTxt(p) + cmp(p.pct, pa && pa.pct, true)]);
           if (gpon) o.push('Emergencias (P1/P2): ' + p.emerg);
           else if (porCliente(p)) o.push(porCliente(p));
