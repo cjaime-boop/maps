@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Mobisond · Avisador
 // @namespace    mobisond
-// @version      2.83
+// @version      2.84
 // @description  Avisa los casos nuevos (celular, campana y grupo de Telegram), los Lineales sin notas hace 25 min, los SLA y los aceptados; botón de resumen de turno y comandos del bot.
 // @match        https://*.service-now.com/*
 // @grant        GM_xmlhttpRequest
@@ -673,6 +673,21 @@
   var SEM_C = ['dom', 'lun', 'mar', 'mié', 'jue', 'vie', 'sáb'];
   function fechaC(ms) { var d = new Date(ms); return SEM_C[d.getDay()] + ' ' + ('0' + d.getDate()).slice(-2) + '/' + ('0' + (d.getMonth() + 1)).slice(-2) + ' ' + hhmm(ms); }
   function msDur(v) { return v ? utc(v) : 0; }            // duración de SN: "1970-01-02 03:04:00" = 1 d 3 h 4 min
+  // formulario de cierre que el dispatcher pega en las notas de la WO ("CAUSA DE LA AFECTACION: …", "ID de CIERRE: …", etc.)
+  function formularioCierre(regs) {
+    var txt = regs.map(function (x) { return x ? dv(x, 'work_notes') + '\n' + dv(x, 'comments') : ''; }).join('\n');
+    var i = txt.search(/CAUSA DE LA AFECTACI/i);              // el journal viene de lo más nuevo a lo más viejo: el primero es el último cierre
+    if (i < 0) return null;
+    var ini = txt.lastIndexOf('\n\n', i); ini = ini < 0 ? 0 : ini;
+    var f = {};
+    txt.slice(ini).split('\n').some(function (l, k) {
+      if (k > 2 && /^\s*\d{2}[-\/]\d{2}[-\/]\d{4} \d{2}:\d{2}(:\d{2})? - /.test(l)) return true;   // empieza otra nota
+      var m = /^\s*([^:]{2,70}?)\s*:\s*(.*)$/.exec(l);
+      if (m) { var k2 = m[1].toUpperCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/\s+/g, ' ').trim(); if (!(k2 in f)) f[k2] = m[2].trim(); }
+      return false;
+    });
+    return f;
+  }
   function datosCierre(regs) {
     var causa = [], idc = [], bt = [], notas = '';
     function suma(lista, v) { v = String(v || '').trim(); if (v && lista.indexOf(v) < 0) lista.push(v); }
@@ -736,14 +751,22 @@
         else out.push('🟢 Cumplido' + (tardo ? ' · ' + duracion(tardo / 60000) + de : ''));
       }
       // cierre
-      var dc = datosCierre([wo, wot]);
-      if (dc.causa.length || dc.idc.length || dc.bt.length || dc.notas) {
-        out.push('', '🛠️ <b>Cierre</b>');
-        if (dc.causa.length) out.push('Causa: ' + esc(dc.causa.join(' · ')));
-        if (dc.idc.length) out.push('ID de cierre: ' + esc(dc.idc.join(' · ')));
-        if (dc.bt.length) out.push('BT: ' + esc(dc.bt.join(', ')));
-        if (dc.notas) { var nt = dc.notas.replace(/\s+/g, ' ').trim(); out.push('<i>"' + esc(nt.length > 160 ? nt.slice(0, 157) + '…' : nt) + '"</i>'); }
-      }
+      var fc = formularioCierre([wo, wot]) || {}, dc = datosCierre([wo, wot]);
+      var si = function (v) { return /^s[ií]/i.test(v || ''); };
+      var lineas = [];
+      var causa = fc['CAUSA DE LA AFECTACION'] || dc.causa.join(' · '), idc = fc['ID DE CIERRE'] || dc.idc.join(' · ');
+      if (causa) lineas.push('Causa: ' + esc(causa));
+      if (idc) lineas.push('ID de cierre: ' + esc(idc));
+      var cable = fc['NOMBRE DEL CABLE'], elem = fc['ELEMENTO AFECTADO'];
+      if (cable || elem) lineas.push('Cable: ' + esc([cable, elem].filter(Boolean).join(' · ')));
+      if (si(fc['REASIGNACIONES'])) lineas.push('Reasignación: ' + esc((fc['DESDE'] || '?') + ' → ' + (fc['HASTA'] || '?')));
+      if (fc['BAJA BUFFER Y FO'] || fc['ALTA BUFFER Y FO']) lineas.push('Buffers: ' + esc([fc['BAJA BUFFER Y FO'] ? 'baja ' + fc['BAJA BUFFER Y FO'] : '', fc['ALTA BUFFER Y FO'] ? 'alta ' + fc['ALTA BUFFER Y FO'] : ''].filter(Boolean).join(' · ')));
+      if (si(fc['NUEVA BOTELLA'])) lineas.push('🆕 Botella nueva' + (fc['CANTIDAD DE BOTELLAS'] ? ': ' + esc(fc['CANTIDAD DE BOTELLAS']) : ''));
+      if (si(fc['COLOCACION POSTES'])) lineas.push('Colocación de postes: sí');
+      if (!fc['DESDE'] && dc.bt.length) lineas.push('BT: ' + esc(dc.bt.join(', ')));
+      var tareas = fc['TAREAS REALIZADAS'] || ((dc.notas.match(/[a-záéíóúñ]/gi) || []).length >= 10 ? dc.notas : '');   // close notes con "." no sirven
+      if (tareas) { var nt = tareas.replace(/\s+/g, ' ').trim(); lineas.push('<i>"' + esc(nt.length > 180 ? nt.slice(0, 177) + '…' : nt) + '"</i>'); }
+      if (lineas.length) out.push.apply(out, ['', '🛠️ <b>Cierre</b>'].concat(lineas));
       // mismo enlace en 90 días (sin contar este caso ni sus hermanos)
       if (otros && otros.length) {
         var vistos = {}, lista = [];
