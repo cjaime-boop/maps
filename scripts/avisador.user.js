@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Mobisond · Avisador
 // @namespace    mobisond
-// @version      2.82
+// @version      2.83
 // @description  Avisa los casos nuevos (celular, campana y grupo de Telegram), los Lineales sin notas hace 25 min, los SLA y los aceptados; botón de resumen de turno y comandos del bot.
 // @match        https://*.service-now.com/*
 // @grant        GM_xmlhttpRequest
@@ -621,16 +621,17 @@
   }
   function duracion(min) {
     min = Math.round(Math.abs(min));
-    return min >= 60 ? Math.floor(min / 60) + ' h ' + (min % 60) + ' min' : min + ' min';
+    return min >= 60 ? Math.floor(min / 60) + ' h' + (min % 60 ? ' ' + (min % 60) + ' min' : '') : min + ' min';
   }
   function textoCaso(arg) {
     var n = (arg || '').trim().toUpperCase();
     if (!n) return Promise.resolve('Decime qué caso: <code>/caso WO0096818</code> (también sirve el WOT o el CS).');
     var q = /^WOT/.test(n) ? 'number=' + n : /^WO/.test(n) ? 'parent.number=' + n : /^CS/.test(n) ? 'short_descriptionSTARTSWITH' + n : 'number=' + n;
-    var campos = 'sys_id,number,parent,state,substate,u_pause_reason,priority,assigned_to,cmdb_ci,short_description,opened_at,assignment_group,active';
+    var campos = 'sys_id,number,parent,state,substate,u_pause_reason,priority,assigned_to,cmdb_ci,short_description,opened_at,closed_at,assignment_group,active';
     return api('wm_task', q + '^ORDERBYDESCopened_at', campos).then(function (rs) {
       if (!rs.length) return 'No encontré el caso ' + esc(n) + '.';
       var r = rs[0], ahora = Date.now();
+      if (vl(r, 'active') === 'false') return textoCerrado(r);
       var ids = [vl(r, 'sys_id')]; if (vl(r, 'parent')) ids.push(vl(r, 'parent'));
       return Promise.all([
         ultimasNotas([r]).catch(function () { return {}; }),
@@ -666,6 +667,95 @@
         out.push('', '🔗 <a href="' + esc(linkCaso(r)) + '">Abrir en ServiceNow</a>');
         return out.join('\n');
       });
+    });
+  }
+  // ---- /caso de un caso cerrado: tiempos, si cumplió el SLA neto, datos del cierre y otros casos del mismo enlace
+  var SEM_C = ['dom', 'lun', 'mar', 'mié', 'jue', 'vie', 'sáb'];
+  function fechaC(ms) { var d = new Date(ms); return SEM_C[d.getDay()] + ' ' + ('0' + d.getDate()).slice(-2) + '/' + ('0' + (d.getMonth() + 1)).slice(-2) + ' ' + hhmm(ms); }
+  function msDur(v) { return v ? utc(v) : 0; }            // duración de SN: "1970-01-02 03:04:00" = 1 d 3 h 4 min
+  function datosCierre(regs) {
+    var causa = [], idc = [], bt = [], notas = '';
+    function suma(lista, v) { v = String(v || '').trim(); if (v && lista.indexOf(v) < 0) lista.push(v); }
+    regs.forEach(function (x) {
+      if (!x) return;
+      Object.keys(x).forEach(function (k) {                // campos del formulario de cierre (los nombres cambian según la tabla)
+        var v = dv(x, k);
+        if (!v || typeof v !== 'string' || v.length > 120 || /^(sys_|closed_|close_notes|comments|work_notes|description|short_desc)/.test(k)) return;
+        if (/caus/i.test(k)) suma(causa, v);
+        else if (/cierre|close_code|closure/i.test(k)) suma(idc, v);
+        else if (/botella|(^|_)bt(_|$)/i.test(k)) suma(bt, v);
+      });
+      if (!notas && dv(x, 'close_notes')) notas = dv(x, 'close_notes');
+      var txt = dv(x, 'comments') + '\n' + dv(x, 'work_notes');   // formulario de cierre copiado en la WO (lo más nuevo primero)
+      var m;
+      if (!causa.length && (m = /causa(?: de (?:la )?(?:afectaci[oó]n|falla))?\s*[:=]\s*([^\n]{2,80})/i.exec(txt))) suma(causa, m[1]);
+      if (!idc.length && (m = /id\s*(?:de\s*)?cierre\s*[:=]\s*([^\n]{2,80})/i.exec(txt))) suma(idc, m[1]);
+      if (!bt.length && (m = /\b(?:BT|botella)\s*[:=]\s*([A-Z0-9][A-Z0-9_\-]{5,40})/i.exec(txt))) suma(bt, m[1].toUpperCase());
+    });
+    return {causa: causa, idc: idc, bt: bt, notas: notas};
+  }
+  function textoCerrado(r) {
+    var padre = vl(r, 'parent'), ci = vl(r, 'cmdb_ci');
+    var ids = [vl(r, 'sys_id')]; if (padre) ids.push(padre);
+    return Promise.all([
+      api('wm_task', 'sys_id=' + vl(r, 'sys_id'), '').then(function (x) { return x[0]; }).catch(function () { return null; }),
+      padre ? api('wm_order', 'sys_id=' + padre, '').then(function (x) { return x[0]; }).catch(function () { return null; }) : null,
+      api('task_sla', 'taskIN' + ids.join(','), 'sla,stage,has_breached,start_time,end_time,planned_end_time,duration,pause_duration').catch(function () { return null; }),
+      ci ? api('wm_task', 'cmdb_ci=' + ci + '^opened_at>=javascript:gs.daysAgoStart(90)^sys_id!=' + vl(r, 'sys_id') + '^ORDERBYDESCopened_at', 'number,parent,opened_at,state')
+             .catch(function () { return null; }) : null
+    ]).then(function (res) {
+      var wot = res[0] || r, wo = res[1], slas = res[2], otros = res[3];
+      var prio = dv(r, 'priority'), color = /^1/.test(prio) ? '🔴' : /^2/.test(prio) ? '🟠' : /^3/.test(prio) ? '🟡' : '⚪';
+      var cancel = /cancel/i.test(dv(r, 'state'));
+      var out = ['🔎 <b>' + esc(woDe(r)) + '</b> · ' + (cancel ? '🚫 Cancelado' : '✅ Cerrado'), esc(dv(r, 'cmdb_ci') || 'sin CI')];
+      if (dv(r, 'short_description')) out.push('<i>' + esc(dv(r, 'short_description')) + '</i>');
+      out.push('', '📌 <b>Estado</b>',
+               esc(dv(r, 'state')) + (aceptado(r) ? ' · ✅ ' + esc(dv(r, 'u_pause_reason') || 'aceptado') : ''),
+               color + ' Prioridad ' + esc(prio || '—'),
+               '👷 ' + esc(dv(r, 'assigned_to') || 'sin asignar'));
+      // tiempos
+      var ab = utc(vl(r, 'opened_at')), ce = utc(vl(wot, 'closed_at') || vl(r, 'closed_at'));
+      var neto = (slas || []).filter(function (x) { return /neto/i.test(dv(x, 'sla')) && !/cancel/i.test(vl(x, 'stage') + dv(x, 'stage')); })
+                             .sort(function (a, b) { return utc(vl(b, 'start_time')) - utc(vl(a, 'start_time')); })[0];
+      var pausa = neto ? msDur(vl(neto, 'pause_duration')) : 0;
+      out.push('', '🕐 <b>Tiempos</b>');
+      if (ab) out.push('Abierto: ' + fechaC(ab));
+      if (ce) out.push('Cerrado: ' + fechaC(ce));
+      if (ab && ce) out.push('Total ' + duracion((ce - ab) / 60000) + (pausa ? ' · en pausa ' + duracion(pausa / 60000) : ''));
+      // SLA neto: lo que tardó descontando pausas, contra el objetivo (vencimiento planificado − inicio − pausas)
+      out.push('', '⏱️ <b>SLA neto</b>');
+      if (cancel) out.push('caso cancelado');
+      else if (slas === null) out.push('no lo pude leer');
+      else if (!neto) out.push('sin SLA neto');
+      else {
+        var ini = utc(vl(neto, 'start_time')), fin = utc(vl(neto, 'end_time')) || ce;
+        var tardo = fin && ini ? fin - ini - pausa : 0;
+        var obj = utc(vl(neto, 'planned_end_time')) && ini ? utc(vl(neto, 'planned_end_time')) - ini - pausa : 0;
+        var de = obj > 0 ? ' de ' + duracion(obj / 60000) : '';
+        if (vl(neto, 'has_breached') === 'true') out.push('🔴 Vencido' + (tardo && obj && tardo > obj ? ' por ' + duracion((tardo - obj) / 60000) : '') + (tardo ? ' · ' + duracion(tardo / 60000) + de : ''));
+        else out.push('🟢 Cumplido' + (tardo ? ' · ' + duracion(tardo / 60000) + de : ''));
+      }
+      // cierre
+      var dc = datosCierre([wo, wot]);
+      if (dc.causa.length || dc.idc.length || dc.bt.length || dc.notas) {
+        out.push('', '🛠️ <b>Cierre</b>');
+        if (dc.causa.length) out.push('Causa: ' + esc(dc.causa.join(' · ')));
+        if (dc.idc.length) out.push('ID de cierre: ' + esc(dc.idc.join(' · ')));
+        if (dc.bt.length) out.push('BT: ' + esc(dc.bt.join(', ')));
+        if (dc.notas) { var nt = dc.notas.replace(/\s+/g, ' ').trim(); out.push('<i>"' + esc(nt.length > 160 ? nt.slice(0, 157) + '…' : nt) + '"</i>'); }
+      }
+      // mismo enlace en 90 días (sin contar este caso ni sus hermanos)
+      if (otros && otros.length) {
+        var vistos = {}, lista = [];
+        otros.forEach(function (o) { var w = woDe(o); if (w !== woDe(r) && !vistos[w]) { vistos[w] = 1; lista.push(o); } });
+        if (lista.length) {
+          var u = lista[0], fu = utc(vl(u, 'opened_at'));
+          out.push('', '🔁 <b>Mismo enlace</b>', lista.length + (lista.length === 1 ? ' caso más' : ' casos más') + ' en 90 días · último ' + esc(woDe(u)) +
+                   (fu ? ' (' + fechaC(fu).slice(4, 9) + ')' : ''));
+        }
+      }
+      out.push('', '🔗 <a href="' + esc(linkCaso(r)) + '">Abrir en ServiceNow</a>');
+      return out.join('\n');
     });
   }
   // ---- modo Supabase: el bot vive en una Edge Function (siempre prendida) que anota en Supabase los pedidos
