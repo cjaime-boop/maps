@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Mobisond · Avisador
 // @namespace    mobisond
-// @version      2.99
+// @version      3.0
 // @description  Avisa los casos nuevos (celular, campana y grupo de Telegram), los Lineales sin notas hace 25 min, los SLA y los aceptados; botón de resumen de turno y comandos del bot.
 // @match        https://*.service-now.com/*
 // @grant        GM_xmlhttpRequest
@@ -621,11 +621,10 @@
       GM_setValue('acept_vistos', aceptNuevo);
       GM_setValue('acept_iniciado', true);
 
-      // 1) sin notas de trabajo (solo Lineales, sin pausa ni aceptados)
-      // Lineales siempre; GPON solo prioridad 1 y 2
+      // 1) sin notas de trabajo: P1 y P2 de Lineales y GPON, sin pausa ni aceptados
       var p12 = function (r) { return /^[12]$/.test(vl(r, 'priority')) || /^[12]\b/.test(dv(r, 'priority')); };
       var lin = casos.filter(function (r) {
-        return (proyecto(r) === 'Lineales' || (proyecto(r) === 'GPON' && p12(r))) && !pausado(r) && !aceptado(r);
+        return (proyecto(r) === 'Lineales' || proyecto(r) === 'GPON') && p12(r) && !pausado(r) && !aceptado(r);   // solo P1 y P2
       });
       if (lin.length) ultimasNotas(lin).then(function (notas) {
         lin.forEach(function (r) {
