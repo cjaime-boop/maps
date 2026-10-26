@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Mobisond · Avisador
 // @namespace    mobisond
-// @version      3.6
+// @version      3.7
 // @description  Avisa los casos nuevos (celular, campana y grupo de Telegram), los Lineales sin notas hace 25 min, los SLA y los aceptados; botón de resumen de turno y comandos del bot.
 // @match        https://*.service-now.com/*
 // @grant        GM_xmlhttpRequest
@@ -148,7 +148,7 @@
             return '• ' + esc(woDe(o)) + ' · ' + ('0' + d.getDate()).slice(-2) + '/' + ('0' + (d.getMonth() + 1)).slice(-2) + ' · ' + esc(causa);
           });
           if (lista.length > 3) lineas.push('<i>… y ' + (lista.length - 3) + ' más</i>');
-          return '━━━━━━━━━━━━━━\n🔁🚨 <b>¡Posible reincidencia!</b> 🚨🔁\n<i>Este CI ya tuvo ' + (lista.length === 1 ? 'otro caso' : lista.length + ' casos') +
+          return '━━━━━━━━━━━━━━\n🔁🚨 <b>¡Posible reincidencia!</b> 🚨🔁\n\n<i>Este CI ya tuvo ' + (lista.length === 1 ? 'otro caso' : lista.length + ' casos') +
                  ' en los últimos 90 días 😱</i>\n\n' + lineas.join('\n') + '\n━━━━━━━━━━━━━━\n';
         });
       });
@@ -607,7 +607,7 @@
         var noAcept = /no acept/i.test(dv(r, 'u_pause_reason'));
         if (!ausente && ((antes && antes.verif && !enVerif(r) && !aceptado(r) && (!pausado(r) || noAcept)) || (noAcept && antes && !antes.noAcept))) {
           unaVezAlGrupo('rech:' + id + ':' + Math.floor(ahora / 1800000),
-            '❌ <b>El cliente no aceptó el caso</b>\n<i>Vuelve a estar en curso</i>' + cuerpo(r, '👷 ' + esc(dv(r, 'assigned_to') || 'sin asignar')));
+            '❌ <b>El cliente no aceptó el caso</b>\n\n<i>Vuelve a estar en curso</i>' + cuerpo(r, '👷 ' + esc(dv(r, 'assigned_to') || 'sin asignar')));
         }
         v.verif = enVerif(r); v.noAcept = noAcept;
         nuevoVisto[id] = v;
@@ -1085,7 +1085,7 @@
         var min = (ahora - utc(vl(r, 'opened_at'))) / 60000;
         if (min >= PENDIENTE_MIN && /pending dispatch|pendiente/i.test(dv(r, 'state')) && !vl(r, 'assigned_to')) {
           var prio = dv(r, 'priority');
-          unaVezAlGrupo('pend:' + vl(r, 'sys_id'), '⏰ <b>Caso sin asignar hace ' + Math.floor(min) + ' min</b>\n<i>Sigue en Pending Dispatch</i>' +
+          unaVezAlGrupo('pend:' + vl(r, 'sys_id'), '⏰ <b>Caso sin asignar hace ' + Math.floor(min) + ' min</b>\n\n<i>Sigue en Pending Dispatch</i>' +
             (prio ? '\n\n' + colorPrio(prio) + ' <b>' + esc(prio) + '</b>' : '') + cuerpo(r));
         }
       });
@@ -1650,7 +1650,7 @@
       if (r.sinSla) notas.push('No pude leer los SLA: "Casos vencidos" queda con ?');
       if (r.sinVerif) notas.push('No pude ver los pases a verificación: "resueltos" son los cerrados hoy');
       var titulo = r.hoy ? '📊 <b>Resumen del día</b>' : '📊 <b>Resumen del ' + ('0' + r.dia.getDate()).slice(-2) + '/' + ('0' + (r.dia.getMonth() + 1)).slice(-2) + '/' + r.dia.getFullYear() + '</b>\n<i>(acumulados, pausados y en mano no se pueden saber de días anteriores)</i>';
-      return titulo + '\n<i>Tocá el recuadro para copiarlo y pegalo en WhatsApp</i>\n⚠️ <b>Reporte creado por BOT, revisar antes de enviar</b>\n\n' + t +
+      return titulo + '\n\n<i>Tocá el recuadro para copiarlo y pegalo en WhatsApp</i>\n⚠️ <b>Reporte creado por BOT, revisar antes de enviar</b>\n\n' + t +
              (notas.length ? '\n\n⚠️ <i>' + esc(notas.join(' · ')) + '</i>' : '');
     });
   }
