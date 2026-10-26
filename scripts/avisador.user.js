@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Mobisond · Avisador
 // @namespace    mobisond
-// @version      2.92
+// @version      2.93
 // @description  Avisa los casos nuevos (celular, campana y grupo de Telegram), los Lineales sin notas hace 25 min, los SLA y los aceptados; botón de resumen de turno y comandos del bot.
 // @match        https://*.service-now.com/*
 // @grant        GM_xmlhttpRequest
@@ -401,11 +401,7 @@
   // todas las entradas de un campo de notas: "2026-10-24 05:12:33 - Juan Pérez (Notas de trabajo)" / "(Additional comments)"
   function notasDelTexto(t) {
     var re = /(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}|\d{2}[\/-]\d{2}[\/-]\d{4} \d{2}:\d{2}:\d{2}) - (.+?) \((?:Notas de trabajo|Work notes|Comentarios adicionales|Additional comments|Comentarios)\)/gi, m, out = [];
-    while ((m = re.exec(t || ''))) out.push({t: fechaJournal(m[1]), quien: m[2].trim(), st: m.index, ini: re.lastIndex});
-    out.forEach(function (n, i) {      // el texto de cada nota: desde su encabezado hasta el siguiente
-      n.txt = (t || '').slice(n.ini, i + 1 < out.length ? out[i + 1].st : undefined)
-        .replace(/\[\/?code\]|<[^>]+>/g, ' ').replace(/&nbsp;/g, ' ').replace(/\s+/g, ' ').trim();
-    });
+    while ((m = re.exec(t || ''))) out.push({t: fechaJournal(m[1]), quien: m[2].trim()});
     return out;
   }
   // Última actividad de gente de Mobisond en la WO (padre): notas de trabajo, comentarios adicionales y fotos/archivos subidos.
@@ -671,74 +667,11 @@
       }, function (e) { unaVezAlGrupo('cmd:' + p.id, 'No pude armar el resumen (' + esc(e.message) + ').', p.msg, p.chat); listo('error ServiceNow ' + e.message); });
       return;
     }
-    if (p.cmd === '/pase') {
-      textoPase().then(function (t) {
-        unaVezAlGrupo('cmd:' + p.id, t, p.msg, p.chat, function (ok) { listo(ok ? 'contestado' : 'no se pudo contestar'); });
-      }, function (e) { unaVezAlGrupo('cmd:' + p.id, 'No pude armar el pase de turno (' + esc(e.message) + ').', p.msg, p.chat); listo('error ServiceNow ' + e.message); });
-      return;
-    }
     if (p.cmd === '/bandeja') {
       textoBandeja().then(function (t) {
         unaVezAlGrupo('cmd:' + p.id, t, p.msg, p.chat, function (ok) { listo(ok ? 'contestado' + (p.chat && String(p.chat) !== String(GM_getValue('tg_chat')) ? ' por privado' : '') : 'no se pudo contestar'); });
       }, function (e) { unaVezAlGrupo('cmd:' + p.id, 'No pude leer la bandeja de ServiceNow (' + esc(e.message) + ').', p.msg, p.chat); listo('error ServiceNow ' + e.message); });
     } else listo('comando desconocido');
-  }
-  // ---- /pase: cada caso abierto con su estado, el último avance de Mobisond y el SLA, para el cambio de turno
-  function textoPase() {
-    var q = 'active=true^assignment_group.nameSTARTSWITH' + GRUPOS.lineales + '^ORassignment_group.nameSTARTSWITH' + GRUPOS.gpon;
-    var campos = 'sys_id,number,parent,state,substate,u_pause_reason,priority,assignment_group,assigned_to,cmdb_ci,opened_at';
-    return api('wm_task', q + '^ORDERBYpriority', campos).then(function (casos) {
-      var ids = []; casos.forEach(function (r) { ids.push(vl(r, 'sys_id')); if (vl(r, 'parent')) ids.push(vl(r, 'parent')); });
-      return Promise.all([
-        ultimasNotas(casos).catch(function () { return {}; }),
-        ids.length ? api('task_sla', 'active=true^taskIN' + ids.join(','), 'task,sla,stage,has_breached,planned_end_time').catch(function () { return []; }) : []
-      ]).then(function (res) {
-        var notas = res[0], slaDe = {};
-        res[1].forEach(function (x) { if (/neto/i.test(dv(x, 'sla'))) slaDe[vl(x, 'task')] = x; });
-        var ahora = Date.now(), hoy = new Date().toDateString();
-        var cuando = function (t) { var d = new Date(t); return (d.toDateString() === hoy ? '' : ('0' + d.getDate()).slice(-2) + '/' + ('0' + (d.getMonth() + 1)).slice(-2) + ' ') + hhmm(t); };
-        var conTexto = true;
-        var armar = function () {
-          var out = ['🔄 <b>Pase de turno</b> · ' + hhmm(ahora)];
-          ['Lineales', 'GPON'].forEach(function (pr) {
-            var cs = casos.filter(function (r) { return proyecto(r) === pr; });
-            var orden = function (r) { return enCamino(r) ? 1 : !enCurso(r) ? 5 : aceptado(r) ? 4 : pausado(r) && /verificaci/i.test(dv(r, 'u_pause_reason')) ? 3 : pausado(r) ? 2 : 0; };
-            cs.sort(function (a, b) { return orden(a) - orden(b) || (+vl(a, 'priority') || 9) - (+vl(b, 'priority') || 9); });
-            if (pr === 'GPON') out.push('', '━━━━━━━━━━━━');
-            out.push('', (pr === 'Lineales' ? '🔧' : '📡') + ' <b>' + pr + '</b> · ' + cs.length + (cs.length === 1 ? ' abierto' : ' abiertos'));
-            cs.forEach(function (r) {
-              var o = orden(r), prio = dv(r, 'priority'), pn = vl(r, 'priority') || (prio.match(/^\d/) || [''])[0];
-              var icono = ['▶️', '🚗', '⏸️', '🔍', '✅', '⏳'][o];
-              var tec = dv(r, 'assigned_to') ? ' · 👷 ' + esc(dv(r, 'assigned_to')) : '';
-              var linea = o === 0 ? 'En curso' + tec : o === 1 ? esc(dv(r, 'state')) + tec : o === 2 ? 'Pausado: ' + esc(dv(r, 'u_pause_reason') || 'sin motivo') + tec
-                : o === 3 ? 'Verificación del cliente' : o === 4 ? 'Aceptado por el cliente' : '';
-              if (o === 5) {
-                var ab = utc(vl(r, 'opened_at')), h = ab ? new Date(ab).getHours() : 12;
-                linea = 'Sin atender · entró ' + (ab ? cuando(ab) : '?') + (pr === 'GPON' && +pn >= 3 && (h >= 19 || h < 7) ? ' (post 19:00)' : '');
-              }
-              out.push('', icono + ' <b>' + esc(woDe(r)) + '</b> · ' + colorPrio(prio) + ' P' + esc(pn || '?') + (o === 5 ? ' · sin atender' : ''),
-                       esc(dv(r, 'cmdb_ci') || 'sin CI'), linea);
-              var n = notas[vl(r, 'sys_id')];
-              if (n && n.t && o !== 4) {
-                var txt = conTexto && n.txt ? n.txt : '';
-                if (txt.length > 90) txt = txt.slice(0, 87) + '…';
-                out.push('📝 ' + cuando(n.t) + ' ' + esc(n.quien || '') + (n.foto ? ' (foto)' : '') + (txt ? ': <i>"' + esc(txt) + '"</i>' : ''));
-              }
-              var sla = slaDe[vl(r, 'sys_id')] || slaDe[vl(r, 'parent')];
-              if (sla && o < 3 && !/paus/i.test(vl(sla, 'stage') + dv(sla, 'stage'))) {
-                if (vl(sla, 'has_breached') === 'true') out.push('🔴 SLA neto vencido');
-                else { var v = utc(vl(sla, 'planned_end_time')); if (v) out.push('⏱️ SLA neto vence ' + cuando(v) + ((v - ahora) / 60000 <= 60 ? ' ⚠️' : '')); }
-              }
-            });
-          });
-          return out.join('\n');
-        };
-        var t = armar();
-        if (t.length > 3900) { conTexto = false; t = armar(); }               // Telegram corta en 4096: sin el texto de las notas
-        if (t.length > 4000) t = t.slice(0, t.lastIndexOf('\n\n', 3950)) + '\n\n<i>… sigue en /bandeja</i>';
-        return t;
-      });
-    });
   }
   function duracion(min) {
     min = Math.round(Math.abs(min));
@@ -935,15 +868,14 @@
   function comandos() {
     if (!hayGrupo() || !soyLider()) return;
     atenderPendientes();
-    if (GM_getValue('tg_cmds', 0) < 10) {     // menú de comandos del bot (aparece al escribir "/" en el grupo)
+    if (GM_getValue('tg_cmds', 0) < 11) {     // menú de comandos del bot (aparece al escribir "/" en el grupo)
       tg('setMyCommands', {commands: [{command: 'bandeja', description: 'Casos abiertos de Lineales y GPON'},
-                                      {command: 'pase', description: 'Pase de turno: cada caso con su último avance'},
                                       {command: 'caso', description: 'Detalle de un caso: /caso WO0096818'},
                                       {command: 'activos', description: 'Quién está activo ahora y quién entra'},
                                       {command: 'status', description: 'Resumen del día (Lineales y GPON)'},
                                       {command: 'semana', description: 'Resumen de esta semana (o /semana 13-10-2026)'},
                                       {command: 'mes', description: 'Resumen de este mes (o /mes 09-2026)'},
-                                      {command: 'historial', description: 'Qué pasó cerca de una botella, coordenadas o link'}]}, function () { GM_setValue('tg_cmds', 10); });
+                                      {command: 'historial', description: 'Qué pasó cerca de una botella, coordenadas o link'}]}, function () { GM_setValue('tg_cmds', 11); });
     }
     if (modoBot === null) {                    // ¿el bot está conectado a Supabase?
       modoBot = 'esperando';
