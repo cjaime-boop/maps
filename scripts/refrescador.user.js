@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Mobisond · Refrescador de pestañas
 // @namespace    mobisond
-// @version      2.7
+// @version      2.8
 // @description  Refresca la página entera cada 30 segundos en las pestañas que elijas (cualquier página). Refresca siempre, aunque estés escribiendo o usando la página. Muestra la cuenta en el título y, en ServiceNow, avisa si se cerró la sesión.
 // @match        *://*/*
 // @grant        GM_getValue
@@ -104,8 +104,12 @@
                                                              credentials: 'omit', signal: ctl ? ctl.signal : undefined})
         .then(function () { clearTimeout(corte); listo(true); }, function () { clearTimeout(corte); listo(false); });
     }
+    function ocupado() {   // el Avisador está armando un pedido del bot (/semana, /mes): se espera, hasta 3 min
+      try { var t = Number(localStorage.getItem('mobisond_ocupado') || 0); return t && Date.now() - t < 3 * 60000; } catch (e) { return false; }
+    }
     function recargar() {
       if (probando) return;
+      if (ocupado()) { proximo = Date.now() + 5000; pintar(); return; }
       probando = true;
       hayConexion(function (ok) {
         probando = false;

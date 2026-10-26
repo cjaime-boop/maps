@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Mobisond · Avisador
 // @namespace    mobisond
-// @version      2.97
+// @version      2.98
 // @description  Avisa los casos nuevos (celular, campana y grupo de Telegram), los Lineales sin notas hace 25 min, los SLA y los aceptados; botón de resumen de turno y comandos del bot.
 // @match        https://*.service-now.com/*
 // @grant        GM_xmlhttpRequest
@@ -50,11 +50,16 @@
   // ---------------------------------------------------------------- grupo de Telegram
   // Con la contraseña del equipo, los avisos van al grupo "Dispensers Mobisond". Aunque varias PCs detecten lo
   // mismo, sale UNA sola vez: Supabase hace de árbitro (ver unaVezAlGrupo).
-  function tg(metodo, datos, ok, mal) {
+  function tg(metodo, datos, ok, mal, intento) {
     GM_xmlhttpRequest({method: 'POST', url: 'https://api.telegram.org/bot' + GM_getValue('tg_token', '') + '/' + metodo,
       headers: {'Content-Type': 'application/json'}, data: JSON.stringify(datos || {}), timeout: 15000,
       onload: function (r) { var j = {}; try { j = JSON.parse(r.responseText); } catch (e) {}
         if (j.ok) { if (ok) ok(j.result); return; }
+        // muchos mensajes juntos: Telegram pide esperar unos segundos -> se reintenta solo (hasta 3 veces)
+        var espera = j.parameters && j.parameters.retry_after;
+        if ((j.error_code === 429 || r.status === 429) && espera && (intento || 0) < 3) {
+          setTimeout(function () { tg(metodo, datos, ok, mal, (intento || 0) + 1); }, (espera + 1) * 1000); return;
+        }
         // si el grupo pasó a "supergrupo", Telegram le cambia el número: se actualiza solo
         if (j.parameters && j.parameters.migrate_to_chat_id) GM_setValue('tg_chat', String(j.parameters.migrate_to_chat_id));
         console.log('[Mobisond] Telegram ' + metodo + ': ' + (j.description || r.status));
@@ -153,8 +158,9 @@
     antecedentesGPON(f.id).then(function (extra) { unaVezAlGrupo(f.id, mensajeGrupo(f, false, extra || '')); });
   }
   // Manda al grupo una sola vez por "clave", aunque varias PCs lo detecten (Supabase decide quién lo manda).
-  function unaVezAlGrupo(clave, html, responderA, chatId, alTerminar) {   // chatId: para contestar por privado (si no, al grupo)
+  function unaVezAlGrupo(clave, html, responderA, chatId, alTerminar, reintento) {   // chatId: para contestar por privado (si no, al grupo)
     if (!hayGrupo()) return;
+    var gane = false;
     var datos = {chat_id: chatId || GM_getValue('tg_chat'), text: html, parse_mode: 'HTML', disable_web_page_preview: true};
     if (responderA) datos.reply_to_message_id = responderA;
     var fin = alTerminar || function () {};
@@ -163,7 +169,19 @@
       if (decidido) return; decidido = true;
       tg('sendMessage', datos, function () {
         botLog('mandado ' + clave.slice(0, 30) + (por ? ' (' + por + ')' : '')); fin(true);
-      }, function (e) { botLog('Telegram no dejó mandar (' + clave.slice(0, 30) + '): ' + e); fin(false); });
+      }, function (e) {
+        botLog('Telegram no dejó mandar (' + clave.slice(0, 30) + '): ' + e);
+        if (!/^cmd:/.test(clave)) {             // aviso que no salió: se suelta en Supabase y se reintenta en 1 min (hasta 3 veces)
+          if (gane) sbRpc('bot_soltar', {p_aviso: clave}).catch(function () {});
+          var n = (reintento || 0) + 1;
+          if (n <= 3) {
+            var cola = GM_getValue('tg_reintentos', []).filter(function (x) { return x.clave !== clave; });
+            cola.push({clave: clave, html: html, chat: datos.chat_id, n: n, cuando: Date.now() + 60000});
+            GM_setValue('tg_reintentos', cola.slice(-20));
+          }
+        }
+        fin(false);
+      });
     };
     // los comandos los lee una sola PC (Supabase o Telegram se los da a una): se contestan directo
     if (/^cmd:/.test(clave)) { mandar(); return; }
@@ -171,8 +189,18 @@
     // Si Supabase no responde, se manda igual (mejor repetido que perdido).
     sbRpc('bot_reclamar', {p_aviso: clave, p_pc: pcId()}).then(function (gano) {
       if (gano === false) { decidido = true; botLog('ya lo mandó otra PC: ' + clave.slice(0, 30)); fin(true); return; }
+      gane = true;
       mandar();
     }, function (e) { mandar('Supabase no respondió: ' + e.message); });
+  }
+  // avisos que Telegram no dejó mandar: la pestaña que atiende los reintenta (sobreviven a las recargas)
+  function reintentarAvisos() {
+    var cola = GM_getValue('tg_reintentos', []);
+    if (!cola.length) return;
+    var ahora = Date.now(), listos = cola.filter(function (x) { return x.cuando <= ahora; });
+    if (!listos.length) return;
+    GM_setValue('tg_reintentos', cola.filter(function (x) { return x.cuando > ahora && ahora - x.cuando < 20 * 60000; }));
+    listos.forEach(function (x) { botLog('reintento ' + x.n + ': ' + x.clave.slice(0, 30)); unaVezAlGrupo(x.clave, x.html, null, x.chat, null, x.n); });
   }
   function alGrupo(f) { botLog('caso nuevo ' + f.numero); avisoCasoNuevo(f); }
   function configurarGrupo() {
@@ -535,6 +563,9 @@
     if (!hayGrupo() || !soyLider()) return;
     var ahora = Date.now();
     if (ahora - GM_getValue('ult_control', 0) < CADA_MS) return;      // la pestaña se recarga cada 30 s: se controla cada 2 min
+    // PC que vuelve después de más de 10 min sin controlar (apagada, sin sesión): esta vuelta solo anota, no avisa
+    // cambios de prioridad / aceptados / no aceptados viejos
+    var ausente = ahora - GM_getValue('ult_control', 0) > 10 * 60000;
     GM_setValue('ult_control', ahora);
     var q = 'active=true^assignment_group.nameSTARTSWITH' + GRUPOS.lineales + '^ORassignment_group.nameSTARTSWITH' + GRUPOS.gpon;
     var campos = 'sys_id,number,parent,state,substate,u_pause_reason,priority,assignment_group,assigned_to,cmdb_ci,short_description,work_start,opened_at';
@@ -549,7 +580,7 @@
         var id = vl(r, 'sys_id'), p = vl(r, 'priority'), txt = dv(r, 'priority');
         priosNuevo[id] = {v: p, t: txt};
         var antes = prios[id];
-        if (prioIni && antes && antes.v && p && antes.v !== p) {
+        if (prioIni && !ausente && antes && antes.v && p && antes.v !== p) {
           var sube = +p < +antes.v;
           unaVezAlGrupo('prio:' + id + ':' + antes.v + '>' + p,
             '🔀 <b>Cambió la prioridad</b> ' + (sube ? '⬆️' : '⬇️') + '\n' +
@@ -569,7 +600,7 @@
         if (pausado(r)) v.pausa = ahora;
         // NO ACEPTADO: estaba en Verificación del cliente y ahora volvió a trabajo (sin pausa) o dice "No aceptado"
         var noAcept = /no acept/i.test(dv(r, 'u_pause_reason'));
-        if ((antes && antes.verif && !enVerif(r) && !aceptado(r) && (!pausado(r) || noAcept)) || (noAcept && !(antes && antes.noAcept))) {
+        if (!ausente && ((antes && antes.verif && !enVerif(r) && !aceptado(r) && (!pausado(r) || noAcept)) || (noAcept && antes && !antes.noAcept))) {
           unaVezAlGrupo('rech:' + id + ':' + Math.floor(ahora / 1800000),
             '❌ <b>El cliente no aceptó el caso</b>\n<i>Vuelve a estar en curso</i>' + cuerpo(r, '👷 ' + esc(dv(r, 'assigned_to') || 'sin asignar')));
         }
@@ -579,7 +610,7 @@
       GM_setValue('ctl_visto', nuevoVisto);
 
       // 0) casos que pasaron a "Aceptado por el cliente" (Lineales y GPON). La primera vez solo se anotan los que ya estaban.
-      var acept = GM_getValue('acept_vistos', {}), primeraVez = !GM_getValue('acept_iniciado', false), aceptNuevo = {};
+      var acept = GM_getValue('acept_vistos', {}), primeraVez = !GM_getValue('acept_iniciado', false) || ausente, aceptNuevo = {};
       casos.filter(aceptado).forEach(function (r) {
         var id = vl(r, 'sys_id');
         aceptNuevo[id] = acept[id] || ahora;
@@ -696,8 +727,11 @@
     if (Date.now() - p.cuando > 10 * 60 * 1000) { GM_setValue('tg_pend', pend.slice(1)); botLog('descarto ' + p.cmd + ' viejo'); return; }
     if (atenderPendientes.ocupado) return;
     atenderPendientes.ocupado = true;
+    var latido = null;
     var listo = function (que) {
       atenderPendientes.ocupado = false;
+      if (latido) clearInterval(latido);
+      try { localStorage.removeItem('mobisond_ocupado'); } catch (e) {}
       GM_setValue('tg_pend', GM_getValue('tg_pend', []).filter(function (x) { return x.id !== p.id; }));
       botLog(p.cmd + ': ' + que);
       if (p.sb) sbRpc('bot_listo', {p_id: p.id}).catch(function () {});   // Supabase: avisar que ya se contestó
@@ -715,6 +749,9 @@
       }, function (e) { listo('no pude verificar al usuario: ' + e); });
       return;
     }
+    // pedido largo en curso: Supabase no se lo da a otra PC y el refrescador no recarga la pestaña en el medio
+    try { localStorage.setItem('mobisond_ocupado', String(Date.now())); } catch (e) {}
+    if (p.sb) latido = setInterval(function () { sbRpc('bot_sigo', {p_id: p.id, p_pc: pcId()}).catch(function () {}); }, 20000);
     if (p.cmd === '/caso') {
       textoCaso((p.texto || '').trim().split(/\s+/)[1]).then(function (t) {
         unaVezAlGrupo('cmd:' + p.id, t, p.msg, p.chat, function (ok) { listo(ok ? 'contestado' : 'no se pudo contestar'); });
@@ -952,6 +989,7 @@
   var leyendo = false;
   function comandos() {
     if (!hayGrupo() || !soyLider()) return;
+    reintentarAvisos();
     atenderPendientes();
     if (GM_getValue('tg_cmds', 0) < 11) {     // menú de comandos del bot (aparece al escribir "/" en el grupo)
       tg('setMyCommands', {commands: [{command: 'bandeja', description: 'Casos abiertos de Lineales y GPON'},
