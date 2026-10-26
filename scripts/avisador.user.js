@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Mobisond · Avisador
 // @namespace    mobisond
-// @version      3.0
+// @version      3.1
 // @description  Avisa los casos nuevos (celular, campana y grupo de Telegram), los Lineales sin notas hace 25 min, los SLA y los aceptados; botón de resumen de turno y comandos del bot.
 // @match        https://*.service-now.com/*
 // @grant        GM_xmlhttpRequest
@@ -1500,7 +1500,7 @@
             if (n && dentro(d) && d.getTime() <= Date.now()) venc[n] = 1;
           });
           var calc = function (proy) {
-            var r = {ing: 0, res: 0, venc: [], vencBaja: [], emerg: 0, clientes: [], porDia: {}, cerr: 0, cerrVenc: 0};
+            var r = {ing: 0, res: 0, venc: [], vencBaja: [], vencCli: [], emerg: 0, clientes: [], porDia: {}, cerr: 0, cerrVenc: 0};
             casos.forEach(function (c) {
               if (proyecto(c) !== proy) return;
               var n = dv(c, 'number'), ab = deUtc(val(c, 'opened_at'));
@@ -1512,6 +1512,7 @@
               }
               if (prim[n] && dentro(prim[n].d)) r.res++;
               if (venc[n]) (prioBaja(c) ? r.vencBaja : r.venc).push(dv(c, 'parent') || n);   // baja: aparte, no afecta el % en término
+              if (venc[n] && !prioBaja(c) && proy === 'lineales') r.vencCli.push(cliente(c) || 'otro');
               // en término: de los CERRADOS en el período (sin cancelados ni prioridad baja), cuántos sin SLA neto vencido
               if (val(c, 'active') === 'false' && dentro(deUtc(val(c, 'closed_at'))) && !prioBaja(c)) {
                 r.cerr++;
@@ -1549,6 +1550,10 @@
       var x = top.split('-'), l = new Date(+x[0], x[1] - 1, +x[2]), d = new Date(l.getTime()); d.setDate(d.getDate() + 6);
       return 'Semana más cargada: ' + dm(l) + ' al ' + dm(d) + ' (' + porSem[top] + (porSem[top] === 1 ? ' caso)' : ' casos)');
     }
+    function vencCliTxt(r) {             // "Vencidos por cliente: 2 CLR · 1 EDN" (solo Lineales, sin prioridad baja)
+      return r.vencCli && r.vencCli.length ? ['Vencidos por cliente: ' + esc(contar(r.vencCli).sort(function (a, b) { return b[1] - a[1]; })
+                                                 .map(function (p) { return p[1] + ' ' + p[0]; }).join(' · '))] : [];
+    }
     function porCliente(r) {
       return r.clientes.length ? 'Por cliente: ' + esc(contar(r.clientes).sort(function (a, b) { return b[1] - a[1]; })
                                                    .map(function (p) { return p[1] + ' ' + p[0]; }).join(' · ')) : null;
@@ -1570,7 +1575,7 @@
         var L = d.L, G = d.G, hoy0 = new Date(); hoy0.setHours(0, 0, 0, 0);
         var encurso = domingo >= hoy0;           // semana en curso: va del lunes hasta hoy
         var out = ['📅 <b>Resumen semanal</b> · ' + dm(lunes) + ' al ' + (encurso ? dm(hoy0) + ' <i>(semana en curso)</i>' : dm(domingo)), '', '🔧 <b>Lineales</b>', '',
-                   'Ingresados: ' + L.ing, 'Resueltos: ' + L.res, 'Vencidos: ' + esc(vencTxtP(L))].concat(vencBajaTxt(L), [cumplTxt(L)]);
+                   'Ingresados: ' + L.ing, 'Resueltos: ' + L.res, 'Vencidos: ' + esc(vencTxtP(L))].concat(vencCliTxt(L), vencBajaTxt(L), [cumplTxt(L)]);
         if (porCliente(L)) out.push(porCliente(L));
         if (diaCargado(L)) out.push(diaCargado(L));
         out = out.concat(SEP, ['📡 <b>GPON</b>', '', 'Ingresados: ' + G.ing, 'Resueltos: ' + G.res, 'Vencidos: ' + esc(vencTxtP(G))], vencBajaTxt(G), [cumplTxt(G),
@@ -1599,7 +1604,7 @@
         };
         var bloque = function (p, pa, gpon) {
           var o = ['Ingresados: ' + p.ing + cmp(p.ing, pa && pa.ing), 'Resueltos: ' + p.res, 'Vencidos: ' + esc(vencTxtP(p))]
-                  .concat(vencBajaTxt(p), [cumplTxt(p) + cmp(p.pct, pa && pa.pct, true)]);
+                  .concat(vencCliTxt(p), vencBajaTxt(p), [cumplTxt(p) + cmp(p.pct, pa && pa.pct, true)]);
           if (gpon) o.push('Emergencias (P1/P2): ' + p.emerg);
           else if (porCliente(p)) o.push(porCliente(p));
           if (semanaCargada(p)) o.push(semanaCargada(p));
