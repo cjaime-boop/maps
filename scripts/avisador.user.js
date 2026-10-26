@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Mobisond · Avisador
 // @namespace    mobisond
-// @version      2.96
+// @version      2.97
 // @description  Avisa los casos nuevos (celular, campana y grupo de Telegram), los Lineales sin notas hace 25 min, los SLA y los aceptados; botón de resumen de turno y comandos del bot.
 // @match        https://*.service-now.com/*
 // @grant        GM_xmlhttpRequest
@@ -512,7 +512,7 @@
         var nuestra = ns.filter(function (n) { return esNuestro(n.quien); })[0];
         var ubic = null;
         ns.some(function (n) { var c = coordsDeNota(n.txt || ''); if (c) ubic = {lat: c[0], lon: c[1], fuente: c[2], t: n.t}; return !!c; });
-        if (!ubic) { var lc = latLonCaso(r); if (lc) ubic = {lat: lc[0], lon: lc[1], fuente: 'caso'}; }
+        var lc = ubic ? null : latLonCaso(r);       // el campo del caso va aparte: QGIS lo usa como último recurso
         var sla = slaDe[vl(r, 'sys_id')] || slaDe[vl(r, 'parent')];
         var estado = enCamino(r) ? 'camino' : !enCurso(r) ? 'sin' : aceptado(r) ? 'aceptado' :
                      pausado(r) && /verificaci/i.test(dv(r, 'u_pause_reason')) ? 'verif' : pausado(r) ? 'pausado' : 'curso';
@@ -524,7 +524,7 @@
           sla: sla ? {vence: utc(vl(sla, 'planned_end_time')) || null, vencido: vl(sla, 'has_breached') === 'true',
                       pausado: /paus/i.test(vl(sla, 'stage') + dv(sla, 'stage')), resta: dv(sla, 'business_time_left')} : null,
           nota: nuestra ? {t: nuestra.t, quien: nuestra.quien, txt: (nuestra.txt || '').slice(0, 160)} : null,
-          ubic: ubic
+          ubic: ubic, latlon_caso: lc ? {lat: lc[0], lon: lc[1], fuente: 'caso'} : null
         };
       });
       return sbRpc('bot_casos_abiertos', {p_pc: pcId(), p_casos: lista});
