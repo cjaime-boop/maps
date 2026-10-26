@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Mobisond · Avisador
 // @namespace    mobisond
-// @version      2.79
+// @version      2.80
 // @description  Avisa los casos nuevos (celular, campana y grupo de Telegram), los Lineales sin notas hace 25 min, los SLA y los aceptados; botón de resumen de turno y comandos del bot.
 // @match        https://*.service-now.com/*
 // @grant        GM_xmlhttpRequest
@@ -1015,7 +1015,7 @@
     }
 
     function calcular(casos, venc, proy, vh) {
-      var r = {resueltosDet: [], ingresados: 0, resueltos: 0, acumulados: 0, verificacion: 0, pausas: [], sinAtender: 0, claroSin: 0,
+      var r = {resueltosDet: [], ingresados: 0, resueltos: 0, acumulados: 0, verificacion: 0, pausas: [], sinAtender: 0, claroSin: 0, sinNoche: 0,
                enMano: [], vencidos: 0, vencidosWO: [], emergencia: false};
       casos.forEach(function (c) {
         if (proyecto(c) !== proy) return;
@@ -1043,10 +1043,21 @@
         if (pausa && VERIFICACION.test(pausa)) r.verificacion++;
         else if (pausa) r.pausas.push(pausa);
         else if (/work in progress|en curso/i.test(estado) || enCamino(c)) r.enMano.push(cliente(c));   // aceptado / en camino = en mano
-        else { r.sinAtender++; if (cliente(c) === 'CLR') r.claroSin++; }
+        else {
+          r.sinAtender++;
+          if (cliente(c) === 'CLR') r.claroSin++;
+          if (fueraDeVentana(val(c, 'opened_at'))) r.sinNoche++;   // GPON: los moderados se trabajan de 7 a 19
+        }
       });
       if (!venc) r.vencidos = '?';
       return r;
+    }
+
+    // ingresó después de las 19 (o antes de las 7): fuera de la ventana de trabajo de GPON
+    function fueraDeVentana(utc) {
+      if (!utc) return false;
+      var h = new Date(utc.replace(' ', 'T') + 'Z').getHours();
+      return h >= 19 || h < 7;
     }
 
     // opened_at / closed_at vienen en UTC ("2026-10-24 13:05:00"); se comparan con el día de hoy en la hora de la PC
@@ -1081,7 +1092,7 @@
         // acumulados, verificación, pausados, sin atender y en mano son "cómo está la bandeja ahora":
         // de un día anterior no se pueden saber, quedan con —
         [L, G].forEach(function (r) {
-          r.acumulados = r.verificacion = r.sinAtender = r.claroSin = '—';
+          r.acumulados = r.verificacion = r.sinAtender = r.claroSin = '—'; r.sinNoche = 0;
           r.pausas = []; r.pausasTxt = '—'; r.enMano = null;
         });
       }
@@ -1107,7 +1118,7 @@
       contar(G.pausas).forEach(function (p) { t.push('* ' + (p[1] > 1 ? p[1] + ' ' : '') + p[0]); });
       t.push('');
       t.push('Casos vencidos: ' + vencTxt(G));
-      t.push('Casos sin atender: ' + G.sinAtender);
+      t.push('Casos sin atender: ' + G.sinAtender + (G.sinNoche ? ' (' + G.sinNoche + ' post 19:00 hs)' : ''));
       t.push('Alguna emergencia: ' + (G.emergencia ? 'sí' : 'no'));
       t.push('Casos en mano: ' + enManoTxt(G.enMano, false));
       return {dia: new Date(DIA.getTime()), hoy: esDiaHoy(), texto: t.join('\n'), sinSla: !venc, sinVerif: !vh,
