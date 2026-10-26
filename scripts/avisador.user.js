@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Mobisond · Avisador
 // @namespace    mobisond
-// @version      2.90
+// @version      2.91
 // @description  Avisa los casos nuevos (celular, campana y grupo de Telegram), los Lineales sin notas hace 25 min, los SLA y los aceptados; botón de resumen de turno y comandos del bot.
 // @match        https://*.service-now.com/*
 // @grant        GM_xmlhttpRequest
@@ -474,6 +474,7 @@
       });
       GM_setValue('prio_vistos', priosNuevo);
       GM_setValue('prio_iniciado', true);
+      var todos = casos;                 // los avisos de SLA miran todos los abiertos, no solo los "en curso"
       casos = casos.filter(enCurso);
       // pausas y entrada a "en curso" vistas desde esta PC (para empezar a contar los 25 min desde que se retoma)
       var visto = GM_getValue('ctl_visto', {}), nuevoVisto = {};
@@ -491,7 +492,6 @@
         nuevoVisto[id] = v;
       });
       GM_setValue('ctl_visto', nuevoVisto);
-      if (!casos.length) return;
 
       // 0) casos que pasaron a "Aceptado por el cliente" (Lineales y GPON). La primera vez solo se anotan los que ya estaban.
       var acept = GM_getValue('acept_vistos', {}), primeraVez = !GM_getValue('acept_iniciado', false), aceptNuevo = {};
@@ -525,14 +525,17 @@
         });
       });
 
-      // 2) SLA a 1 hora de vencer (Lineales y GPON)
+      // 2) SLA neto a 1 hora de vencer y vencido (Lineales y GPON): cualquier estado del caso, solo P1 a P3, solo con el SLA corriendo
+      var p123 = function (r) { return /^[123]$/.test(vl(r, 'priority')) || /^[123]\b/.test(dv(r, 'priority')); };
       var porId = {};
-      casos.forEach(function (r) { porId[vl(r, 'sys_id')] = r; if (vl(r, 'parent')) porId[vl(r, 'parent')] = r; });
+      todos.filter(p123).forEach(function (r) { porId[vl(r, 'sys_id')] = r; if (vl(r, 'parent')) porId[vl(r, 'parent')] = r; });
+      if (!Object.keys(porId).length) return;
       api('task_sla', 'active=true^taskIN' + Object.keys(porId).join(','), 'sys_id,task,sla,stage,has_breached,planned_end_time,original_breach_time')
         .then(function (slas) {
           slas.forEach(function (s) {
             if (!/neto/i.test(dv(s, 'sla'))) return;                         // solo el SLA NETO
             var r = porId[vl(s, 'task')]; if (!r) return;
+            if (/paus/i.test(vl(s, 'stage') + dv(s, 'stage'))) return;       // SLA pausado: no avisa
             // se venció: aviso una vez (solo si se venció hace menos de 30 min, para no avisar de golpe los viejos)
             if (vl(s, 'has_breached') === 'true') {
               var cuando = utc(vl(s, 'original_breach_time') || vl(s, 'planned_end_time'));
@@ -541,7 +544,6 @@
               }
               return;
             }
-            if (/paus/i.test(vl(s, 'stage') + dv(s, 'stage'))) return;
             var vence = utc(vl(s, 'planned_end_time')), falta = (vence - ahora) / 60000;
             if (falta > 0 && falta <= SLA_MIN) {
               unaVezAlGrupo('sla:' + vl(s, 'sys_id'), '⚠️ <b>SLA neto vence en ' + Math.round(falta) + ' min</b> · ' + hhmm(vence) + cuerpo(r));
