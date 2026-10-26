@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Mobisond · Avisador
 // @namespace    mobisond
-// @version      2.88
+// @version      2.89
 // @description  Avisa los casos nuevos (celular, campana y grupo de Telegram), los Lineales sin notas hace 25 min, los SLA y los aceptados; botón de resumen de turno y comandos del bot.
 // @match        https://*.service-now.com/*
 // @grant        GM_xmlhttpRequest
@@ -707,7 +707,7 @@
   }
   // ---- /caso de un caso cerrado: tiempos, si cumplió el SLA neto y datos del cierre
   var SEM_C = ['dom', 'lun', 'mar', 'mié', 'jue', 'vie', 'sáb'];
-  function fechaC(ms) { var d = new Date(ms); return SEM_C[d.getDay()] + ' ' + ('0' + d.getDate()).slice(-2) + '/' + ('0' + (d.getMonth() + 1)).slice(-2) + ' ' + hhmm(ms); }
+  function fechaC(ms) { var d = new Date(ms); return SEM_C[d.getDay()] + ' ' + ('0' + d.getDate()).slice(-2) + '/' + ('0' + (d.getMonth() + 1)).slice(-2) + '/' + d.getFullYear() + ' ' + hhmm(ms); }
   function msDur(v) { return v ? utc(v) : 0; }            // duración de SN: "1970-01-02 03:04:00" = 1 d 3 h 4 min
   // formulario de cierre que el dispatcher pega en las notas de la WO ("CAUSA DE LA AFECTACION: …", "ID de CIERRE: …", etc.)
   function formularioCierre(regs) {
