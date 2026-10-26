@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Mobisond · Avisador
 // @namespace    mobisond
-// @version      2.89
+// @version      2.90
 // @description  Avisa los casos nuevos (celular, campana y grupo de Telegram), los Lineales sin notas hace 25 min, los SLA y los aceptados; botón de resumen de turno y comandos del bot.
 // @match        https://*.service-now.com/*
 // @grant        GM_xmlhttpRequest
@@ -458,6 +458,22 @@
     var q = 'active=true^assignment_group.nameSTARTSWITH' + GRUPOS.lineales + '^ORassignment_group.nameSTARTSWITH' + GRUPOS.gpon;
     var campos = 'sys_id,number,parent,state,substate,u_pause_reason,priority,assignment_group,assigned_to,cmdb_ci,short_description,work_start';
     api('wm_task', q, campos).then(function (casos) {
+      // CAMBIO DE PRIORIDAD (todos los abiertos, también los que todavía no están en curso). La primera vez solo se anotan.
+      var prios = GM_getValue('prio_vistos', {}), prioIni = GM_getValue('prio_iniciado', false), priosNuevo = {};
+      casos.forEach(function (r) {
+        var id = vl(r, 'sys_id'), p = vl(r, 'priority'), txt = dv(r, 'priority');
+        priosNuevo[id] = {v: p, t: txt};
+        var antes = prios[id];
+        if (prioIni && antes && antes.v && p && antes.v !== p) {
+          var sube = +p < +antes.v;
+          unaVezAlGrupo('prio:' + id + ':' + antes.v + '>' + p,
+            '🔀 <b>Cambió la prioridad</b> ' + (sube ? '⬆️' : '⬇️') + '\n' +
+            colorPrio(antes.t || antes.v) + ' ' + esc(antes.t || antes.v) + ' → ' + colorPrio(txt || p) + ' ' + esc(txt || p) +
+            (/^1/.test(txt || p) ? ' 🔥' : '') + cuerpo(r));
+        }
+      });
+      GM_setValue('prio_vistos', priosNuevo);
+      GM_setValue('prio_iniciado', true);
       casos = casos.filter(enCurso);
       // pausas y entrada a "en curso" vistas desde esta PC (para empezar a contar los 25 min desde que se retoma)
       var visto = GM_getValue('ctl_visto', {}), nuevoVisto = {};
