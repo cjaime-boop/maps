@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Mobisond · Avisador
 // @namespace    mobisond
-// @version      2.77
+// @version      2.78
 // @description  Avisa los casos nuevos (celular, campana y grupo de Telegram), los Lineales sin notas hace 25 min, los SLA y los aceptados; botón de resumen de turno y comandos del bot.
 // @match        https://*.service-now.com/*
 // @grant        GM_xmlhttpRequest
@@ -859,6 +859,8 @@
     function val(reg, campo) { var v = reg[campo]; return v ? (v.value || '') : ''; }
     // Consultas con muchos sys_id: se parten en tandas (una URL con cientos de ids es demasiado larga y ServiceNow
     // la rechaza). armar(ids) devuelve la consulta de cada tanda; se juntan todos los resultados.
+    // prioridad baja (4 - Baja / Low, o 5): sus vencidos no cuentan en el contador
+    function prioBaja(c) { return /^[45]$/.test(val(c, 'priority')) || /^[45]\b|baja|low|planning/i.test(dv(c, 'priority')); }
     function apiIN(tabla, ids, armar, campos, tam) {
       tam = tam || 80;
       var tandas = [];
@@ -1028,7 +1030,7 @@
           r.resueltos++;
           r.resueltosDet.push((dv(c, 'parent') || n) + (vh && typeof vh[n] === 'string' ? ' (' + vh[n] + ')' : ' (cerrado hoy)'));
         }
-        if (venc && venc[n]) {
+        if (venc && venc[n] && !prioBaja(c)) {      // los de prioridad baja no cuentan como vencidos
           r.vencidos++;
           var wo = dv(c, 'parent') || n.replace(/^WOT/i, 'WO');
           if (r.vencidosWO.indexOf(wo) < 0) r.vencidosWO.push(wo);
@@ -1207,7 +1209,7 @@
             if (n && dentro(d) && d.getTime() <= Date.now()) venc[n] = 1;
           });
           var calc = function (proy) {
-            var r = {ing: 0, res: 0, venc: [], emerg: 0, clientes: [], porDia: {}};
+            var r = {ing: 0, res: 0, venc: [], vencBaja: [], emerg: 0, clientes: [], porDia: {}};
             casos.forEach(function (c) {
               if (proyecto(c) !== proy) return;
               var n = dv(c, 'number'), ab = deUtc(val(c, 'opened_at'));
@@ -1218,7 +1220,7 @@
                 var k = iso(ab); r.porDia[k] = (r.porDia[k] || 0) + 1;
               }
               if (prim[n] && dentro(prim[n].d)) r.res++;
-              if (venc[n]) r.venc.push(dv(c, 'parent') || n);
+              if (venc[n]) (prioBaja(c) ? r.vencBaja : r.venc).push(dv(c, 'parent') || n);   // baja: aparte, no afecta el % en término
             });
             r.pct = r.res ? Math.round((r.res - Math.min(r.venc.length, r.res)) * 100 / r.res) : null;
             return r;
@@ -1232,6 +1234,7 @@
     }
     // textos comunes
     function vencTxtP(r) { return r.venc.length ? r.venc.length + ' / ' + r.venc.join(' / ') : '0'; }
+    function vencBajaTxt(r) { return r.vencBaja.length ? ['Vencidos (prioridad baja): ' + esc(r.vencBaja.length + ' / ' + r.vencBaja.join(' / '))] : []; }
     function cumplTxt(r) {
       if (r.pct === null) return 'En término: — (sin resueltos)';
       var v = Math.min(r.venc.length, r.res);
@@ -1272,10 +1275,10 @@
         var L = d.L, G = d.G, hoy0 = new Date(); hoy0.setHours(0, 0, 0, 0);
         var encurso = domingo >= hoy0;           // semana en curso: va del lunes hasta hoy
         var out = ['📅 <b>Resumen semanal</b> · ' + dm(lunes) + ' al ' + (encurso ? dm(hoy0) + ' <i>(semana en curso)</i>' : dm(domingo)), '', '🔧 <b>Lineales</b>', '',
-                   'Ingresados: ' + L.ing, 'Resueltos: ' + L.res, 'Vencidos: ' + esc(vencTxtP(L)), cumplTxt(L)];
+                   'Ingresados: ' + L.ing, 'Resueltos: ' + L.res, 'Vencidos: ' + esc(vencTxtP(L))].concat(vencBajaTxt(L), [cumplTxt(L)]);
         if (porCliente(L)) out.push(porCliente(L));
         if (diaCargado(L)) out.push(diaCargado(L));
-        out = out.concat(SEP, ['📡 <b>GPON</b>', '', 'Ingresados: ' + G.ing, 'Resueltos: ' + G.res, 'Vencidos: ' + esc(vencTxtP(G)), cumplTxt(G),
+        out = out.concat(SEP, ['📡 <b>GPON</b>', '', 'Ingresados: ' + G.ing, 'Resueltos: ' + G.res, 'Vencidos: ' + esc(vencTxtP(G))], vencBajaTxt(G), [cumplTxt(G),
                                'Emergencias (P1/P2): ' + G.emerg]);
         if (diaCargado(G)) out.push(diaCargado(G));
         var cis = d.cis.slice(0, 5);
@@ -1300,8 +1303,8 @@
           return ' <i>(' + (dif > 0 ? '▲ ' + dif : dif < 0 ? '▼ ' + (-dif) : '=') + (pts && dif ? ' pts' : '') + ' vs ' + mesAnt + ')</i>';
         };
         var bloque = function (p, pa, gpon) {
-          var o = ['Ingresados: ' + p.ing + cmp(p.ing, pa && pa.ing), 'Resueltos: ' + p.res, 'Vencidos: ' + esc(vencTxtP(p)),
-                   cumplTxt(p) + cmp(p.pct, pa && pa.pct, true)];
+          var o = ['Ingresados: ' + p.ing + cmp(p.ing, pa && pa.ing), 'Resueltos: ' + p.res, 'Vencidos: ' + esc(vencTxtP(p))]
+                  .concat(vencBajaTxt(p), [cumplTxt(p) + cmp(p.pct, pa && pa.pct, true)]);
           if (gpon) o.push('Emergencias (P1/P2): ' + p.emerg);
           else if (porCliente(p)) o.push(porCliente(p));
           if (semanaCargada(p)) o.push(semanaCargada(p));
