@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Mobisond · Avisador
 // @namespace    mobisond
-// @version      2.98
+// @version      2.99
 // @description  Avisa los casos nuevos (celular, campana y grupo de Telegram), los Lineales sin notas hace 25 min, los SLA y los aceptados; botón de resumen de turno y comandos del bot.
 // @match        https://*.service-now.com/*
 // @grant        GM_xmlhttpRequest
@@ -1491,16 +1491,17 @@
         var slas = ids.length ? apiIN('task_sla', ids, function (t) { return 'taskIN' + t.join(',') + '^has_breached=true'; }, 'task,sla,stage,planned_end_time,original_breach_time')
           .catch(function () { return null; }) : Promise.resolve([]);
         return Promise.all([ids.length ? primerasVerif(casos) : Promise.resolve({}), slas]).then(function (res) {
-          var prim = res[0] || {}, venc = {};
+          var prim = res[0] || {}, venc = {}, vencAlguna = {};
           (res[1] || []).forEach(function (sv) {
             if (!/neto/i.test(dv(sv, 'sla'))) return;
             if (/cancel/i.test(val(sv, 'stage') + ' ' + dv(sv, 'stage'))) return;   // SLA cancelado: no cuenta
             var d = deUtc(val(sv, 'original_breach_time') || val(sv, 'planned_end_time'));
             var n = porId[val(sv, 'task')] || dePadre[val(sv, 'task')];
+            if (n) vencAlguna[n] = 1;                                      // se venció alguna vez (para "en término")
             if (n && dentro(d) && d.getTime() <= Date.now()) venc[n] = 1;
           });
           var calc = function (proy) {
-            var r = {ing: 0, res: 0, venc: [], vencBaja: [], emerg: 0, clientes: [], porDia: {}};
+            var r = {ing: 0, res: 0, venc: [], vencBaja: [], emerg: 0, clientes: [], porDia: {}, cerr: 0, cerrVenc: 0};
             casos.forEach(function (c) {
               if (proyecto(c) !== proy) return;
               var n = dv(c, 'number'), ab = deUtc(val(c, 'opened_at'));
@@ -1512,8 +1513,13 @@
               }
               if (prim[n] && dentro(prim[n].d)) r.res++;
               if (venc[n]) (prioBaja(c) ? r.vencBaja : r.venc).push(dv(c, 'parent') || n);   // baja: aparte, no afecta el % en término
+              // en término: de los CERRADOS en el período (sin cancelados ni prioridad baja), cuántos sin SLA neto vencido
+              if (val(c, 'active') === 'false' && dentro(deUtc(val(c, 'closed_at'))) && !prioBaja(c)) {
+                r.cerr++;
+                if (vencAlguna[n]) r.cerrVenc++;
+              }
             });
-            r.pct = r.res ? Math.round((r.res - Math.min(r.venc.length, r.res)) * 100 / r.res) : null;
+            r.pct = r.cerr ? Math.round((r.cerr - r.cerrVenc) * 100 / r.cerr) : null;
             return r;
           };
           var cis = contar(casos.filter(function (c) { return dentro(deUtc(val(c, 'opened_at'))) && dv(c, 'cmdb_ci'); })
@@ -1527,9 +1533,8 @@
     function vencTxtP(r) { return r.venc.length ? r.venc.length + ' / ' + r.venc.join(' / ') : '0'; }
     function vencBajaTxt(r) { return r.vencBaja.length ? ['Vencidos (prioridad baja): ' + esc(r.vencBaja.length + ' / ' + r.vencBaja.join(' / '))] : []; }
     function cumplTxt(r) {
-      if (r.pct === null) return 'En término: — (sin resueltos)';
-      var v = Math.min(r.venc.length, r.res);
-      return 'En término: ' + r.pct + '% (' + v + (v === 1 ? ' vencido' : ' vencidos') + ' de ' + r.res + ' resueltos)';
+      if (r.pct === null) return 'En término: — (sin cerrados)';
+      return 'En término: ' + r.pct + '% (' + (r.cerr - r.cerrVenc) + ' de ' + r.cerr + (r.cerr === 1 ? ' cerrado)' : ' cerrados)');
     }
     function diaCargado(r) {
       var top = Object.keys(r.porDia).sort(function (a, b) { return r.porDia[b] - r.porDia[a]; })[0];
