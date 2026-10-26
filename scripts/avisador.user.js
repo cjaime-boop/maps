@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Mobisond · Avisador
 // @namespace    mobisond
-// @version      2.93
+// @version      2.94
 // @description  Avisa los casos nuevos (celular, campana y grupo de Telegram), los Lineales sin notas hace 25 min, los SLA y los aceptados; botón de resumen de turno y comandos del bot.
 // @match        https://*.service-now.com/*
 // @grant        GM_xmlhttpRequest
@@ -401,7 +401,11 @@
   // todas las entradas de un campo de notas: "2026-10-24 05:12:33 - Juan Pérez (Notas de trabajo)" / "(Additional comments)"
   function notasDelTexto(t) {
     var re = /(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}|\d{2}[\/-]\d{2}[\/-]\d{4} \d{2}:\d{2}:\d{2}) - (.+?) \((?:Notas de trabajo|Work notes|Comentarios adicionales|Additional comments|Comentarios)\)/gi, m, out = [];
-    while ((m = re.exec(t || ''))) out.push({t: fechaJournal(m[1]), quien: m[2].trim()});
+    while ((m = re.exec(t || ''))) out.push({t: fechaJournal(m[1]), quien: m[2].trim(), st: m.index, ini: re.lastIndex});
+    out.forEach(function (n, i) {      // el texto de cada nota: desde su encabezado hasta el siguiente
+      n.txt = (t || '').slice(n.ini, i + 1 < out.length ? out[i + 1].st : undefined)
+        .replace(/\[\/?code\]|<[^>]+>/g, ' ').replace(/&nbsp;/g, ' ').replace(/\s+/g, ' ').trim();
+    });
     return out;
   }
   // Última actividad de gente de Mobisond en la WO (padre): notas de trabajo, comentarios adicionales y fotos/archivos subidos.
@@ -450,14 +454,58 @@
     });
   }
 
+  // ---- Casos abiertos para el panel de QGIS: la PC que atiende el bot sube la bandeja a Supabase cada 2 min
+  function coordsDeNota(txt) {                 // [lat, lon, 'maps'|'coordenadas'] dentro de Argentina, o null
+    var arg = function (a, b) { return a < -21 && a > -56 && b < -53 && b > -74; }, m;
+    if ((m = /!3d(-?\d{1,2}\.\d+)!4d(-?\d{1,3}\.\d+)/.exec(txt)) && arg(+m[1], +m[2])) return [+m[1], +m[2], 'maps'];
+    var re = /(?:google\.[a-z.]+\/maps|maps\.google\.[a-z.]+)[^\s"']*?(?:[@=]|q=|ll=|query=)(-?\d{1,2}\.\d{3,})(?:,|%2C)\s*(-?\d{1,3}\.\d{3,})/i;
+    if ((m = re.exec(txt)) && arg(+m[1], +m[2])) return [+m[1], +m[2], 'maps'];
+    var re2 = /(-\d{2}\.\d{4,})\s*[,; ]\s*(-\d{2}\.\d{4,})/g;
+    while ((m = re2.exec(txt))) if (arg(+m[1], +m[2])) return [+m[1], +m[2], 'coordenadas'];
+    return null;
+  }
+  function subirBandeja(casos) {
+    var padres = [], ids = [];
+    casos.forEach(function (r) { ids.push(vl(r, 'sys_id')); if (vl(r, 'parent')) { ids.push(vl(r, 'parent')); if (padres.indexOf(vl(r, 'parent')) < 0) padres.push(vl(r, 'parent')); } });
+    Promise.all([
+      padres.length ? api('wm_order', 'sys_idIN' + padres.join(','), 'sys_id,work_notes,comments').catch(function () { return []; }) : [],
+      ids.length ? api('task_sla', 'active=true^taskIN' + ids.join(','), 'task,sla,stage,has_breached,planned_end_time,business_time_left').catch(function () { return []; }) : []
+    ]).then(function (res) {
+      var notasDe = {}, slaDe = {};
+      res[0].forEach(function (w) { notasDe[vl(w, 'sys_id')] = notasDelTexto(dv(w, 'work_notes') + '\n' + dv(w, 'comments')); });
+      res[1].forEach(function (x) { if (/neto/i.test(dv(x, 'sla')) && !/cancel/i.test(vl(x, 'stage'))) slaDe[vl(x, 'task')] = x; });
+      var lista = casos.map(function (r) {
+        var ns = (notasDe[vl(r, 'parent')] || []).slice().sort(function (a, b) { return b.t - a.t; });
+        var nuestra = ns.filter(function (n) { return esNuestro(n.quien); })[0];
+        var ubic = null;
+        ns.some(function (n) { var c = coordsDeNota(n.txt || ''); if (c) ubic = {lat: c[0], lon: c[1], fuente: c[2], t: n.t}; return !!c; });
+        var sla = slaDe[vl(r, 'sys_id')] || slaDe[vl(r, 'parent')];
+        var estado = enCamino(r) ? 'camino' : !enCurso(r) ? 'sin' : aceptado(r) ? 'aceptado' :
+                     pausado(r) && /verificaci/i.test(dv(r, 'u_pause_reason')) ? 'verif' : pausado(r) ? 'pausado' : 'curso';
+        return {
+          wo: woDe(r), wot: dv(r, 'number'), ci: dv(r, 'cmdb_ci'), proyecto: proyecto(r),
+          prio: vl(r, 'priority'), prio_txt: dv(r, 'priority'), estado: estado, estado_txt: dv(r, 'state'),
+          motivo: dv(r, 'u_pause_reason'), tecnico: dv(r, 'assigned_to'), abierto: utc(vl(r, 'opened_at')) || null,
+          link: linkCaso(r), descripcion: dv(r, 'short_description'),
+          sla: sla ? {vence: utc(vl(sla, 'planned_end_time')) || null, vencido: vl(sla, 'has_breached') === 'true',
+                      pausado: /paus/i.test(vl(sla, 'stage') + dv(sla, 'stage')), resta: dv(sla, 'business_time_left')} : null,
+          nota: nuestra ? {t: nuestra.t, quien: nuestra.quien, txt: (nuestra.txt || '').slice(0, 160)} : null,
+          ubic: ubic
+        };
+      });
+      return sbRpc('bot_casos_abiertos', {p_pc: pcId(), p_casos: lista});
+    }).catch(function (e) { console.log('[Mobisond] casos abiertos (QGIS): ' + (e && e.message)); });   // si la tabla no existe, no pasa nada
+  }
+
   function controles() {
     if (!hayGrupo() || !soyLider()) return;
     var ahora = Date.now();
     if (ahora - GM_getValue('ult_control', 0) < CADA_MS) return;      // la pestaña se recarga cada 30 s: se controla cada 2 min
     GM_setValue('ult_control', ahora);
     var q = 'active=true^assignment_group.nameSTARTSWITH' + GRUPOS.lineales + '^ORassignment_group.nameSTARTSWITH' + GRUPOS.gpon;
-    var campos = 'sys_id,number,parent,state,substate,u_pause_reason,priority,assignment_group,assigned_to,cmdb_ci,short_description,work_start';
+    var campos = 'sys_id,number,parent,state,substate,u_pause_reason,priority,assignment_group,assigned_to,cmdb_ci,short_description,work_start,opened_at';
     api('wm_task', q, campos).then(function (casos) {
+      subirBandeja(casos);
       // CAMBIO DE PRIORIDAD (todos los abiertos, también los que todavía no están en curso). La primera vez solo se anotan.
       var prios = GM_getValue('prio_vistos', {}), prioIni = GM_getValue('prio_iniciado', false), priosNuevo = {};
       casos.forEach(function (r) {
