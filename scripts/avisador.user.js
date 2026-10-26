@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Mobisond · Avisador
 // @namespace    mobisond
-// @version      3.5
+// @version      3.6
 // @description  Avisa los casos nuevos (celular, campana y grupo de Telegram), los Lineales sin notas hace 25 min, los SLA y los aceptados; botón de resumen de turno y comandos del bot.
 // @match        https://*.service-now.com/*
 // @grant        GM_xmlhttpRequest
@@ -160,7 +160,7 @@
     antecedentesGPON(f.id).then(function (extra) { unaVezAlGrupo(f.id, mensajeGrupo(f, false, extra || '')); });
   }
   // Manda al grupo una sola vez por "clave", aunque varias PCs lo detecten (Supabase decide quién lo manda).
-  function unaVezAlGrupo(clave, html, responderA, chatId, alTerminar, reintento) {   // chatId: para contestar por privado (si no, al grupo)
+  function unaVezAlGrupo(clave, html, responderA, chatId, alTerminar, reintento, primero) {   // chatId: para contestar por privado (si no, al grupo)
     if (!hayGrupo()) return;
     var gane = false;
     var datos = {chat_id: chatId || GM_getValue('tg_chat'), text: html, parse_mode: 'HTML', disable_web_page_preview: true};
@@ -178,7 +178,7 @@
           var n = (reintento || 0) + 1;
           if (n <= 3) {
             var cola = GM_getValue('tg_reintentos', []).filter(function (x) { return x.clave !== clave; });
-            cola.push({clave: clave, html: html, chat: datos.chat_id, n: n, cuando: Date.now() + 60000});
+            cola.push({clave: clave, html: html, chat: datos.chat_id, n: n, cuando: Date.now() + 60000, primero: primero || Date.now()});
             GM_setValue('tg_reintentos', cola.slice(-20));
           }
         }
@@ -199,10 +199,13 @@
   function reintentarAvisos() {
     var cola = GM_getValue('tg_reintentos', []);
     if (!cola.length) return;
-    var ahora = Date.now(), listos = cola.filter(function (x) { return x.cuando <= ahora; });
-    if (!listos.length) return;
-    GM_setValue('tg_reintentos', cola.filter(function (x) { return x.cuando > ahora && ahora - x.cuando < 20 * 60000; }));
-    listos.forEach(function (x) { botLog('reintento ' + x.n + ': ' + x.clave.slice(0, 30)); unaVezAlGrupo(x.clave, x.html, null, x.chat, null, x.n); });
+    // un aviso que no pudo salir en 5 minutos ya quedó viejo (el caso pudo cambiar): se descarta, no se manda tarde
+    var ahora = Date.now(), vigente = function (x) { return ahora - (x.primero || 0) < 5 * 60000; };
+    var listos = cola.filter(function (x) { return x.cuando <= ahora && vigente(x); });
+    var viejos = cola.filter(function (x) { return !vigente(x); });
+    GM_setValue('tg_reintentos', cola.filter(function (x) { return x.cuando > ahora && vigente(x); }));
+    viejos.forEach(function (x) { botLog('descarto aviso viejo: ' + x.clave.slice(0, 30)); });
+    listos.forEach(function (x) { botLog('reintento ' + x.n + ': ' + x.clave.slice(0, 30)); unaVezAlGrupo(x.clave, x.html, null, x.chat, null, x.n, x.primero); });
   }
   function alGrupo(f) { botLog('caso nuevo ' + f.numero); avisoCasoNuevo(f); }
   function configurarGrupo() {
