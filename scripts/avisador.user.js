@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Mobisond · Avisador
 // @namespace    mobisond
-// @version      2.84
+// @version      2.85
 // @description  Avisa los casos nuevos (celular, campana y grupo de Telegram), los Lineales sin notas hace 25 min, los SLA y los aceptados; botón de resumen de turno y comandos del bot.
 // @match        https://*.service-now.com/*
 // @grant        GM_xmlhttpRequest
@@ -669,7 +669,7 @@
       });
     });
   }
-  // ---- /caso de un caso cerrado: tiempos, si cumplió el SLA neto, datos del cierre y otros casos del mismo enlace
+  // ---- /caso de un caso cerrado: tiempos, si cumplió el SLA neto y datos del cierre
   var SEM_C = ['dom', 'lun', 'mar', 'mié', 'jue', 'vie', 'sáb'];
   function fechaC(ms) { var d = new Date(ms); return SEM_C[d.getDay()] + ' ' + ('0' + d.getDate()).slice(-2) + '/' + ('0' + (d.getMonth() + 1)).slice(-2) + ' ' + hhmm(ms); }
   function msDur(v) { return v ? utc(v) : 0; }            // duración de SN: "1970-01-02 03:04:00" = 1 d 3 h 4 min
@@ -710,16 +710,14 @@
     return {causa: causa, idc: idc, bt: bt, notas: notas};
   }
   function textoCerrado(r) {
-    var padre = vl(r, 'parent'), ci = vl(r, 'cmdb_ci');
+    var padre = vl(r, 'parent');
     var ids = [vl(r, 'sys_id')]; if (padre) ids.push(padre);
     return Promise.all([
       api('wm_task', 'sys_id=' + vl(r, 'sys_id'), '').then(function (x) { return x[0]; }).catch(function () { return null; }),
       padre ? api('wm_order', 'sys_id=' + padre, '').then(function (x) { return x[0]; }).catch(function () { return null; }) : null,
-      api('task_sla', 'taskIN' + ids.join(','), 'sla,stage,has_breached,start_time,end_time,planned_end_time,duration,pause_duration').catch(function () { return null; }),
-      ci ? api('wm_task', 'cmdb_ci=' + ci + '^opened_at>=javascript:gs.daysAgoStart(90)^sys_id!=' + vl(r, 'sys_id') + '^ORDERBYDESCopened_at', 'number,parent,opened_at,state')
-             .catch(function () { return null; }) : null
+      api('task_sla', 'taskIN' + ids.join(','), 'sla,stage,has_breached,start_time,end_time,planned_end_time,duration,pause_duration').catch(function () { return null; })
     ]).then(function (res) {
-      var wot = res[0] || r, wo = res[1], slas = res[2], otros = res[3];
+      var wot = res[0] || r, wo = res[1], slas = res[2];
       var prio = dv(r, 'priority'), color = /^1/.test(prio) ? '🔴' : /^2/.test(prio) ? '🟠' : /^3/.test(prio) ? '🟡' : '⚪';
       var cancel = /cancel/i.test(dv(r, 'state'));
       var out = ['🔎 <b>' + esc(woDe(r)) + '</b> · ' + (cancel ? '🚫 Cancelado' : '✅ Cerrado'), esc(dv(r, 'cmdb_ci') || 'sin CI')];
@@ -767,16 +765,6 @@
       var tareas = fc['TAREAS REALIZADAS'] || ((dc.notas.match(/[a-záéíóúñ]/gi) || []).length >= 10 ? dc.notas : '');   // close notes con "." no sirven
       if (tareas) { var nt = tareas.replace(/\s+/g, ' ').trim(); lineas.push('<i>"' + esc(nt.length > 180 ? nt.slice(0, 177) + '…' : nt) + '"</i>'); }
       if (lineas.length) out.push.apply(out, ['', '🛠️ <b>Cierre</b>'].concat(lineas));
-      // mismo enlace en 90 días (sin contar este caso ni sus hermanos)
-      if (otros && otros.length) {
-        var vistos = {}, lista = [];
-        otros.forEach(function (o) { var w = woDe(o); if (w !== woDe(r) && !vistos[w]) { vistos[w] = 1; lista.push(o); } });
-        if (lista.length) {
-          var u = lista[0], fu = utc(vl(u, 'opened_at'));
-          out.push('', '🔁 <b>Mismo enlace</b>', lista.length + (lista.length === 1 ? ' caso más' : ' casos más') + ' en 90 días · último ' + esc(woDe(u)) +
-                   (fu ? ' (' + fechaC(fu).slice(4, 9) + ')' : ''));
-        }
-      }
       out.push('', '🔗 <a href="' + esc(linkCaso(r)) + '">Abrir en ServiceNow</a>');
       return out.join('\n');
     });
