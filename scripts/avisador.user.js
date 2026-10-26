@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Mobisond · Avisador
 // @namespace    mobisond
-// @version      2.81
+// @version      2.82
 // @description  Avisa los casos nuevos (celular, campana y grupo de Telegram), los Lineales sin notas hace 25 min, los SLA y los aceptados; botón de resumen de turno y comandos del bot.
 // @match        https://*.service-now.com/*
 // @grant        GM_xmlhttpRequest
@@ -1356,7 +1356,7 @@
       if (r.sinSla) notas.push('No pude leer los SLA: "Casos vencidos" queda con ?');
       if (r.sinVerif) notas.push('No pude ver los pases a verificación: "resueltos" son los cerrados hoy');
       var titulo = r.hoy ? '📊 <b>Resumen del día</b>' : '📊 <b>Resumen del ' + ('0' + r.dia.getDate()).slice(-2) + '/' + ('0' + (r.dia.getMonth() + 1)).slice(-2) + '/' + r.dia.getFullYear() + '</b>\n<i>(acumulados, pausados y en mano no se pueden saber de días anteriores)</i>';
-      return titulo + '\n<i>Tocá el recuadro para copiarlo y pegalo en WhatsApp</i>\n\n' + t +
+      return titulo + '\n<i>Tocá el recuadro para copiarlo y pegalo en WhatsApp</i>\n⚠️ <b>Reporte creado por BOT, revisar antes de enviar</b>\n\n' + t +
              (notas.length ? '\n\n⚠️ <i>' + esc(notas.join(' · ')) + '</i>' : '');
     });
   }
