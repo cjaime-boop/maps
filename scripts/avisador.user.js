@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Mobisond · Avisador
 // @namespace    mobisond
-// @version      2.85
+// @version      2.86
 // @description  Avisa los casos nuevos (celular, campana y grupo de Telegram), los Lineales sin notas hace 25 min, los SLA y los aceptados; botón de resumen de turno y comandos del bot.
 // @match        https://*.service-now.com/*
 // @grant        GM_xmlhttpRequest
@@ -109,12 +109,47 @@
   }
   var DRAMA = ['Se terminó la paz 😩', 'Arriba, que hay laburo 💪', 'Nadie lo pidió, pero llegó 🙃', 'A ponerse las pilas ⚡',
                'Y justo cuando estaba todo tranquilo… 😬', 'Atención, atención 📢'];
-  function mensajeGrupo(f, prueba) {
+  function mensajeGrupo(f, prueba, extra) {
     var d = f.datos, prio = d.priority || '';
     var titulo = prueba ? '🧪 <b>Prueba de caso nuevo</b>'
                         : '🚨🚨 <b>¡Entró un caso!</b> 🚨🚨\n<i>' + DRAMA[Math.floor(Math.random() * DRAMA.length)] + '</i>';
     var lineaPrio = prio ? '\n\n' + colorPrio(prio) + ' <b>' + esc(prio) + '</b>' + (/^1/.test(prio) && !prueba ? ' 🔥' : '') : '';
-    return titulo + lineaPrio + bloqueCaso(f.numero, d.cmdb_ci, d.short_description, f.link);
+    return titulo + lineaPrio + bloqueCaso(f.numero, d.cmdb_ci, d.short_description, f.link, extra);
+  }
+  // GPON: si el CI del caso nuevo ya tuvo casos en los últimos 90 días, se agrega al aviso (con la causa del cierre)
+  function antecedentesGPON(id) {
+    var paso = api('wm_task', 'sys_id=' + id, 'sys_id,parent,cmdb_ci,assignment_group').then(function (rs) {
+      var r = rs[0];
+      if (!r || proyecto(r) !== 'GPON' || !vl(r, 'cmdb_ci')) return '';
+      return api('wm_task', 'cmdb_ci=' + vl(r, 'cmdb_ci') + '^opened_at>=javascript:gs.daysAgoStart(90)^sys_id!=' + id + '^ORDERBYDESCopened_at',
+                 'sys_id,number,parent,opened_at,state').then(function (otros) {
+        var vistos = {}, lista = [];
+        vistos[woDe(r)] = 1;
+        otros.forEach(function (o) {
+          if (/cancel/i.test(dv(o, 'state'))) return;           // los cancelados no cuentan
+          var w = woDe(o); if (vistos[w]) return; vistos[w] = 1; lista.push(o);
+        });
+        if (!lista.length) return '';
+        var padres = lista.slice(0, 3).map(function (o) { return vl(o, 'parent'); }).filter(Boolean);
+        var forms = padres.length ? api('wm_order', 'sys_idIN' + padres.join(','), 'sys_id,work_notes,comments').catch(function () { return []; }) : Promise.resolve([]);
+        return forms.then(function (wos) {
+          var porId = {}; wos.forEach(function (w) { porId[vl(w, 'sys_id')] = w; });
+          var lineas = lista.slice(0, 3).map(function (o) {
+            var t = utc(vl(o, 'opened_at')), d = new Date(t);
+            var fc = formularioCierre([porId[vl(o, 'parent')]]);
+            var causa = fc && fc['CAUSA DE LA AFECTACION'] ? fc['CAUSA DE LA AFECTACION'] : /cerrado|closed/i.test(dv(o, 'state')) ? 'sin formulario de cierre' : esc(dv(o, 'state'));
+            return '• ' + esc(woDe(o)) + ' · ' + ('0' + d.getDate()).slice(-2) + '/' + ('0' + (d.getMonth() + 1)).slice(-2) + ' · ' + esc(causa);
+          });
+          if (lista.length > 3) lineas.push('<i>… y ' + (lista.length - 3) + ' más</i>');
+          return '🔁 <b>CI con antecedentes</b> · ' + lista.length + (lista.length === 1 ? ' caso' : ' casos') + ' en 90 días\n' + lineas.join('\n') + '\n';
+        });
+      });
+    }).catch(function () { return ''; });
+    var limite = new Promise(function (ok) { setTimeout(function () { ok(''); }, 8000); });   // si tarda, el aviso sale igual
+    return Promise.race([paso, limite]);
+  }
+  function avisoCasoNuevo(f) {
+    antecedentesGPON(f.id).then(function (extra) { unaVezAlGrupo(f.id, mensajeGrupo(f, false, extra || '')); });
   }
   // Manda al grupo una sola vez por "clave", aunque varias PCs lo detecten (Supabase decide quién lo manda).
   function unaVezAlGrupo(clave, html, responderA, chatId, alTerminar) {   // chatId: para contestar por privado (si no, al grupo)
@@ -138,7 +173,7 @@
       mandar();
     }, function (e) { mandar('Supabase no respondió: ' + e.message); });
   }
-  function alGrupo(f) { botLog('caso nuevo ' + f.numero); unaVezAlGrupo(f.id, mensajeGrupo(f)); }
+  function alGrupo(f) { botLog('caso nuevo ' + f.numero); avisoCasoNuevo(f); }
   function configurarGrupo() {
     var tok = prompt('Grupo de Telegram\n\nPegá el token del bot (te lo da @BotFather, es algo como 123456:ABC-xyz).\n' +
                      'Dejalo vacío y Aceptar para desactivar el grupo.', GM_getValue('tg_token', ''));
@@ -917,7 +952,7 @@
         var f = {id: id, numero: woDe(r), link: linkCaso(r),
                  datos: {priority: dv(r, 'priority'), cmdb_ci: dv(r, 'cmdb_ci'), short_description: dv(r, 'short_description')}};
         botLog('caso nuevo (por detrás) ' + f.numero);
-        unaVezAlGrupo(id, mensajeGrupo(f));
+        avisoCasoNuevo(f);
       });
       GM_setValue('nuevos_avisados', avisados);
     }, function (e) { console.log('[Mobisond] casos por detrás: ' + e.message); });
