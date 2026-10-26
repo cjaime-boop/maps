@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Mobisond · Avisador
 // @namespace    mobisond
-// @version      2.94
+// @version      2.95
 // @description  Avisa los casos nuevos (celular, campana y grupo de Telegram), los Lineales sin notas hace 25 min, los SLA y los aceptados; botón de resumen de turno y comandos del bot.
 // @match        https://*.service-now.com/*
 // @grant        GM_xmlhttpRequest
@@ -455,14 +455,16 @@
   }
 
   // ---- Casos abiertos para el panel de QGIS: la PC que atiende el bot sube la bandeja a Supabase cada 2 min
-  function coordsDeNota(txt) {                 // [lat, lon, 'maps'|'coordenadas'] dentro de Argentina, o null
-    var arg = function (a, b) { return a < -21 && a > -56 && b < -53 && b > -74; }, m;
-    if ((m = /!3d(-?\d{1,2}\.\d+)!4d(-?\d{1,3}\.\d+)/.exec(txt)) && arg(+m[1], +m[2])) return [+m[1], +m[2], 'maps'];
-    var re = /(?:google\.[a-z.]+\/maps|maps\.google\.[a-z.]+)[^\s"']*?(?:[@=]|q=|ll=|query=)(-?\d{1,2}\.\d{3,})(?:,|%2C)\s*(-?\d{1,3}\.\d{3,})/i;
-    if ((m = re.exec(txt)) && arg(+m[1], +m[2])) return [+m[1], +m[2], 'maps'];
-    var re2 = /(-\d{2}\.\d{4,})\s*[,; ]\s*(-\d{2}\.\d{4,})/g;
-    while ((m = re2.exec(txt))) if (arg(+m[1], +m[2])) return [+m[1], +m[2], 'coordenadas'];
-    return null;
+  function coordsDeNota(txt) {                 // la ÚLTIMA ubicación escrita en la nota (pases de turno con varias): [lat, lon, tipo]
+    var arg = function (a, b) { return a < -21 && a > -56 && b < -53 && b > -74; }, mejor = null, m;
+    var probar = function (re, tipo) {
+      re.lastIndex = 0;
+      while ((m = re.exec(txt))) if (arg(+m[1], +m[2]) && (!mejor || m.index >= mejor.i)) mejor = {i: m.index, c: [+m[1], +m[2], tipo]};
+    };
+    probar(/!3d(-?\d{1,2}\.\d+)!4d(-?\d{1,3}\.\d+)/g, 'maps');
+    probar(/(?:google\.[a-z.]+\/maps|maps\.google\.[a-z.]+)[^\s"']*?(?:[@=]|q=|ll=|query=)(-?\d{1,2}\.\d{3,})(?:,|%2C)\s*(-?\d{1,3}\.\d{3,})/gi, 'maps');
+    probar(/(-\d{2}\.\d{4,})\s*[,; ]\s*(-\d{2}\.\d{4,})/g, 'coordenadas');
+    return mejor ? mejor.c : null;
   }
   function subirBandeja(casos) {
     var padres = [], ids = [];
