@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Mobisond · Avisador
 // @namespace    mobisond
-// @version      2.78
+// @version      2.79
 // @description  Avisa los casos nuevos (celular, campana y grupo de Telegram), los Lineales sin notas hace 25 min, los SLA y los aceptados; botón de resumen de turno y comandos del bot.
 // @match        https://*.service-now.com/*
 // @grant        GM_xmlhttpRequest
@@ -713,13 +713,14 @@
   function comandos() {
     if (!hayGrupo() || !soyLider()) return;
     atenderPendientes();
-    if (GM_getValue('tg_cmds', 0) < 8) {     // menú de comandos del bot (aparece al escribir "/" en el grupo)
+    if (GM_getValue('tg_cmds', 0) < 9) {     // menú de comandos del bot (aparece al escribir "/" en el grupo)
       tg('setMyCommands', {commands: [{command: 'bandeja', description: 'Casos abiertos de Lineales y GPON'},
                                       {command: 'caso', description: 'Detalle de un caso: /caso WO0096818'},
                                       {command: 'activos', description: 'Quién está activo ahora y quién entra'},
                                       {command: 'status', description: 'Resumen del día (Lineales y GPON)'},
                                       {command: 'semana', description: 'Resumen de esta semana (o /semana 13-10-2026)'},
-                                      {command: 'mes', description: 'Resumen de este mes (o /mes 09-2026)'}]}, function () { GM_setValue('tg_cmds', 8); });
+                                      {command: 'mes', description: 'Resumen de este mes (o /mes 09-2026)'},
+                                      {command: 'historial', description: 'Qué pasó cerca de una botella, coordenadas o link'}]}, function () { GM_setValue('tg_cmds', 9); });
     }
     if (modoBot === null) {                    // ¿el bot está conectado a Supabase?
       modoBot = 'esperando';
