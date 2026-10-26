@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Mobisond · Avisador
 // @namespace    mobisond
-// @version      3.2
+// @version      3.3
 // @description  Avisa los casos nuevos (celular, campana y grupo de Telegram), los Lineales sin notas hace 25 min, los SLA y los aceptados; botón de resumen de turno y comandos del bot.
 // @match        https://*.service-now.com/*
 // @grant        GM_xmlhttpRequest
@@ -112,12 +112,14 @@
       (desc ? '\n\n<i>' + esc(desc) + '</i>' : '') + '\n\n' + (extra ? extra + '\n' : '') +
       '🔗 <a href="' + esc(link) + '">Abrir en ServiceNow</a>';
   }
-  var DRAMA = ['Se terminó la paz 😩', 'Arriba, que hay laburo 💪', 'Nadie lo pidió, pero llegó 🙃', 'A ponerse las pilas ⚡',
-               'Y justo cuando estaba todo tranquilo… 😬', 'Atención, atención 📢'];
+  var DRAMA = ['Se terminó la paz 😩', 'Nadie lo pidió, pero llegó 🙃', 'Y justo cuando estaba todo tranquilo… 😬',
+               'Atención, atención 📢', 'Agarrate que hay movimiento 🎢', 'El mate va a tener que esperar 🧉',
+               '¿Alguien dijo fibra? 🧵', 'Otro más para la colección 📦', 'No es simulacro 🚨',
+               'Que no cunda el pánico… todavía 😅', 'Café cargado y a la cancha ☕', 'Se cortó algo en algún lado ✂️'];
   function mensajeGrupo(f, prueba, extra) {
     var d = f.datos, prio = d.priority || '';
     var titulo = prueba ? '🧪 <b>Prueba de caso nuevo</b>'
-                        : '🚨🚨 <b>¡Entró un caso!</b> 🚨🚨\n<i>' + DRAMA[Math.floor(Math.random() * DRAMA.length)] + '</i>';
+                        : '🚨🚨 <b>¡Entró un caso!</b> 🚨🚨\n\n<i>' + DRAMA[Math.floor(Math.random() * DRAMA.length)] + '</i>';
     var lineaPrio = prio ? '\n\n' + colorPrio(prio) + ' <b>' + esc(prio) + '</b>' + (/^1/.test(prio) && !prueba ? ' 🔥' : '') : '';
     return titulo + lineaPrio + bloqueCaso(f.numero, d.cmdb_ci, d.short_description, f.link, extra);
   }
@@ -583,7 +585,7 @@
         if (prioIni && !ausente && antes && antes.v && p && antes.v !== p) {
           var sube = +p < +antes.v;
           unaVezAlGrupo('prio:' + id + ':' + antes.v + '>' + p,
-            '🔀 <b>Cambió la prioridad</b> ' + (sube ? '⬆️' : '⬇️') + '\n' +
+            '🔀 <b>Cambió la prioridad</b> ' + (sube ? '⬆️' : '⬇️') + '\n\n' +
             colorPrio(antes.t || antes.v) + ' ' + esc(antes.t || antes.v) + ' → ' + colorPrio(txt || p) + ' ' + esc(txt || p) +
             (/^1/.test(txt || p) ? ' 🔥' : '') + cuerpo(r));
         }
