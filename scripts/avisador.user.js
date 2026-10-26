@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Mobisond · Avisador
 // @namespace    mobisond
-// @version      2.86
+// @version      2.87
 // @description  Avisa los casos nuevos (celular, campana y grupo de Telegram), los Lineales sin notas hace 25 min, los SLA y los aceptados; botón de resumen de turno y comandos del bot.
 // @match        https://*.service-now.com/*
 // @grant        GM_xmlhttpRequest
@@ -141,7 +141,8 @@
             return '• ' + esc(woDe(o)) + ' · ' + ('0' + d.getDate()).slice(-2) + '/' + ('0' + (d.getMonth() + 1)).slice(-2) + ' · ' + esc(causa);
           });
           if (lista.length > 3) lineas.push('<i>… y ' + (lista.length - 3) + ' más</i>');
-          return '🔁 <b>CI con antecedentes</b> · ' + lista.length + (lista.length === 1 ? ' caso' : ' casos') + ' en 90 días\n' + lineas.join('\n') + '\n';
+          return '━━━━━━━━━━━━━━\n🔁🚨 <b>¡Reincidencia!</b> 🚨🔁\n<i>Este CI ya tuvo ' + (lista.length === 1 ? 'otro caso' : lista.length + ' casos') +
+                 ' en los últimos 90 días 😱</i>\n\n' + lineas.join('\n') + '\n━━━━━━━━━━━━━━\n';
         });
       });
     }).catch(function () { return ''; });
