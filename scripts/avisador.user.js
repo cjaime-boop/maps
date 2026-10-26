@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Mobisond · Avisador
 // @namespace    mobisond
-// @version      2.80
+// @version      2.81
 // @description  Avisa los casos nuevos (celular, campana y grupo de Telegram), los Lineales sin notas hace 25 min, los SLA y los aceptados; botón de resumen de turno y comandos del bot.
 // @match        https://*.service-now.com/*
 // @grant        GM_xmlhttpRequest
@@ -1046,7 +1046,8 @@
         else {
           r.sinAtender++;
           if (cliente(c) === 'CLR') r.claroSin++;
-          if (fueraDeVentana(val(c, 'opened_at'))) r.sinNoche++;   // GPON: los moderados se trabajan de 7 a 19
+          var p12 = /^[12]$/.test(val(c, 'priority')) || /^[12]\b/.test(dv(c, 'priority'));
+          if (!p12 && fueraDeVentana(val(c, 'opened_at'))) r.sinNoche++;   // GPON: de P3 para abajo se trabaja de 7 a 19 (P1/P2 siempre)
         }
       });
       if (!venc) r.vencidos = '?';
