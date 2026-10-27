@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Mobisond · Avisador
 // @namespace    mobisond
-// @version      3.13
+// @version      3.14
 // @description  Avisa los casos nuevos (celular, campana y grupo de Telegram), los Lineales sin notas hace 25 min, los SLA y los aceptados; botón de resumen de turno y comandos del bot.
 // @match        https://*.service-now.com/*
 // @grant        GM_xmlhttpRequest
@@ -137,14 +137,21 @@
           var w = woDe(o); if (vistos[w]) return; vistos[w] = 1; lista.push(o);
         });
         if (!lista.length) return '';
-        var padres = lista.slice(0, 3).map(function (o) { return vl(o, 'parent'); }).filter(Boolean);
-        var forms = padres.length ? api('wm_order', 'sys_idIN' + padres.join(','), 'sys_id,work_notes,comments').catch(function () { return []; }) : Promise.resolve([]);
-        return forms.then(function (wos) {
-          var porId = {}; wos.forEach(function (w) { porId[vl(w, 'sys_id')] = w; });
-          var lineas = lista.slice(0, 3).map(function (o) {
+        var tres = lista.slice(0, 3);
+        var padres = tres.map(function (o) { return vl(o, 'parent'); }).filter(Boolean);
+        // igual que /caso: el formulario puede estar en las notas de la WO o de la WOT, o en los campos de cierre
+        var forms = Promise.all([
+          padres.length ? api('wm_order', 'sys_idIN' + padres.join(','), '').catch(function () { return []; }) : [],
+          api('wm_task', 'sys_idIN' + tres.map(function (o) { return vl(o, 'sys_id'); }).join(','), '').catch(function () { return []; })
+        ]);
+        return forms.then(function (rr) {
+          var porId = {}; rr[0].concat(rr[1]).forEach(function (w) { porId[vl(w, 'sys_id')] = w; });
+          var lineas = tres.map(function (o) {
             var t = utc(vl(o, 'opened_at')), d = new Date(t);
-            var fc = formularioCierre([porId[vl(o, 'parent')]]);
-            var causa = fc && fc['CAUSA DE LA AFECTACION'] ? fc['CAUSA DE LA AFECTACION'] : /cerrado|closed/i.test(dv(o, 'state')) ? 'sin formulario de cierre' : esc(dv(o, 'state'));
+            var regs = [porId[vl(o, 'parent')], porId[vl(o, 'sys_id')]];
+            var fc = formularioCierre(regs) || {}, dc = datosCierre(regs);
+            var c0 = fc['CAUSA DE LA AFECTACION'] || dc.causa.join(' · ');
+            var causa = c0 ? c0 : /cerrado|closed/i.test(dv(o, 'state')) ? 'sin formulario de cierre' : dv(o, 'state');
             return '• ' + esc(woDe(o)) + ' · ' + ('0' + d.getDate()).slice(-2) + '/' + ('0' + (d.getMonth() + 1)).slice(-2) + ' · ' + esc(causa);
           });
           if (lista.length > 3) lineas.push('<i>… y ' + (lista.length - 3) + ' más</i>');
@@ -393,10 +400,35 @@
       '&sysparm_limit=1000&sysparm_fields=' + campos + '&sysparm_query=' + encodeURIComponent(query);
     var h = {'Accept': 'application/json'}, t = token(); if (t) h['X-UserToken'] = t;
     return fetch(url, {credentials: 'same-origin', headers: h}).then(function (r) {
+      if (r.status === 401) sesionPerdida();
       if (!r.ok) throw new Error('ServiceNow ' + r.status);
+      sesionOk();
       return r.json();
     }).then(function (j) { return j.result || []; });
   }
+  // ---- sesión de ServiceNow vencida: la PC deja de atender (así toma otra o salta el aviso de PC caída) y avisa al grupo
+  function sesionCaida() { var c = GM_getValue('sn_caida', 0); return !!c; }
+  function sesionPerdida() {
+    if (GM_getValue('sn_caida', 0)) return;
+    GM_setValue('sn_caida', Date.now());
+    botLog('se cerró la sesión de ServiceNow (401)');
+    if (hayGrupo()) unaVezAlGrupo('sesion:' + pcId() + ':' + Math.floor(Date.now() / 3600000),
+      '⚠️ <b>Se cerró la sesión de ServiceNow</b>\n\n<i>En la PC ' + esc(pcId()) + ' el avisador no puede leer casos.</i>\n' +
+      'Entrá de nuevo a ServiceNow en esa PC (recargá la pestaña). Mientras tanto atiende otra PC, si hay alguna.');
+  }
+  function sesionOk() {
+    var c = GM_getValue('sn_caida', 0);
+    if (!c) return;
+    GM_setValue('sn_caida', 0);
+    botLog('volvió la sesión de ServiceNow');
+    if (hayGrupo() && Date.now() - c > 2 * 60000) unaVezAlGrupo('sesion_ok:' + pcId() + ':' + c,
+      '✅ <b>Volvió la sesión de ServiceNow</b>\n\n<i>La PC ' + esc(pcId()) + ' vuelve a leer casos (estuvo caída ' + Math.round((Date.now() - c) / 60000) + ' min).</i>');
+  }
+  // con la sesión caída, cada 1 min se prueba una consulta chiquita para saber cuándo vuelve
+  setInterval(function () {
+    if (!sesionCaida() || window.top !== window.self || !token()) return;
+    api('sys_user', 'sys_idISNOTEMPTY^ORDERBYsys_id', 'sys_id').catch(function () {});
+  }, 60000);
   function dv(r, c) { var v = r[c]; return v ? (v.display_value || '') : ''; }
   function vl(r, c) { var v = r[c]; return v ? (v.value || '') : ''; }
   function utc(t) { return t ? new Date(t.replace(' ', 'T') + 'Z').getTime() : 0; }
@@ -1754,6 +1786,7 @@
   function soyLider2() {
     if (window.top !== window.self) return false;      // solo la ventana principal (no los marcos de adentro)
     if (!token()) return false;                         // y que tenga la sesión de ServiceNow a mano para consultar
+    if (sesionCaida()) return false;                    // sesión vencida (401): no atiende hasta que vuelva
     var ps = anotarPestaña(), yoRefresco = meRefresca();
     var elegida = GM_getValue('bot_elegida', '');          // la que se eligió desde el menú (mientras siga abierta)
     if (elegida && elegida !== MI_TAB && ps[elegida]) return false;
