@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Mobisond · Avisador
 // @namespace    mobisond
-// @version      3.10
+// @version      3.11
 // @description  Avisa los casos nuevos (celular, campana y grupo de Telegram), los Lineales sin notas hace 25 min, los SLA y los aceptados; botón de resumen de turno y comandos del bot.
 // @match        https://*.service-now.com/*
 // @grant        GM_xmlhttpRequest
@@ -1726,7 +1726,24 @@
   function hayOtraQuieta(ps) {
     return Object.keys(ps).some(function (k) { return k !== MI_TAB && !ps[k].refresca; });
   }
+  // "🤖 Bot · " en el título de la pestaña que trabaja (como el segundero del Refrescador)
+  var MARCA_BOT = '🤖 Bot · ';
+  function marcarTitulo(on) {
+    if (window.top !== window.self) return;
+    var t = document.title || '', i = t.indexOf(MARCA_BOT);
+    if (on && i < 0) {
+      var m = t.match(/^(\(\d+ s\)|\(⏸\)|\(sin conexión\))\s*/);       // va después del segundero del Refrescador
+      document.title = m ? m[0] + MARCA_BOT + t.slice(m[0].length) : MARCA_BOT + t;
+    } else if (!on && i >= 0) {
+      document.title = t.slice(0, i) + t.slice(i + MARCA_BOT.length);
+    }
+  }
   function soyLider() {
+    var r = soyLider2();
+    marcarTitulo(r);
+    return r;
+  }
+  function soyLider2() {
     if (window.top !== window.self) return false;      // solo la ventana principal (no los marcos de adentro)
     if (!token()) return false;                         // y que tenga la sesión de ServiceNow a mano para consultar
     var ps = anotarPestaña(), yoRefresco = meRefresca();
