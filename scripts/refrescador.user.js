@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Mobisond · Refrescador de pestañas
 // @namespace    mobisond
-// @version      2.8
+// @version      2.9
 // @description  Refresca la página entera cada 30 segundos en las pestañas que elijas (cualquier página). Refresca siempre, aunque estés escribiendo o usando la página. Muestra la cuenta en el título y, en ServiceNow, avisa si se cerró la sesión.
 // @match        *://*/*
 // @grant        GM_getValue
@@ -71,6 +71,7 @@
   var corriendo = null;
   function arrancar() {
     if (corriendo || !paginas()[miClave]) return;
+    try { sessionStorage.setItem('mobisond_refresca', '1'); } catch (e) {}   // el Avisador no usa esta pestaña para trabajar
     var proximo = Date.now() + SEG * 1000, pausa = false, apagado = false;
     try {
       GM_addValueChangeListener('segundos', function (n, viejo, nuevo) {
@@ -135,10 +136,12 @@
     }
     corriendo = function () {
       apagado = true; if (w) w.terminate(); if (iv) clearInterval(iv); b.remove();
+      try { sessionStorage.removeItem('mobisond_refresca'); } catch (e) {}
       document.title = limpio(document.title); corriendo = null;
     };
     pintar();
   }
+  if (!paginas()[miClave]) { try { sessionStorage.removeItem('mobisond_refresca'); } catch (e) {} }
   arrancar();
   try {   // si se prende o se apaga desde otra pestaña igual
     GM_addValueChangeListener('refrescar_paginas', function () {

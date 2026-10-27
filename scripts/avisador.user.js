@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Mobisond · Avisador
 // @namespace    mobisond
-// @version      3.9
+// @version      3.10
 // @description  Avisa los casos nuevos (celular, campana y grupo de Telegram), los Lineales sin notas hace 25 min, los SLA y los aceptados; botón de resumen de turno y comandos del bot.
 // @match        https://*.service-now.com/*
 // @grant        GM_xmlhttpRequest
@@ -346,7 +346,7 @@
   });
   GM_registerMenuCommand('⚙️ Configuración', configuracion);
   GM_registerMenuCommand('🔧 Revisar bot', function () {          // diagnóstico temporal de /bandeja
-    var info = ['Versión ' + (typeof GM_info !== 'undefined' ? GM_info.script.version : '?'), 'Pestaña vigilada: ' + (vigilada() ? 'SÍ' : 'NO'), 'Esta pestaña atiende avisos y bot: ' + (soyLider() ? 'SÍ' : 'NO'), 'Grupo guardado: ' + (GM_getValue('tg_chat', '') || 'ninguno'),
+    var info = ['Versión ' + (typeof GM_info !== 'undefined' ? GM_info.script.version : '?'), 'Pestaña vigilada: ' + (vigilada() ? 'SÍ' : 'NO'), 'Esta pestaña atiende avisos y bot: ' + (soyLider() ? 'SÍ' : 'NO') + (meRefresca() ? ' (es la que recarga el Refrescador)' : ''), 'Grupo guardado: ' + (GM_getValue('tg_chat', '') || 'ninguno'),
                 'Token: ' + (GM_getValue('tg_token', '') ? 'cargado' : 'falta'), 'Último leído: ' + GM_getValue('tg_offset', 0)];
     tg('getWebhookInfo', {}, function (w) {
       info.push('Webhook: ' + (w.url ? w.url : 'no') + (w.last_error_message ? '\nÚltimo error de Telegram: ' + w.last_error_message : '') +
@@ -1712,11 +1712,29 @@
     return id;
   }
   var MI_TAB = idPestaña();
+  // La pestaña que recarga el Refrescador (Pending Dispatch) no trabaja si hay otra de ServiceNow abierta en la PC:
+  // una recarga en el medio corta las consultas largas (notas, /semana, /mes).
+  function meRefresca() { try { return !!sessionStorage.getItem('mobisond_refresca'); } catch (e) { return false; } }
+  function anotarPestaña() {
+    var ahora = Date.now(), ps = GM_getValue('pestanas', {}), nuevo = {};
+    Object.keys(ps).forEach(function (k) { if (ahora - ps[k].t < 15000) nuevo[k] = ps[k]; });
+    if (window.top === window.self && token()) nuevo[MI_TAB] = {t: ahora, refresca: meRefresca()};
+    else delete nuevo[MI_TAB];
+    GM_setValue('pestanas', nuevo);
+    return nuevo;
+  }
+  function hayOtraQuieta(ps) {
+    return Object.keys(ps).some(function (k) { return k !== MI_TAB && !ps[k].refresca; });
+  }
   function soyLider() {
     if (window.top !== window.self) return false;      // solo la ventana principal (no los marcos de adentro)
     if (!token()) return false;                         // y que tenga la sesión de ServiceNow a mano para consultar
+    var ps = anotarPestaña(), yoRefresco = meRefresca();
+    if (yoRefresco && hayOtraQuieta(ps)) return false;  // hay otra pestaña que no se recarga: que trabaje ella
     var l = GM_getValue('lider', null), ahora = Date.now();
-    if (!l || l.id === MI_TAB || ahora - l.t > 15000) { GM_setValue('lider', {id: MI_TAB, t: ahora}); return true; }
+    if (!l || l.id === MI_TAB || ahora - l.t > 15000 || (l.refresca && !yoRefresco)) {
+      GM_setValue('lider', {id: MI_TAB, t: ahora, refresca: yoRefresco}); return true;
+    }
     return false;
   }
 
