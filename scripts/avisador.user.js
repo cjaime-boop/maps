@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Mobisond · Avisador
 // @namespace    mobisond
-// @version      3.8
+// @version      3.9
 // @description  Avisa los casos nuevos (celular, campana y grupo de Telegram), los Lineales sin notas hace 25 min, los SLA y los aceptados; botón de resumen de turno y comandos del bot.
 // @match        https://*.service-now.com/*
 // @grant        GM_xmlhttpRequest
@@ -524,17 +524,26 @@
   function subirBandeja(casos) {
     var padres = [], ids = [];
     casos.forEach(function (r) { ids.push(vl(r, 'sys_id')); if (vl(r, 'parent')) { ids.push(vl(r, 'parent')); if (padres.indexOf(vl(r, 'parent')) < 0) padres.push(vl(r, 'parent')); } });
-    var avisoNotas = '';
+    var avisoNotas = '', deCache = 0;
     var extraLL = (camposLatLon() || {}).tabla === 'wm_order' && camposLatLon().campos.length ? ',' + camposLatLon().campos.join(',') : '';
-    // las notas de las WO: si falla, se reintenta sin los campos extra y de a 5 WO; si igual falla, QGIS lo avisa
+    // mientras se leen las notas, el refrescador no recarga la pestaña (si recarga en el medio, la lectura se corta)
+    var marca = String(Date.now()), marcada = false;
+    try { if (!localStorage.getItem('mobisond_ocupado')) { localStorage.setItem('mobisond_ocupado', marca); marcada = true; } } catch (e) {}
+    var soltar = function () { try { if (marcada && localStorage.getItem('mobisond_ocupado') === marca) localStorage.removeItem('mobisond_ocupado'); } catch (e) {} };
+    var esperar = function (ms) { return new Promise(function (r) { setTimeout(r, ms); }); };
+    // las notas de las WO: si falla, se reintenta (sin los campos extra, después de a 5 WO); si igual falla, se usan las
+    // últimas notas leídas bien de cada WO (guardadas) y QGIS avisa solo si faltan
     var leerWOs = function () {
       if (!padres.length) return Promise.resolve([]);
       return api('wm_order', 'sys_idIN' + padres.join(','), 'sys_id,work_notes,comments' + extraLL).catch(function (e1) {
-        var tandas = [], i;
-        for (i = 0; i < padres.length; i += 5) tandas.push(padres.slice(i, i + 5));
-        return Promise.all(tandas.map(function (t) { return api('wm_order', 'sys_idIN' + t.join(','), 'sys_id,work_notes,comments'); }))
-          .then(function (rs) { return [].concat.apply([], rs); })
-          .catch(function (e2) { avisoNotas = 'No pude leer las notas de las WO (' + ((e2 && e2.message) || (e1 && e1.message) || 'error') + ')'; return []; });
+        return esperar(3000).then(function () { return api('wm_order', 'sys_idIN' + padres.join(','), 'sys_id,work_notes,comments'); })
+          .catch(function () {
+            var tandas = [], i;
+            for (i = 0; i < padres.length; i += 5) tandas.push(padres.slice(i, i + 5));
+            return Promise.all(tandas.map(function (t) { return api('wm_order', 'sys_idIN' + t.join(','), 'sys_id,work_notes,comments'); }))
+              .then(function (rs) { return [].concat.apply([], rs); });
+          })
+          .catch(function (e2) { avisoNotas = 'No pude leer las notas de las WO (' + ((e2 && e2.message) || (e1 && e1.message) || 'error') + ')'; return null; });
       });
     };
     Promise.all([
@@ -543,8 +552,24 @@
     ]).then(function (res) {
       var notasDe = {}, slaDe = {};
       var woRec = {};
+      soltar();
+      var cache = GM_getValue('notas_cache', {});
+      if (res[0] === null) {                       // no se pudieron leer: las últimas que se leyeron bien
+        padres.forEach(function (p) { if (cache[p]) { notasDe[p] = cache[p].n; deCache++; } });
+        if (deCache === padres.length) avisoNotas = '';
+        res[0] = [];
+      }
       res[0].forEach(function (w) { woRec[vl(w, 'sys_id')] = w; notasDe[vl(w, 'sys_id')] = notasDelTexto(dv(w, 'work_notes') + '\n' + dv(w, 'comments')); });
-      if (!avisoNotas && padres.length) {
+      if (res[0].length) {                          // se guardan (las últimas 6 de cada WO abierta) para la próxima vez
+        var nuevo = {};
+        padres.forEach(function (p) {
+          var ns = notasDe[p] ? notasDe[p].slice().sort(function (a, b) { return b.t - a.t; }).slice(0, 6)
+            .map(function (n) { return {t: n.t, quien: n.quien, txt: (n.txt || '').slice(0, 600)}; }) : null;
+          if (ns) nuevo[p] = {n: ns, t: Date.now()}; else if (cache[p]) nuevo[p] = cache[p];
+        });
+        GM_setValue('notas_cache', nuevo);
+      }
+      if (!avisoNotas && !deCache && padres.length) {
         var conTexto = res[0].filter(function (w) { return (dv(w, 'work_notes') + dv(w, 'comments')).trim(); }).length;
         var leidas = Object.keys(notasDe).filter(function (k) { return notasDe[k].length; }).length;
         if (!res[0].length) avisoNotas = 'ServiceNow no devolvió las WO (' + padres.length + ' pedidas)';
@@ -582,7 +607,7 @@
         };
       });
       return sbRpc('bot_casos_abiertos', {p_pc: pcId(), p_casos: lista});
-    }).catch(function (e) { console.log('[Mobisond] casos abiertos (QGIS): ' + (e && e.message)); });   // si la tabla no existe, no pasa nada
+    }).catch(function (e) { soltar(); console.log('[Mobisond] casos abiertos (QGIS): ' + (e && e.message)); });   // si la tabla no existe, no pasa nada
   }
 
   function controles() {
