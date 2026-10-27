@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Mobisond · Móviles Ituran → QGIS
 // @namespace    mobisond
-// @version      2.0
+// @version      2.1
 // @description  Pasa las posiciones de los móviles de Ituran al plugin "Móviles Ituran" de QGIS de esta misma PC (127.0.0.1). No sale nada de la computadora.
 // @match        https://web2.ituran.com.ar/*
 // @match        http://web2.ituran.com.ar/*
@@ -20,6 +20,7 @@
   var W = (typeof unsafeWindow !== 'undefined') ? unsafeWindow : window;
   var PUERTOS = [8787, 8788, 8789, 8790];
   var PATENTE = /\b([A-Z]{2}\s?\d{3}\s?[A-Z]{2}|[A-Z]{3}\s?\d{3})\b/;
+  var PATENTE_SOLA = /^([A-Z]{2}\s?\d{3}\s?[A-Z]{2}|[A-Z]{3}\s?\d{3})$/;
   var moviles = {};          // patente -> último dato
   var nodos = {};            // número interno de Ituran -> {patente, grupo, modelo}
   var ultimoPedido = null;   // el último pedido que trajo posiciones (se repite si la página se frena)
@@ -130,11 +131,15 @@
     if (lat !== null && lon !== null && enArgentina(lat, lon)) {
       var nd = nodoDe(x, claveP);
       var pat = nd ? nd.patente : campo(x, /plate|patente|licen|matric/i, 'txt');
-      if (pat && !PATENTE.test(String(pat).toUpperCase())) pat = null;
-      if (!pat) { for (var k in x) { var v = x[k]; if (typeof v === 'string' && PATENTE.test(v.toUpperCase())) { pat = v.toUpperCase().match(PATENTE)[1]; break; } } }
+      if (pat && !PATENTE_SOLA.test(String(pat).trim().toUpperCase())) pat = null;
+      // sin campo de patente: solo un texto que sea ENTERO una patente en mayúsculas (no "Ing 748" de una dirección)
+      if (!pat) { for (var k in x) { var v = x[k]; if (typeof v === 'string' && !/addr|direcc|address|location|ubic|street|calle|desc|name|nombre/i.test(k) && PATENTE_SOLA.test(v.trim())) { pat = v.trim(); break; } } }
       if (pat) {
         pat = String(pat).replace(/\s/g, '').toUpperCase();
         if (!nd) { for (var idn in nodos) { if (nodos[idn].patente === pat) { nd = nodos[idn]; break; } } }
+        if (!nd && Object.keys(nodos).length) pat = null;     // ya conocemos la flota: lo que no está en la lista no es nuestro
+      }
+      if (pat) {
         salida.push({patente: pat, modelo: nd ? nd.modelo : '', lat: lat, lon: lon,
           // la hora del GPS (no la de apagado, alta, etc.)
           hora: campo(x, /gps.?time|gpsdate|fecha.?gps|positiontime|lastpos|datetime|^time$|^date$|^fecha$|^hora$/i, 'txt') ||
