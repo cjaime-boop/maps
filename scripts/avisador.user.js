@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Mobisond · Avisador
 // @namespace    mobisond
-// @version      3.7
+// @version      3.8
 // @description  Avisa los casos nuevos (celular, campana y grupo de Telegram), los Lineales sin notas hace 25 min, los SLA y los aceptados; botón de resumen de turno y comandos del bot.
 // @match        https://*.service-now.com/*
 // @grant        GM_xmlhttpRequest
@@ -524,14 +524,34 @@
   function subirBandeja(casos) {
     var padres = [], ids = [];
     casos.forEach(function (r) { ids.push(vl(r, 'sys_id')); if (vl(r, 'parent')) { ids.push(vl(r, 'parent')); if (padres.indexOf(vl(r, 'parent')) < 0) padres.push(vl(r, 'parent')); } });
+    var avisoNotas = '';
+    var extraLL = (camposLatLon() || {}).tabla === 'wm_order' && camposLatLon().campos.length ? ',' + camposLatLon().campos.join(',') : '';
+    // las notas de las WO: si falla, se reintenta sin los campos extra y de a 5 WO; si igual falla, QGIS lo avisa
+    var leerWOs = function () {
+      if (!padres.length) return Promise.resolve([]);
+      return api('wm_order', 'sys_idIN' + padres.join(','), 'sys_id,work_notes,comments' + extraLL).catch(function (e1) {
+        var tandas = [], i;
+        for (i = 0; i < padres.length; i += 5) tandas.push(padres.slice(i, i + 5));
+        return Promise.all(tandas.map(function (t) { return api('wm_order', 'sys_idIN' + t.join(','), 'sys_id,work_notes,comments'); }))
+          .then(function (rs) { return [].concat.apply([], rs); })
+          .catch(function (e2) { avisoNotas = 'No pude leer las notas de las WO (' + ((e2 && e2.message) || (e1 && e1.message) || 'error') + ')'; return []; });
+      });
+    };
     Promise.all([
-      padres.length ? api('wm_order', 'sys_idIN' + padres.join(','), 'sys_id,work_notes,comments' +
-        ((camposLatLon() || {}).tabla === 'wm_order' && camposLatLon().campos.length ? ',' + camposLatLon().campos.join(',') : '')).catch(function () { return []; }) : [],
+      leerWOs(),
       ids.length ? api('task_sla', 'active=true^taskIN' + ids.join(','), 'task,sla,stage,has_breached,planned_end_time,business_time_left').catch(function () { return []; }) : []
     ]).then(function (res) {
       var notasDe = {}, slaDe = {};
       var woRec = {};
       res[0].forEach(function (w) { woRec[vl(w, 'sys_id')] = w; notasDe[vl(w, 'sys_id')] = notasDelTexto(dv(w, 'work_notes') + '\n' + dv(w, 'comments')); });
+      if (!avisoNotas && padres.length) {
+        var conTexto = res[0].filter(function (w) { return (dv(w, 'work_notes') + dv(w, 'comments')).trim(); }).length;
+        var leidas = Object.keys(notasDe).filter(function (k) { return notasDe[k].length; }).length;
+        if (!res[0].length) avisoNotas = 'ServiceNow no devolvió las WO (' + padres.length + ' pedidas)';
+        else if (!conTexto) avisoNotas = 'Las WO llegaron sin notas (¿permisos de la sesión?)';
+        else if (!leidas) avisoNotas = 'No entendí el formato de las notas: ' + (dv(res[0][0], 'work_notes') || '').slice(0, 60);
+      }
+      if (avisoNotas) botLog('casos abiertos: ' + avisoNotas);
       var ll = camposLatLon();
       var latLonCaso = function (r) {                // si las notas no traen coordenadas: el campo del caso
         if (!ll || !ll.campos.length) return null;
@@ -557,7 +577,8 @@
           sla: sla ? {vence: utc(vl(sla, 'planned_end_time')) || null, vencido: vl(sla, 'has_breached') === 'true',
                       pausado: /paus/i.test(vl(sla, 'stage') + dv(sla, 'stage')), resta: dv(sla, 'business_time_left')} : null,
           nota: nuestra ? {t: nuestra.t, quien: nuestra.quien, txt: (nuestra.txt || '').slice(0, 160)} : null,
-          ubic: ubic, latlon_caso: lc ? {lat: lc[0], lon: lc[1], fuente: 'caso'} : null
+          ubic: ubic, latlon_caso: lc ? {lat: lc[0], lon: lc[1], fuente: 'caso'} : null,
+          aviso_notas: avisoNotas || null, pc: pcId()
         };
       });
       return sbRpc('bot_casos_abiertos', {p_pc: pcId(), p_casos: lista});
