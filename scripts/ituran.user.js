@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Mobisond · Móviles Ituran → QGIS
 // @namespace    mobisond
-// @version      2.1
+// @version      2.2
 // @description  Pasa las posiciones de los móviles de Ituran al plugin "Móviles Ituran" de QGIS de esta misma PC (127.0.0.1). No sale nada de la computadora.
 // @match        https://web2.ituran.com.ar/*
 // @match        http://web2.ituran.com.ar/*
@@ -24,7 +24,8 @@
   var moviles = {};          // patente -> último dato
   var nodos = {};            // número interno de Ituran -> {patente, grupo, modelo}
   var ultimoPedido = null;   // el último pedido que trajo posiciones (se repite si la página se frena)
-  var ultimaPos = 0, enviando = false, pendiente = false;
+  var ultimaPos = 0, enviando = false, pendiente = false, ultimoRepite = 0;
+  function cada() { var c = Number(GM_getValue('cada', 30)) || 30; return Math.max(15, Math.min(c, 600)); }   // segundos (lo elige QGIS)
 
   // ---------------------------------------------------------------- 1) la pestaña nunca "se duerme"
   // Chrome frena las pestañas en segundo plano y muchas páginas dejan de pedir posiciones si no se ven.
@@ -43,7 +44,12 @@
     if (!p || !codigo()) { if (mal) mal('sin vincular'); return; }
     GM_xmlhttpRequest({method: 'POST', url: 'http://127.0.0.1:' + p + ruta, data: JSON.stringify(datos), timeout: 5000,
       headers: {'Content-Type': 'application/json', 'X-Codigo': codigo()},
-      onload: function (r) { if (r.status === 200) { if (ok) ok(); } else if (mal) mal(r.status === 403 ? 'código' : 'error ' + r.status); },
+      onload: function (r) {
+        if (r.status === 200) {
+          try { var cfg = JSON.parse(r.responseText || '{}'); if (cfg && cfg.cada) GM_setValue('cada', Number(cfg.cada)); } catch (e) {}   // QGIS manda la frecuencia
+          if (ok) ok();
+        } else if (mal) mal(r.status === 403 ? 'código' : 'error ' + r.status);
+      },
       onerror: function () { if (mal) mal('QGIS apagado'); }, ontimeout: function () { if (mal) mal('QGIS no responde'); }});
   }
   // busca en qué puerto está escuchando QGIS (si el botón de Móviles Ituran está apretado)
@@ -100,9 +106,15 @@
     });
     Object.keys(d.NodesData).forEach(function (id) {
       var n = d.NodesData[id] || {}, pat = String(n.Plate || n.Label || '').replace(/\s/g, '').toUpperCase();
-      if (pat) nodos[String(id)] = {patente: pat, grupo: grupoDe[String(id)] || '', modelo: n.Model || '', etiqueta: n.Label || ''};
+      if (pat) nodos[String(id)] = {patente: pat, grupo: grupoDe[String(id)] || '', modelo: n.Model || '', etiqueta: n.Label || '', nombre: comentarios(n)};
     });
     return true;
+  }
+  // los comentarios de Ituran (Comment1, Comment2...) = quién maneja el móvil: "Diego D'olivo / Hugo Romero"
+  function comentarios(o) {
+    var ks = Object.keys(o || {}).filter(function (k) { return /^(comment|coment|remark)/i.test(k); }).sort(), vs = [];
+    ks.forEach(function (k) { var v = o[k]; if ((typeof v === 'string' || typeof v === 'number') && String(v).trim() && vs.indexOf(String(v).trim()) < 0) vs.push(String(v).trim()); });
+    return vs.join(' / ');
   }
   function nodoDe(x, claveP) {
     if (claveP !== undefined && nodos[String(claveP)]) return nodos[String(claveP)];
@@ -140,7 +152,7 @@
         if (!nd && Object.keys(nodos).length) pat = null;     // ya conocemos la flota: lo que no está en la lista no es nuestro
       }
       if (pat) {
-        salida.push({patente: pat, modelo: nd ? nd.modelo : '', lat: lat, lon: lon,
+        salida.push({patente: pat, modelo: nd ? nd.modelo : '', lat: lat, lon: lon, nombre: comentarios(x) || (nd && nd.nombre) || '',
           // la hora del GPS (no la de apagado, alta, etc.)
           hora: campo(x, /gps.?time|gpsdate|fecha.?gps|positiontime|lastpos|datetime|^time$|^date$|^fecha$|^hora$/i, 'txt') ||
                 campo(x, /time|date|fecha|hora/i, 'txt', /ignit|encend|apag|alta|creat|install|expir|birth|start|stop|off|on$/i) || '',
@@ -169,11 +181,15 @@
     setTimeout(function () { pendiente = false; enviarPosiciones(); }, 2000);
   }
   function estado() {
-    return {pagina: location.href.slice(0, 200), moviles: Object.keys(moviles).length,
+    return {pagina: location.href.slice(0, 200), moviles: Object.keys(moviles).length, cada: cada(),
             ultima_posicion: ultimaPos ? Math.round((Date.now() - ultimaPos) / 1000) : null, repite: !!ultimoPedido};
   }
   function enviarPosiciones() {
-    var lista = Object.keys(moviles).map(function (k) { return moviles[k]; });
+    var lista = Object.keys(moviles).map(function (k) {
+      var v = moviles[k];
+      if (!v.nombre) { for (var id in nodos) { if (nodos[id].patente === v.patente && nodos[id].nombre) { v.nombre = nodos[id].nombre; break; } } }
+      return v;
+    });
     if (!lista.length || enviando) return;
     enviando = true;
     mandar('/posiciones', {moviles: lista, estado: estado()}, function () { enviando = false; }, function (e) {
@@ -219,9 +235,11 @@
     ['CONNECTING', 'OPEN', 'CLOSING', 'CLOSED'].forEach(function (k) { W.WebSocket[k] = WS[k]; });
   }
 
-  // ---------------------------------------------------------------- 5) si la página deja de traer posiciones, se las pide el script
+  // ---------------------------------------------------------------- 5) cada X segundos (lo que elijas en QGIS) se le piden las posiciones a Ituran
   setInterval(function () {
-    if (!ultimoPedido || Date.now() - ultimaPos < 30000) return;
+    var c = cada() * 1000;
+    if (!ultimoPedido || Date.now() - ultimaPos < c || Date.now() - ultimoRepite < c) return;   // si Ituran ya trajo hace poco, no hace falta
+    ultimoRepite = Date.now();
     try {
       var x = new W.XMLHttpRequest();
       x.open(ultimoPedido.metodo || 'GET', ultimoPedido.url, true);
@@ -229,7 +247,7 @@
       Object.keys(cab).forEach(function (k) { try { x.setRequestHeader(k, cab[k]); } catch (e) {} });
       x.send(ultimoPedido.cuerpo || null);               // la respuesta pasa por el mismo lector de arriba
     } catch (e) {}
-  }, 15000);
+  }, 5000);
 
   // ---------------------------------------------------------------- 6) latido: QGIS sabe que Ituran sigue abierto
   setInterval(function () {
