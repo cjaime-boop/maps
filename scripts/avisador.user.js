@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Mobisond · Avisador
 // @namespace    mobisond
-// @version      3.11
+// @version      3.12
 // @description  Avisa los casos nuevos (celular, campana y grupo de Telegram), los Lineales sin notas hace 25 min, los SLA y los aceptados; botón de resumen de turno y comandos del bot.
 // @match        https://*.service-now.com/*
 // @grant        GM_xmlhttpRequest
@@ -364,6 +364,14 @@
     }, function (e) { info.push('Telegram ERROR: ' + e); alert(info.join('\n')); });
   });
   GM_registerMenuCommand('Dejar de vigilar', function () { GM_setValue('lista', ''); alert('Ya no vigilo ninguna lista.'); });
+  GM_registerMenuCommand('🤖 Vigilar bot (esta pestaña)', function () {
+    if (window.top !== window.self || !token()) { alert('Esta pestaña no puede atender el bot (no tiene la sesión de ServiceNow a mano).'); return; }
+    GM_setValue('bot_elegida', MI_TAB);
+    GM_setValue('lider', {id: MI_TAB, t: Date.now(), refresca: meRefresca()});
+    soyLider();
+    alert('🤖 Listo: esta pestaña atiende el bot y los avisos.' + (meRefresca() ? '\n\nOjo: es la que recarga el Refrescador; las consultas largas se pueden cortar.' : '') +
+          '\n\nSi la cerrás, otra pestaña toma la posta sola.');
+  });
 
   // ---------------------------------------------------------------- controles al grupo de Telegram
   // Cada 2 minutos (desde la pestaña que atiende en cada PC) se consulta ServiceNow por detrás:
@@ -1747,9 +1755,12 @@
     if (window.top !== window.self) return false;      // solo la ventana principal (no los marcos de adentro)
     if (!token()) return false;                         // y que tenga la sesión de ServiceNow a mano para consultar
     var ps = anotarPestaña(), yoRefresco = meRefresca();
-    if (yoRefresco && hayOtraQuieta(ps)) return false;  // hay otra pestaña que no se recarga: que trabaje ella
+    var elegida = GM_getValue('bot_elegida', '');          // la que se eligió desde el menú (mientras siga abierta)
+    if (elegida && elegida !== MI_TAB && ps[elegida]) return false;
+    var mia = elegida === MI_TAB;
+    if (!mia && yoRefresco && hayOtraQuieta(ps)) return false;  // hay otra pestaña que no se recarga: que trabaje ella
     var l = GM_getValue('lider', null), ahora = Date.now();
-    if (!l || l.id === MI_TAB || ahora - l.t > 15000 || (l.refresca && !yoRefresco)) {
+    if (mia || !l || l.id === MI_TAB || ahora - l.t > 15000 || (l.refresca && !yoRefresco)) {
       GM_setValue('lider', {id: MI_TAB, t: ahora, refresca: yoRefresco}); return true;
     }
     return false;
