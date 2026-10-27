@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Mobisond · Avisador
 // @namespace    mobisond
-// @version      3.14
+// @version      3.15
 // @description  Avisa los casos nuevos (celular, campana y grupo de Telegram), los Lineales sin notas hace 25 min, los SLA y los aceptados; botón de resumen de turno y comandos del bot.
 // @match        https://*.service-now.com/*
 // @grant        GM_xmlhttpRequest
@@ -406,23 +406,19 @@
       return r.json();
     }).then(function (j) { return j.result || []; });
   }
-  // ---- sesión de ServiceNow vencida: la PC deja de atender (así toma otra o salta el aviso de PC caída) y avisa al grupo
+  // ---- sesión de ServiceNow vencida: la PC deja de atender. Si hay otra PC con sesión, sigue esa sin avisar nada;
+  // si no queda ninguna, a los 10 min Supabase avisa al grupo "Se perdió la conexión a ServiceNow" (y "Volvió" al volver).
   function sesionCaida() { var c = GM_getValue('sn_caida', 0); return !!c; }
   function sesionPerdida() {
     if (GM_getValue('sn_caida', 0)) return;
     GM_setValue('sn_caida', Date.now());
-    botLog('se cerró la sesión de ServiceNow (401)');
-    if (hayGrupo()) unaVezAlGrupo('sesion:' + pcId() + ':' + Math.floor(Date.now() / 3600000),
-      '⚠️ <b>Se cerró la sesión de ServiceNow</b>\n\n<i>En la PC ' + esc(pcId()) + ' el avisador no puede leer casos.</i>\n' +
-      'Entrá de nuevo a ServiceNow en esa PC (recargá la pestaña). Mientras tanto atiende otra PC, si hay alguna.');
+    botLog('se cerró la sesión de ServiceNow (401): esta PC deja de atender');
   }
   function sesionOk() {
     var c = GM_getValue('sn_caida', 0);
     if (!c) return;
     GM_setValue('sn_caida', 0);
-    botLog('volvió la sesión de ServiceNow');
-    if (hayGrupo() && Date.now() - c > 2 * 60000) unaVezAlGrupo('sesion_ok:' + pcId() + ':' + c,
-      '✅ <b>Volvió la sesión de ServiceNow</b>\n\n<i>La PC ' + esc(pcId()) + ' vuelve a leer casos (estuvo caída ' + Math.round((Date.now() - c) / 60000) + ' min).</i>');
+    botLog('volvió la sesión de ServiceNow (estuvo caída ' + Math.round((Date.now() - c) / 60000) + ' min)');
   }
   // con la sesión caída, cada 1 min se prueba una consulta chiquita para saber cuándo vuelve
   setInterval(function () {
