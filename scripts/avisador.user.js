@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Mobisond · Avisador
 // @namespace    mobisond
-// @version      3.15
+// @version      3.16
 // @description  Avisa los casos nuevos (celular, campana y grupo de Telegram), los Lineales sin notas hace 25 min, los SLA y los aceptados; botón de resumen de turno y comandos del bot.
 // @match        https://*.service-now.com/*
 // @grant        GM_xmlhttpRequest
@@ -1762,17 +1762,17 @@
   function hayOtraQuieta(ps) {
     return Object.keys(ps).some(function (k) { return k !== MI_TAB && !ps[k].refresca; });
   }
-  // "🤖 Bot · " en el título de la pestaña que trabaja (como el segundero del Refrescador)
-  var MARCA_BOT = '🤖 Bot · ';
-  function marcarTitulo(on) {
+  // Marcas en el título (después del segundero del Refrescador): 🔔 = vigila la lista de casos nuevos, 🤖 Bot = atiende el bot
+  var MARCA_BOT = '🤖 Bot · ', MARCA_LISTA = '🔔 ';
+  function marcarTitulo(lider) {
     if (window.top !== window.self) return;
-    var t = document.title || '', i = t.indexOf(MARCA_BOT);
-    if (on && i < 0) {
-      var m = t.match(/^(\(\d+ s\)|\(⏸\)|\(sin conexión\))\s*/);       // va después del segundero del Refrescador
-      document.title = m ? m[0] + MARCA_BOT + t.slice(m[0].length) : MARCA_BOT + t;
-    } else if (!on && i >= 0) {
-      document.title = t.slice(0, i) + t.slice(i + MARCA_BOT.length);
-    }
+    var t = document.title || '';
+    var m = t.match(/^(\(\d+ s\)|\(⏸\)|\(sin conexión\))\s*/), pre = m ? m[0] : '';
+    var resto = t.slice(pre.length);
+    while (resto.indexOf(MARCA_LISTA) === 0 || resto.indexOf(MARCA_BOT) === 0)
+      resto = resto.slice(resto.indexOf(MARCA_LISTA) === 0 ? MARCA_LISTA.length : MARCA_BOT.length);
+    var nuevo = pre + (vigilada() ? MARCA_LISTA : '') + (lider ? MARCA_BOT : '') + resto;
+    if (nuevo !== t) document.title = nuevo;
   }
   function soyLider() {
     var r = soyLider2();
