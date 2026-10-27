@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Mobisond · Avisador
 // @namespace    mobisond
-// @version      3.12
+// @version      3.13
 // @description  Avisa los casos nuevos (celular, campana y grupo de Telegram), los Lineales sin notas hace 25 min, los SLA y los aceptados; botón de resumen de turno y comandos del bot.
 // @match        https://*.service-now.com/*
 // @grant        GM_xmlhttpRequest
@@ -304,7 +304,7 @@
   }
 
   // ---------------------------------------------------------------- menú de Tampermonkey
-  GM_registerMenuCommand('Vigilar esta lista', function () {
+  GM_registerMenuCommand('Vigilar esta lista (Pending Dispatch)', function () {
     var k = claveLista();
     if (!k) { alert('Abrí la lista de ServiceNow (la de Pending Dispatch) y volvé a elegir esta opción.'); return; }
     GM_setValue('lista', k);
