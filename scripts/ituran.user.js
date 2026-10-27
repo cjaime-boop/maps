@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Mobisond · Móviles Ituran → QGIS
 // @namespace    mobisond
-// @version      2.2
+// @version      2.3
 // @description  Pasa las posiciones de los móviles de Ituran al plugin "Móviles Ituran" de QGIS de esta misma PC (127.0.0.1). No sale nada de la computadora.
 // @match        https://web2.ituran.com.ar/*
 // @match        http://web2.ituran.com.ar/*
@@ -23,6 +23,17 @@
   var PATENTE_SOLA = /^([A-Z]{2}\s?\d{3}\s?[A-Z]{2}|[A-Z]{3}\s?\d{3})$/;
   var moviles = {};          // patente -> último dato
   var nodos = {};            // número interno de Ituran -> {patente, grupo, modelo}
+  var gruposVistos = {};     // patente -> grupo, guardado: si un dato llega sin grupo se usa el último conocido
+  try { gruposVistos = JSON.parse(GM_getValue('grupos', '{}')) || {}; } catch (e) {}
+  function recordarGrupo(pat, g) {
+    if (!pat || !g || gruposVistos[pat] === g) return;
+    gruposVistos[pat] = g; GM_setValue('grupos', JSON.stringify(gruposVistos));
+  }
+  function mejorGrupo(a, b) {                // un móvil puede estar en varias carpetas: gana la de GPON / Lineales
+    var bueno = function (g) { return /gpon|lineal/i.test(g || ''); };
+    if (!a) return b || ''; if (!b) return a;
+    return bueno(b) && !bueno(a) ? b : a;
+  }
   var ultimoPedido = null;   // el último pedido que trajo posiciones (se repite si la página se frena)
   var ultimaPos = 0, enviando = false, pendiente = false, ultimoRepite = 0;
   function cada() { var c = Number(GM_getValue('cada', 30)) || 30; return Math.max(15, Math.min(c, 600)); }   // segundos (lo elige QGIS)
@@ -102,11 +113,16 @@
     if (!d || !d.NodesData) return false;
     var grupoDe = {}, carpetas = d.FoldersData || {}, porCarpeta = d.FolderToNodesDic || {};
     Object.keys(porCarpeta).forEach(function (c) {
-      (porCarpeta[c] || []).forEach(function (n) { grupoDe[String(n)] = (carpetas[c] && carpetas[c].Name) || ''; });
+      var nom = (carpetas[c] && carpetas[c].Name) || '';
+      if (nom) (porCarpeta[c] || []).forEach(function (n) { grupoDe[String(n)] = mejorGrupo(grupoDe[String(n)], nom); });
     });
     Object.keys(d.NodesData).forEach(function (id) {
       var n = d.NodesData[id] || {}, pat = String(n.Plate || n.Label || '').replace(/\s/g, '').toUpperCase();
-      if (pat) nodos[String(id)] = {patente: pat, grupo: grupoDe[String(id)] || '', modelo: n.Model || '', etiqueta: n.Label || '', nombre: comentarios(n)};
+      if (!pat) return;
+      var ant = nodos[String(id)] || {};
+      var g = grupoDe[String(id)] || ant.grupo || gruposVistos[pat] || '';
+      recordarGrupo(pat, g);
+      nodos[String(id)] = {patente: pat, grupo: g, modelo: n.Model || ant.modelo || '', etiqueta: n.Label || '', nombre: comentarios(n) || ant.nombre || ''};
     });
     return true;
   }
@@ -158,7 +174,7 @@
                 campo(x, /time|date|fecha|hora/i, 'txt', /ignit|encend|apag|alta|creat|install|expir|birth|start|stop|off|on$/i) || '',
           velocidad: campo(x, /speed|veloc|kmh/i, 'num'),
           direccion: campo(x, /addr|direcc|address|location|ubic|street|calle/i, 'txt') || '',
-          grupo: (nd && nd.grupo) || campo(x, /group|grupo|fleet|flota/i, 'txt') || ''});
+          grupo: (nd && nd.grupo) || gruposVistos[pat] || campo(x, /group|grupo|fleet|flota/i, 'txt') || ''});
       }
     }
     for (var k2 in x) { if (Object.prototype.hasOwnProperty.call(x, k2) && (x[k2] && typeof x[k2] === 'object' || typeof x[k2] === 'string')) recorrer(x[k2], salida, prof + 1, k2); }
@@ -181,13 +197,20 @@
     setTimeout(function () { pendiente = false; enviarPosiciones(); }, 2000);
   }
   function estado() {
-    return {pagina: location.href.slice(0, 200), moviles: Object.keys(moviles).length, cada: cada(),
+    return {pagina: location.href.slice(0, 200), moviles: Object.keys(moviles).length, cada: cada(), arbol: Object.keys(nodos).length,
             ultima_posicion: ultimaPos ? Math.round((Date.now() - ultimaPos) / 1000) : null, repite: !!ultimoPedido};
   }
   function enviarPosiciones() {
     var lista = Object.keys(moviles).map(function (k) {
       var v = moviles[k];
-      if (!v.nombre) { for (var id in nodos) { if (nodos[id].patente === v.patente && nodos[id].nombre) { v.nombre = nodos[id].nombre; break; } } }
+      for (var id in nodos) {
+        if (nodos[id].patente !== v.patente) continue;
+        if (!v.nombre && nodos[id].nombre) v.nombre = nodos[id].nombre;
+        if (nodos[id].grupo) v.grupo = nodos[id].grupo;          // el grupo de la lista de Ituran manda
+        break;
+      }
+      if (!v.grupo && gruposVistos[v.patente]) v.grupo = gruposVistos[v.patente];
+      if (v.grupo) recordarGrupo(v.patente, v.grupo);
       return v;
     });
     if (!lista.length || enviando) return;
