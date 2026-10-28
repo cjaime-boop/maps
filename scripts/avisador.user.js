@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Mobisond · Avisador
 // @namespace    mobisond
-// @version      3.23
+// @version      3.24
 // @description  Avisa los casos nuevos (celular, campana y grupo de Telegram), los Lineales sin notas hace 25 min, los SLA y los aceptados; comandos del bot (/status, /bandeja, /autoasignar…).
 // @match        https://*.service-now.com/*
 // @grant        GM_xmlhttpRequest
@@ -1088,7 +1088,7 @@
     if (!hayGrupo() || !soyLider()) return;
     reintentarAvisos();
     atenderPendientes();
-    if (GM_getValue('tg_cmds', 0) < 12) {     // menú de comandos del bot (aparece al escribir "/" en el grupo)
+    if (GM_getValue('tg_cmds', 0) < 13) {     // menú de comandos del bot (aparece al escribir "/" en el grupo)
       tg('setMyCommands', {commands: [{command: 'bandeja', description: 'Casos abiertos de Lineales y GPON'},
                                       {command: 'caso', description: 'Detalle de un caso: /caso WO0096818'},
                                       {command: 'activos', description: 'Quién está activo ahora y quién entra'},
@@ -1096,7 +1096,8 @@
                                       {command: 'semana', description: 'Resumen de esta semana (o /semana 13-10-2026)'},
                                       {command: 'mes', description: 'Resumen de este mes (o /mes 09-2026)'},
                                       {command: 'historial', description: 'Qué pasó cerca de una botella, coordenadas o link'},
-                                      {command: 'autoasignar', description: 'Asignación automática: ver, on u off'}]}, function () { GM_setValue('tg_cmds', 12); });
+                                      {command: 'autoasignar', description: 'Asignación automática: ver, on u off'},
+                                      {command: 'pcs', description: 'PCs conectadas y su versión del Avisador'}]}, function () { GM_setValue('tg_cmds', 13); });
     }
     if (modoBot === null) {                    // ¿el bot está conectado a Supabase?
       modoBot = 'esperando';
@@ -1298,7 +1299,7 @@
           if (vl(x, 'assigned_to') !== sysDe[c.usuario]) throw new Error('ServiceNow no tomó el cambio');
           botLog('autoasignar: ' + woDe(r) + ' -> ' + c.quien + ' (' + c.usuario + ')');
           var prio = dv(r, 'priority');
-          unaVezAlGrupo('pend:' + id, '🤖 <b>Asignado automáticamente</b>\n\n<i>Estuvo ' + Math.floor(min) + ' min sin asignar</i>' +
+          unaVezAlGrupo('asigok:' + id, '🤖 <b>Asignado automáticamente</b>\n\n<i>Estuvo ' + Math.floor(min) + ' min sin asignar</i>' +
             (prio ? '\n\n' + colorPrio(prio) + ' <b>' + esc(prio) + '</b>' : '') +
             cuerpo(r, '👉 <b>Asignado automáticamente a:</b>\n\n👷 <b>' + esc(c.quien) + '</b> (' + esc(c.usuario) + ')\n'));
         }, function (e) {
@@ -1315,8 +1316,7 @@
     if (ahora - GM_getValue('ult_nuevos', 0) < 25000) return;
     GM_setValue('ult_nuevos', ahora);
     if (ahora - autoAsigT > 60000) {
-      autoAsigT = ahora;
-      sbRpc('bot_autoasignar', {p_on: null, p_quien: null}).then(function (e) { autoAsig = e; }, function () {});
+      sbRpc('bot_autoasignar', {p_on: null, p_quien: null}).then(function (e) { autoAsig = e; autoAsigT = Date.now(); }, function () {});
     }
     var q = 'active=true^opened_at>javascript:gs.minutesAgoStart(15)^assignment_group.nameSTARTSWITH' + GRUPOS.lineales +
             '^ORassignment_group.nameSTARTSWITH' + GRUPOS.gpon;
@@ -1331,8 +1331,11 @@
               (motivo ? esc(motivo) : 'Sigue en Pending Dispatch') + '</i>' +
               (prio ? '\n\n' + colorPrio(prio) + ' <b>' + esc(prio) + '</b>' : '') + cuerpo(r));
           };
-          if (autoAsig && autoAsig.estado === 'on') autoAsignar(r, min, avisoSin);
-          else avisoSin('');
+          // prendida / apagada: manda lo que diga Supabase. Si el dato de esta pestaña tiene más de 1 min (o recién recargó), se lee antes de decidir.
+          var decidir = function () { if (autoAsig && autoAsig.estado === 'on') autoAsignar(r, min, avisoSin); else avisoSin(''); };
+          if (autoAsig && Date.now() - autoAsigT < 60000) decidir();
+          else sbRpc('bot_autoasignar', {p_on: null, p_quien: null}).then(function (e) { autoAsig = e; autoAsigT = Date.now(); decidir(); },
+                     function (e) { avisoSin('No pude leer de Supabase si la asignación automática está prendida (' + e.message + ')'); });
         }
       });
       var avisados = GM_getValue('nuevos_avisados', {});
@@ -1962,6 +1965,23 @@
     }
     return false;
   }
+
+  // ---------------------------------------------------------------- /pcs: cada pestaña le cuenta a Supabase su versión y usuario
+  function infoPC() {
+    if (window.top !== window.self || !token() || sesionCaida() || !hayGrupo()) return;
+    var u = GM_getValue('sn_usuario', null);
+    var mandar = function (nombre) {
+      sbRpc('bot_pc_info_guardar', {p_pc: pcId(), p_version: typeof GM_info !== 'undefined' ? GM_info.script.version : '',
+                                    p_usuario: nombre || '', p_lista: !!vigilada()}).catch(function () {});
+    };
+    if (u && Date.now() - u.t < 6 * 3600000) return mandar(u.nombre);    // el usuario se vuelve a mirar cada 6 h
+    api('sys_user', 'sys_id=javascript:gs.getUserID()', 'name,user_name').then(function (rs) {
+      var nombre = rs[0] ? (dv(rs[0], 'name') || dv(rs[0], 'user_name')) : '';
+      GM_setValue('sn_usuario', {nombre: nombre, t: Date.now()}); mandar(nombre);
+    }, function () { mandar(u && u.nombre); });
+  }
+  setTimeout(infoPC, 8000);
+  setInterval(infoPC, 60000);
 
   // ---------------------------------------------------------------- cuándo revisar
   setTimeout(controles, 4000);
