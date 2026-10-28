@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Mobisond · Avisador
 // @namespace    mobisond
-// @version      3.24
+// @version      3.25
 // @description  Avisa los casos nuevos (celular, campana y grupo de Telegram), los Lineales sin notas hace 25 min, los SLA y los aceptados; comandos del bot (/status, /bandeja, /autoasignar…).
 // @match        https://*.service-now.com/*
 // @grant        GM_xmlhttpRequest
@@ -770,11 +770,16 @@
   // La pestaña que atiende en cada PC toma los pedidos cada 5 s (de Supabase, o de Telegram si no hay Supabase).
   // Si varias PCs están prendidas, cada pedido lo contesta una sola.
   function woDe(r) { return dv(r, 'parent') || dv(r, 'number').replace(/^WOT/i, 'WO'); }
-  function textoBandeja() {
+  // "/bandeja gpon" o "/bandeja lineales" (también tl / lin): solo ese proyecto. Sin nada: los dos.
+  function filtroBandeja(texto) {
+    var a = String(texto || '').toLowerCase().split(/\s+/).slice(1).join(' ');
+    return /gpon/.test(a) ? 'GPON' : /lin|^tl\b|\btl\b/.test(a) ? 'Lineales' : '';
+  }
+  function textoBandeja(solo) {
     var q = 'active=true^assignment_group.nameSTARTSWITH' + GRUPOS.lineales + '^ORassignment_group.nameSTARTSWITH' + GRUPOS.gpon;
     return api('wm_task', q, 'sys_id,number,parent,state,substate,u_pause_reason,assignment_group,assigned_to,cmdb_ci').then(function (casos) {
-      var out = ['📋 <b>Bandeja</b> · ' + hhmm(Date.now())];
-      ['Lineales', 'GPON'].forEach(function (pr) {
+      var out = ['📋 <b>Bandeja' + (solo ? ' ' + solo : '') + '</b> · ' + hhmm(Date.now())];
+      (solo ? [solo] : ['Lineales', 'GPON']).forEach(function (pr) {
         var cs = casos.filter(function (r) { return proyecto(r) === pr; });
         var curso = [], verif = [], pausa = [], sin = [], acep = [], camino = [];
         cs.forEach(function (r) {
@@ -796,7 +801,7 @@
           out.push('', '<b>' + titulo + ' (' + lista.length + ')</b>');
           lista.forEach(function (r) { out.push(fila(r, abajo && abajo(r), alLado && alLado(r))); });
         };
-        if (pr === 'GPON') out.push('', '━━━━━━━━━━━━━━━━━━━━');      // separador entre Lineales y GPON
+        if (pr === 'GPON' && !solo) out.push('', '━━━━━━━━━━━━━━━━━━━━');      // separador entre Lineales y GPON
         out.push('', (pr === 'Lineales' ? '🔧' : '📡') + ' <b>' + pr + '</b>', '', cs.length + (cs.length === 1 ? ' abierto' : ' abiertos'));
         if (!cs.length) return;
         grupo('▶️ En curso', curso, function (r) { return dv(r, 'assigned_to'); });
@@ -887,7 +892,7 @@
       return;
     }
     if (p.cmd === '/bandeja') {
-      textoBandeja().then(function (t) {
+      textoBandeja(filtroBandeja(p.texto)).then(function (t) {
         unaVezAlGrupo('cmd:' + p.id, t, p.msg, p.chat, function (ok) { listo(ok ? 'contestado' + (p.chat && String(p.chat) !== String(GM_getValue('tg_chat')) ? ' por privado' : '') : 'no se pudo contestar'); });
       }, function (e) { unaVezAlGrupo('cmd:' + p.id, 'No pude leer la bandeja de ServiceNow (' + esc(e.message) + ').', p.msg, p.chat); listo('error ServiceNow ' + e.message); });
     } else listo('comando desconocido');
@@ -1088,8 +1093,8 @@
     if (!hayGrupo() || !soyLider()) return;
     reintentarAvisos();
     atenderPendientes();
-    if (GM_getValue('tg_cmds', 0) < 13) {     // menú de comandos del bot (aparece al escribir "/" en el grupo)
-      tg('setMyCommands', {commands: [{command: 'bandeja', description: 'Casos abiertos de Lineales y GPON'},
+    if (GM_getValue('tg_cmds', 0) < 14) {     // menú de comandos del bot (aparece al escribir "/" en el grupo)
+      tg('setMyCommands', {commands: [{command: 'bandeja', description: 'Casos abiertos (o /bandeja gpon, /bandeja lineales)'},
                                       {command: 'caso', description: 'Detalle de un caso: /caso WO0096818'},
                                       {command: 'activos', description: 'Quién está activo ahora y quién entra'},
                                       {command: 'status', description: 'Resumen del día (Lineales y GPON)'},
@@ -1097,7 +1102,7 @@
                                       {command: 'mes', description: 'Resumen de este mes (o /mes 09-2026)'},
                                       {command: 'historial', description: 'Qué pasó cerca de una botella, coordenadas o link'},
                                       {command: 'autoasignar', description: 'Asignación automática: ver, on u off'},
-                                      {command: 'pcs', description: 'PCs conectadas y su versión del Avisador'}]}, function () { GM_setValue('tg_cmds', 13); });
+                                      {command: 'pcs', description: 'PCs conectadas y su versión del Avisador'}]}, function () { GM_setValue('tg_cmds', 14); });
     }
     if (modoBot === null) {                    // ¿el bot está conectado a Supabase?
       modoBot = 'esperando';
