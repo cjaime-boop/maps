@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Mobisond · Avisador
 // @namespace    mobisond
-// @version      3.25
+// @version      3.26
 // @description  Avisa los casos nuevos (celular, campana y grupo de Telegram), los Lineales sin notas hace 25 min, los SLA y los aceptados; comandos del bot (/status, /bandeja, /autoasignar…).
 // @match        https://*.service-now.com/*
 // @grant        GM_xmlhttpRequest
@@ -1093,16 +1093,16 @@
     if (!hayGrupo() || !soyLider()) return;
     reintentarAvisos();
     atenderPendientes();
-    if (GM_getValue('tg_cmds', 0) < 14) {     // menú de comandos del bot (aparece al escribir "/" en el grupo)
+    if (GM_getValue('tg_cmds', 0) < 15) {     // menú de comandos del bot (aparece al escribir "/" en el grupo)
       tg('setMyCommands', {commands: [{command: 'bandeja', description: 'Casos abiertos (o /bandeja gpon, /bandeja lineales)'},
                                       {command: 'caso', description: 'Detalle de un caso: /caso WO0096818'},
                                       {command: 'activos', description: 'Quién está activo ahora y quién entra'},
-                                      {command: 'status', description: 'Resumen del día (Lineales y GPON)'},
+                                      {command: 'status', description: 'Resumen del día (o /status gpon, /status lineales)'},
                                       {command: 'semana', description: 'Resumen de esta semana (o /semana 13-10-2026)'},
                                       {command: 'mes', description: 'Resumen de este mes (o /mes 09-2026)'},
                                       {command: 'historial', description: 'Qué pasó cerca de una botella, coordenadas o link'},
                                       {command: 'autoasignar', description: 'Asignación automática: ver, on u off'},
-                                      {command: 'pcs', description: 'PCs conectadas y su versión del Avisador'}]}, function () { GM_setValue('tg_cmds', 14); });
+                                      {command: 'pcs', description: 'PCs conectadas y su versión del Avisador'}]}, function () { GM_setValue('tg_cmds', 15); });
     }
     if (modoBot === null) {                    // ¿el bot está conectado a Supabase?
       modoBot = 'esperando';
@@ -1435,7 +1435,7 @@
       return orden.map(function (k) { return [k, c[k]]; });
     }
 
-    function armar(fecha) {
+    function armar(fecha, solo) {          // solo: 'Lineales' o 'GPON' (/status gpon); sin nada, los dos
       DIA = fecha ? new Date(fecha.getTime()) : new Date(); DIA.setHours(0, 0, 0, 0);
       var g = grupoQ();
       // casos "vivos" ese día: abiertos antes de que termine el día y (todavía abiertos o cerrados desde ese día)
@@ -1471,7 +1471,7 @@
           return {casos: casos, vencidos: venc};
         }, function () { return {casos: casos, vencidos: null}; });   // si no deja leer los SLA, se completa a mano
       }).then(function (d) {
-        return verificadosHoy(d.casos).then(function (vh) { return texto(d.casos, d.vencidos, vh); });
+        return verificadosHoy(d.casos).then(function (vh) { return texto(d.casos, d.vencidos, vh, solo); });
       });
     }
 
@@ -1622,7 +1622,7 @@
       return r.vencidos + ' / ' + r.vencidosWO.join(' / ');
     }
 
-    function texto(casos, venc, vh) {
+    function texto(casos, venc, vh, solo) {
       var L = calcular(casos, venc, 'lineales', vh);
       var G = calcular(casos, venc, 'gpon', vh);
       if (!esDiaHoy()) {
@@ -1634,7 +1634,9 @@
         });
       }
       var t = [];
-      t.push(esDiaHoy() ? saludo() + ';' : 'Resumen del ' + ('0' + DIA.getDate()).slice(-2) + '/' + ('0' + (DIA.getMonth() + 1)).slice(-2) + '/' + DIA.getFullYear(), '', '*Lineales*', '');
+      t.push(esDiaHoy() ? saludo() + ';' : 'Resumen del ' + ('0' + DIA.getDate()).slice(-2) + '/' + ('0' + (DIA.getMonth() + 1)).slice(-2) + '/' + DIA.getFullYear());
+      if (solo !== 'GPON') {
+      t.push('', '*Lineales*', '');
       t.push('Casos ingresados: ' + L.ingresados);
       t.push('Casos resueltos: ' + L.resueltos);
       t.push('Casos totales acumulados: ' + L.acumulados);
@@ -1646,7 +1648,9 @@
       t.push('Casos totales sin atender: ' + L.sinAtender);
       t.push('Casos de Claro sin atender: ' + L.claroSin);
       t.push('Casos en mano: ' + enManoTxt(L.enMano, true));
-      t.push('', '', '*GPON*', '');
+      }
+      if (solo !== 'Lineales') {
+      t.push.apply(t, (solo ? [''] : ['', '']).concat(['*GPON*', '']));   // con los dos, doble renglón antes de GPON
       t.push('Casos ingresados: ' + G.ingresados);
       t.push('Casos resueltos : ' + G.resueltos);
       t.push('Casos acumulados: ' + G.acumulados);
@@ -1658,6 +1662,7 @@
       t.push('Casos sin atender: ' + G.sinAtender + (G.sinNoche ? ' (' + G.sinNoche + ' post 19:00 hs)' : ''));
       t.push('Alguna emergencia: ' + (G.emergencia ? 'sí' : 'no'));
       t.push('Casos en mano: ' + enManoTxt(G.enMano, false));
+      }
       return {dia: new Date(DIA.getTime()), hoy: esDiaHoy(), texto: t.join('\n'), sinSla: !venc, sinVerif: !vh,
               detalle: 'Resueltos Lineales: ' + (L.resueltosDet.join(', ') || 'ninguno') + ' · GPON: ' + (G.resueltosDet.join(', ') || 'ninguno')};
     }
@@ -1898,12 +1903,13 @@
     var hoy = new Date(); hoy.setHours(0, 0, 0, 0);
     if (f === 'mal') return Promise.resolve('No entendí la fecha. Usalo así: <code>/status 09-04-2026</code>');
     if (f && f > hoy) return Promise.resolve('Esa fecha todavía no llegó 🙂');
-    return RESUMEN.armar(f || undefined).then(function (r) {
+    var solo = filtroBandeja('/status ' + arg);     // /status gpon · /status lineales (se puede combinar con la fecha)
+    return RESUMEN.armar(f || undefined, solo).then(function (r) {
       var t = '<pre>' + esc(r.texto) + '</pre>';
       var notas = [];
       if (r.sinSla) notas.push('No pude leer los SLA: "Casos vencidos" queda con ?');
       if (r.sinVerif) notas.push('No pude ver los pases a verificación: "resueltos" son los cerrados hoy');
-      var titulo = r.hoy ? '📊 <b>Resumen del día</b>' : '📊 <b>Resumen del ' + ('0' + r.dia.getDate()).slice(-2) + '/' + ('0' + (r.dia.getMonth() + 1)).slice(-2) + '/' + r.dia.getFullYear() + '</b>\n<i>(acumulados, pausados y en mano no se pueden saber de días anteriores)</i>';
+      var titulo = r.hoy ? '📊 <b>Resumen del día' + (solo ? ' · ' + solo : '') + '</b>' : '📊 <b>Resumen del ' + ('0' + r.dia.getDate()).slice(-2) + '/' + ('0' + (r.dia.getMonth() + 1)).slice(-2) + '/' + r.dia.getFullYear() + (solo ? ' · ' + solo : '') + '</b>\n<i>(acumulados, pausados y en mano no se pueden saber de días anteriores)</i>';
       return titulo + '\n\n<i>Tocá el recuadro para copiarlo y pegalo en WhatsApp</i>\n⚠️ <b>Reporte creado por BOT, revisar antes de enviar</b>\n\n' + t +
              (notas.length ? '\n\n⚠️ <i>' + esc(notas.join(' · ')) + '</i>' : '');
     });
