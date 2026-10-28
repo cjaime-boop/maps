@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Mobisond · Avisador
 // @namespace    mobisond
-// @version      3.21
-// @description  Avisa los casos nuevos (celular, campana y grupo de Telegram), los Lineales sin notas hace 25 min, los SLA y los aceptados; botón de resumen de turno y comandos del bot.
+// @version      3.22
+// @description  Avisa los casos nuevos (celular, campana y grupo de Telegram), los Lineales sin notas hace 25 min, los SLA y los aceptados; comandos del bot (/status, /bandeja, /autoasignar…).
 // @match        https://*.service-now.com/*
 // @grant        GM_xmlhttpRequest
 // @grant        GM_getValue
@@ -311,7 +311,7 @@
   }
 
   // ---------------------------------------------------------------- menú de Tampermonkey
-  GM_registerMenuCommand('Vigilar esta lista (Pending Dispatch)', function () {
+  GM_registerMenuCommand('🔔 Vigilar esta lista (Pending Dispatch)', function () {
     var k = claveLista();
     if (!k) { alert('Abrí la lista de ServiceNow (la de Pending Dispatch) y volvé a elegir esta opción.'); return; }
     GM_setValue('lista', k);
@@ -333,63 +333,55 @@
       alert('Listo, ahora aviso al canal: ' + GM_getValue('canal') + '\nRecargá la página para que tome el cambio.');
     }
   }
-  GM_registerMenuCommand('¿Qué lista vigilo?', function () {
-    var k = GM_getValue('lista', ''), tit = GM_getValue('lista_titulo', '');
-    if (!k) { alert('No estoy vigilando ninguna lista. Abrí la de Pending Dispatch y elegí "Vigilar esta lista".'); return; }
-    if (vigilada()) {
-      alert('SÍ: esta pestaña es la que vigilo (' + (filas() || []).length + ' casos ahora).' + (tit ? '\n' + tit : ''));
-    } else {
-      alert('NO: esta pestaña no es la vigilada.' + (tit ? '\nVigilo: ' + tit : '') +
-            '\n(Tabla ' + k.split('|')[0] + (claveLista() && claveLista().split('|')[0] === k.split('|')[0] ? ', misma tabla pero otro filtro' : '') + ')');
-    }
-  });
-  GM_registerMenuCommand('🧪 Probar todo (celular, campana y grupo)', function () {
+  // Probar todo: celular (ntfy), campana, notificación de la PC y grupo. Devuelve el texto para mostrar.
+  function probarTodo() {
     var f = (filas() || [])[0] || {numero: 'WO0000000', datos: {short_description: 'Caso de prueba'}, link: location.href};
-    aviso('Entró ' + f.numero + ' (prueba)', texto(f), f.link, 4);          // celular (ntfy) + campana + notificación de la PC
+    aviso('Entró ' + f.numero + ' (prueba)', texto(f), f.link, 4);
     if (hayGrupo()) tg('sendMessage', {chat_id: GM_getValue('tg_chat'), text: mensajeGrupo(f, true), parse_mode: 'HTML', disable_web_page_preview: true},
                        null, function (e) { alert('El grupo de Telegram no anduvo: ' + e); });
-    alert('Prueba mandada. Fijate que llegue:\n\n• al celular (ntfy)\n• a la campana\n• al grupo de Telegram' +
-          (hayGrupo() ? '' : ' (NO configurado en esta PC)') + '\n\n(Alexa no se prueba acá: para eso está "Alexa: probar".)');
-  });
-  GM_registerMenuCommand('⚙️ Configuración', configuracion);
-  GM_registerMenuCommand('🔧 Revisar bot', function () {          // diagnóstico temporal de /bandeja
-    var info = ['Versión ' + (typeof GM_info !== 'undefined' ? GM_info.script.version : '?'), 'Pestaña vigilada: ' + (vigilada() ? 'SÍ' : 'NO'), 'Esta pestaña atiende avisos y bot: ' + (soyLider() ? 'SÍ' : 'NO') + (meRefresca() ? ' (es la que recarga el Refrescador)' : ''), 'Grupo guardado: ' + (GM_getValue('tg_chat', '') || 'ninguno'),
+    return 'Prueba mandada. Fijate que llegue al celular (ntfy), a la campana y al grupo de Telegram' +
+           (hayGrupo() ? '.' : ' (el grupo NO está configurado en esta PC).') + ' Alexa se prueba desde su propia configuración.';
+  }
+  // Revisar bot: diagnóstico (versión, pestaña, grupo, webhook y lo último que hizo el bot). Llama a listo(texto).
+  function revisarBot(listo) {
+    var info = ['Versión ' + (typeof GM_info !== 'undefined' ? GM_info.script.version : '?'), 'Pestaña vigilada: ' + (vigilada() ? 'SÍ' : 'NO'), 'Esta pestaña atiende avisos y bot: ' + (soyLider() ? 'SÍ' : 'NO') + (meRefresca() ? ' (es la que recarga el Refrescador)' : '') + (noAtiende() ? ' (se le sacó con "Dejar de vigilar")' : ''), 'Grupo guardado: ' + (GM_getValue('tg_chat', '') || 'ninguno'),
                 'Token: ' + (GM_getValue('tg_token', '') ? 'cargado' : 'falta'), 'Último leído: ' + GM_getValue('tg_offset', 0)];
+    var log = function () { info.push('', 'Lo último que hizo el bot:'); GM_getValue('tg_log', []).forEach(function (l) { info.push('  ' + l); }); };
     tg('getWebhookInfo', {}, function (w) {
       info.push('Webhook: ' + (w.url ? w.url : 'no') + (w.last_error_message ? '\nÚltimo error de Telegram: ' + w.last_error_message : '') +
                 (w.pending_update_count ? '\nPendientes en Telegram: ' + w.pending_update_count : ''));
-      if (w.url) {
-        info.push('', 'Lo último que hizo el bot:'); GM_getValue('tg_log', []).forEach(function (l) { info.push('  ' + l); });
-        alert(info.join('\n')); return;
-      }
+      if (w.url) { log(); listo(info.join('\n')); return; }
       tg('getUpdates', {timeout: 0, allowed_updates: ['message']}, function (ups) {
         info.push('Mensajes pendientes: ' + ups.length);
         ups.slice(-3).forEach(function (u) { var m = u.message || {}; info.push('  #' + u.update_id + ' ' + (m.chat ? m.chat.id + ' ' + (m.chat.title || '') : '') + ': ' + (m.text || '(sin texto)')); });
-        info.push('', 'Lo último que hizo el bot:'); GM_getValue('tg_log', []).forEach(function (l) { info.push('  ' + l); });
-        alert(info.join('\n'));
-      }, function (e) { info.push('getUpdates ERROR: ' + e); alert(info.join('\n')); });
-    }, function (e) { info.push('Telegram ERROR: ' + e); alert(info.join('\n')); });
-  });
-  GM_registerMenuCommand('Dejar de vigilar', function () { GM_setValue('lista', ''); alert('Ya no vigilo ninguna lista.'); });
-  GM_registerMenuCommand('🤖 Asignación automática (prender / apagar)', function () {
-    sbRpc('bot_autoasignar', {p_on: null, p_quien: null}).then(function (e) {
-      var on = e && e.estado === 'on';
-      if (!confirm('Asignación automática: ' + (on ? 'PRENDIDA' : 'apagada') + (e && e.quien ? ' (último cambio: ' + e.quien + ')' : '') +
-                   '\n\n¿' + (on ? 'Apagarla' : 'Prenderla') + ' para todas las PCs?')) return;
-      sbRpc('bot_autoasignar', {p_on: !on, p_quien: 'Tampermonkey (' + pcId() + ')'}).then(function (e2) {
-        autoAsig = e2; autoAsigT = Date.now();
-        alert('🤖 Asignación automática: ' + (e2.estado === 'on' ? 'prendida ✅' : 'apagada ⏸️'));
-      }, function (er) { alert('No pude cambiarla: ' + er.message); });
-    }, function (er) { alert('No pude leer la asignación automática: ' + er.message + '\n¿Ya se corrió asignacion.sql en Supabase?'); });
-  });
+        log(); listo(info.join('\n'));
+      }, function (e) { info.push('getUpdates ERROR: ' + e); listo(info.join('\n')); });
+    }, function (e) { info.push('Telegram ERROR: ' + e); listo(info.join('\n')); });
+  }
+  // "Dejar de vigilar" le saca a ESTA pestaña la lista y el bot (queda anotado en la pestaña, sobrevive a las recargas).
+  // Vuelve a atender si se elige "Vigilar bot" en ella.
+  function noAtiende() { try { return !!sessionStorage.getItem('mbs_no_bot'); } catch (e) { return false; } }
   GM_registerMenuCommand('🤖 Vigilar bot (esta pestaña)', function () {
     if (window.top !== window.self || !token()) { alert('Esta pestaña no puede atender el bot (no tiene la sesión de ServiceNow a mano).'); return; }
+    try { sessionStorage.removeItem('mbs_no_bot'); } catch (e) {}
     GM_setValue('bot_elegida', MI_TAB);
     GM_setValue('lider', {id: MI_TAB, t: Date.now(), refresca: meRefresca()});
     soyLider();
     alert('🤖 Listo: esta pestaña atiende el bot y los avisos.' + (meRefresca() ? '\n\nOjo: es la que recarga el Refrescador; las consultas largas se pueden cortar.' : '') +
           '\n\nSi la cerrás, otra pestaña toma la posta sola.');
   });
+  GM_registerMenuCommand('🚫 Dejar de vigilar', function () {
+    var lista = vigilada(), bot = GM_getValue('bot_elegida', '') === MI_TAB || (GM_getValue('lider', {}) || {}).id === MI_TAB;
+    if (lista) GM_setValue('lista', '');
+    try { sessionStorage.setItem('mbs_no_bot', '1'); } catch (e) {}
+    if (GM_getValue('bot_elegida', '') === MI_TAB) GM_setValue('bot_elegida', '');
+    if ((GM_getValue('lider', {}) || {}).id === MI_TAB) GM_setValue('lider', null);   // otra pestaña o PC lo toma enseguida
+    marcarTitulo(false);
+    alert('🚫 Listo: esta pestaña ya no vigila' + (lista ? ' la lista' : '') + (lista && bot ? ' ni' : '') + (bot ? ' el bot' : '') + (!lista && !bot ? ' nada (no estaba vigilando)' : '') + '.' +
+          (bot ? '\n\nEl bot lo toma sola otra pestaña o PC con ServiceNow abierto.' : '') +
+          '\n\nPara volver: "Vigilar esta lista" o "🤖 Vigilar bot" en el menú.');
+  });
+  GM_registerMenuCommand('⚙️ Configuración', configuracion);
 
   // ---------------------------------------------------------------- controles al grupo de Telegram
   // Cada 2 minutos (desde la pestaña que atiende en cada PC) se consulta ServiceNow por detrás:
@@ -1136,28 +1128,69 @@
 
   // ---------------------------------------------------------------- panel de configuración
   function configuracion() {
-    var v = document.getElementById('mbs-conf'); if (v) v.remove();
-    var p = document.createElement('div');
-    p.id = 'mbs-conf';
-    p.style.cssText = 'position:fixed;inset:0;z-index:2147483646;background:rgba(15,23,42,.35);display:flex;align-items:center;justify-content:center;font:14px "Segoe UI",Arial';
-    var grupo = hayGrupo() ? 'activo' : 'sin configurar';
-    p.innerHTML = '<div style="background:#fff;color:#1f2937;border-radius:12px;width:340px;box-shadow:0 10px 30px rgba(0,0,0,.25);overflow:hidden">' +
-      '<div style="display:flex;align-items:center;padding:12px 14px;border-bottom:1px solid #eef0f2"><b style="font-size:15px">⚙️ Configuración de avisos</b>' +
-      '<span data-a="x" style="margin-left:auto;color:#9ca3af;cursor:pointer;font-size:16px">✕</span></div>' +
+    var viejo = document.getElementById('mobisond-avisador'); if (viejo) viejo.remove();
+    var host = document.createElement('div'); host.id = 'mobisond-avisador';
+    host.style.cssText = 'position:fixed;inset:0;z-index:2147483646;';
+    var sh = host.attachShadow({mode: 'open'});
+    var e2 = function (t) { return esc(t == null ? '' : t).replace(/"/g, '&quot;'); };
+    var ok = function (t) { return '<span class="ok">' + t + '</span>'; }, av = function (t) { return '<span class="av">' + t + '</span>'; };
+    var k = GM_getValue('lista', ''), tit = GM_getValue('lista_titulo', '');
+    var lider = GM_getValue('lider', null), atiendo = !!(lider && lider.id === MI_TAB && Date.now() - lider.t < 15000);
+    var ver = typeof GM_info !== 'undefined' && GM_info.script ? GM_info.script.version : '';
+    var estado = function () {
+      var aa = autoAsig ? (autoAsig.estado === 'on' ? '<b>prendida</b>' : '<b>apagada</b>') : 'sin dato todavía';
+      return '🔔 ' + (!k ? av('No vigila ninguna lista') + ' · abrí Pending Dispatch y elegí "🔔 Vigilar esta lista"' :
+                      'Vigila <b>' + e2(tit || k.split('|')[0]) + '</b> · ' + (vigilada() ? ok('esta pestaña (' + (filas() || []).length + ' casos)') : 'en otra pestaña')) + '<br>' +
+             '🤖 Bot: ' + (noAtiende() ? av('esta pestaña no lo atiende (Dejar de vigilar)') : atiendo ? ok('lo atiende esta pestaña') : 'lo atiende otra pestaña o PC') + '<br>' +
+             '🤖 Asignación automática: ' + aa + ' <span class="gr">(se cambia con /autoasignar)</span><br>' +
+             '🔐 Sesión de ServiceNow: ' + (sesionCaida() ? av('cerrada, recargá la página') : ok('OK')) + ' · PC <code>' + e2(pcId()) + '</code>';
+    };
+    sh.innerHTML = '<style>' +
+      '*{box-sizing:border-box;font-family:"Segoe UI",Roboto,Arial,sans-serif}' +
+      '.fondo{position:absolute;inset:0;background:rgba(15,23,42,.35)}' +
+      '.p{position:absolute;top:70px;right:40px;width:430px;max-height:calc(100vh - 90px);overflow:auto;background:#fff;border-radius:12px;box-shadow:0 12px 32px rgba(0,0,0,.25);font-size:13.5px;color:#111827}' +
+      '.h{background:#1e3a5f;color:#fff;padding:12px 16px;display:flex;align-items:center;gap:8px;font-weight:700;font-size:15px}' +
+      '.h small{margin-left:auto;font-weight:400;opacity:.8}.x{cursor:pointer;margin-left:10px;font-size:18px;opacity:.85}' +
+      '.b{padding:12px 16px;display:flex;flex-direction:column;gap:9px}' +
+      '.e{border-radius:8px;padding:8px 10px;line-height:1.6;background:#f1f5f9}.ok{color:#15803d}.av{color:#b45309}.gr{color:#6b7280}' +
+      'code{font-family:Consolas,monospace;font-size:12.5px}' +
+      '.sec{font-size:11.5px;color:#6b7280;text-transform:uppercase;letter-spacing:.04em;margin-top:2px}' +
+      '.row{display:flex;align-items:center;padding:8px 10px;border:1px solid #eef0f3;border-radius:8px;cursor:pointer}.row:hover{border-color:#2563eb}' +
+      '.row .v{margin-left:auto;color:#2563eb;font-size:12.5px}' +
+      '.bs{display:flex;gap:8px;flex-wrap:wrap}' +
+      'button{border:1px solid #d1d5db;border-radius:7px;padding:6px 10px;background:#f9fafb;font-size:13px;cursor:pointer}button:hover{border-color:#2563eb}' +
+      '.msg{color:#374151;font-size:12.5px;line-height:1.45}' +
+      'pre{margin:0;white-space:pre-wrap;word-break:break-word;font:12px Consolas,monospace;background:#f8fafc;border:1px solid #eef0f3;border-radius:8px;padding:8px;max-height:260px;overflow:auto}' +
+      '</style><div class="fondo"></div><div class="p">' +
+      '<div class="h">🔔 Avisador · Mobisond<small>v' + e2(ver) + '</small><span class="x" title="Cerrar">✕</span></div>' +
+      '<div class="b"><div class="e" id="est">' + estado() + '</div>' +
+      '<div class="sec">Ajustes de esta PC</div>' +
       [['canal', '📱 Mi canal del celular', canal()],
        ['clave', '🔑 Contraseña del equipo', GM_getValue('tg_token', '') ? 'cargada' : 'falta cargar'],
-       ['grupo', '💬 Grupo de Telegram', grupo],
+       ['grupo', '💬 Grupo de Telegram', hayGrupo() ? 'activo' : 'sin configurar'],
        ['campana', '🔔 Abrir la campana de la PC', '']].map(function (o) {
-        return '<div data-a="' + o[0] + '" style="padding:11px 14px;border-bottom:1px solid #f3f4f6;cursor:pointer">' + o[1] +
-               (o[2] ? '<div style="color:#6b7280;font-size:12px;margin-top:2px">' + o[2] + '</div>' : '') + '</div>';
-      }).join('') + '</div>';
-    p.onclick = function (e) {
-      var a = e.target.closest('[data-a]'); if (e.target === p) a = {dataset: {a: 'x'}};
-      if (!a) return;
-      p.remove();
-      ({canal: cambiarCanal, clave: function () { pedirClave(1); }, grupo: configurarGrupo, campana: abrirCampana, x: function () {}})[a.dataset.a]();
+        return '<div class="row" data-a="' + o[0] + '">' + o[1] + '<span class="v">' + e2(o[2]) + ' ›</span></div>';
+      }).join('') +
+      '<div class="sec">Herramientas</div>' +
+      '<div class="bs"><button id="pro">🧪 Probar todo</button><button id="rev">🔧 Revisar bot</button></div>' +
+      '<div class="msg" id="msg"></div></div></div>';
+    var $ = function (id) { return sh.getElementById(id); };
+    var cerrar = function () { host.remove(); };
+    sh.querySelector('.fondo').onclick = cerrar; sh.querySelector('.x').onclick = cerrar;
+    sh.querySelectorAll('.row').forEach(function (r) {
+      r.onclick = function () {
+        cerrar();   // los ajustes usan las ventanitas de siempre (prompt / alert)
+        ({canal: cambiarCanal, clave: function () { pedirClave(1); }, grupo: configurarGrupo, campana: abrirCampana})[r.dataset.a]();
+      };
+    });
+    $('pro').onclick = function () { $('msg').textContent = probarTodo(); };
+    $('rev').onclick = function () {
+      $('msg').textContent = 'Revisando…';
+      revisarBot(function (t) { if (!host.isConnected) return; $('msg').innerHTML = '<pre>' + esc(t) + '</pre>'; });
     };
-    document.body.appendChild(p);
+    // el estado de la asignación automática se lee de Supabase al abrir
+    sbRpc('bot_autoasignar', {p_on: null, p_quien: null}).then(function (e) { autoAsig = e; autoAsigT = Date.now(); if (host.isConnected) $('est').innerHTML = estado(); }, function () {});
+    document.body.appendChild(host);
   }
 
   // ---------------------------------------------------------------- casos nuevos "por detrás" (respaldo)
@@ -1166,7 +1199,7 @@
   // Usa la misma clave que el aviso de la lista (el sys_id), así Supabase no deja que salga dos veces.
   // En la misma consulta se ve si alguno lleva 7 min en Pending Dispatch sin asignar.
   var PENDIENTE_MIN = 7;               // minutos en Pending Dispatch sin asignar antes de avisar
-  // ---- ASIGNACIÓN AUTOMÁTICA (/autoasignar on|off en Telegram, o el menú de Tampermonkey). Arranca apagada.
+  // ---- ASIGNACIÓN AUTOMÁTICA (/autoasignar on|off en Telegram; el estado vive en Supabase). Arranca apagada.
   // A los 7 min sin asignar: la cuadrilla activa del proyecto (cuadro ACTIVOS de la planilla de horarios, que Supabase
   // guarda cada 5 min) con menos casos abiertos. Cuadrilla de la planilla -> cuenta de ServiceNow (la pasa el Chino).
   // la tabla cuadrilla -> cuenta de ServiceNow vive en Supabase (no en este repo público): viene con el estado
@@ -1632,7 +1665,7 @@
       '#mbs-res .b1{flex:1;background:#1b5b8b;color:#fff;border:0}#mbs-res .b2{background:#fff;border:1px solid #cfd6de;color:#1f2937}';
     document.head.appendChild(css);
 
-    GM_registerMenuCommand('📋 Resumen de turno', abrir);   // sin botón flotante: se abre desde el menú
+    // el resumen de turno ya no está en el menú: se pide por Telegram con /status (usa armar())
     }
 
     function abrir(fechaElegida) {
@@ -1909,6 +1942,7 @@
     if (window.top !== window.self) return false;      // solo la ventana principal (no los marcos de adentro)
     if (!token()) return false;                         // y que tenga la sesión de ServiceNow a mano para consultar
     if (sesionCaida()) return false;                    // sesión vencida (401): no atiende hasta que vuelva
+    if (noAtiende()) return false;                      // se le sacó con "Dejar de vigilar"
     var ps = anotarPestaña(), yoRefresco = meRefresca();
     var elegida = GM_getValue('bot_elegida', '');          // la que se eligió desde el menú (mientras siga abierta)
     if (elegida && elegida !== MI_TAB && ps[elegida]) return false;
