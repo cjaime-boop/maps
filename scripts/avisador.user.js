@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Mobisond · Avisador
 // @namespace    mobisond
-// @version      3.19
+// @version      3.20
 // @description  Avisa los casos nuevos (celular, campana y grupo de Telegram), los Lineales sin notas hace 25 min, los SLA y los aceptados; botón de resumen de turno y comandos del bot.
 // @match        https://*.service-now.com/*
 // @grant        GM_xmlhttpRequest
@@ -1259,8 +1259,7 @@
           var prio = dv(r, 'priority');
           unaVezAlGrupo('pend:' + id, '🤖 <b>Asignado automáticamente</b>\n\n<i>Estuvo ' + Math.floor(min) + ' min sin asignar</i>' +
             (prio ? '\n\n' + colorPrio(prio) + ' <b>' + esc(prio) + '</b>' : '') +
-            cuerpo(r, '👷 <b>' + esc(c.quien) + '</b> (' + esc(c.usuario) + ')\n<i>' + esc(porque) + ' · tenía ' + n +
-                      (n === 1 ? ' caso abierto' : ' casos abiertos') + (elegible.length > 1 ? ' (el que menos)' : '') + '</i>'));
+            cuerpo(r, '👷 <b>' + esc(c.quien) + '</b> (' + esc(c.usuario) + ')'));
         }, function (e) {
           botLog('autoasignar: no pude asignar ' + woDe(r) + ': ' + e.message);
           avisoSin('No lo pude asignar (' + e.message + '): asignalo a mano');
