@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Mobisond · Avisador
 // @namespace    mobisond
-// @version      3.16
+// @version      3.18
 // @description  Avisa los casos nuevos (celular, campana y grupo de Telegram), los Lineales sin notas hace 25 min, los SLA y los aceptados; botón de resumen de turno y comandos del bot.
 // @match        https://*.service-now.com/*
 // @grant        GM_xmlhttpRequest
@@ -371,6 +371,17 @@
     }, function (e) { info.push('Telegram ERROR: ' + e); alert(info.join('\n')); });
   });
   GM_registerMenuCommand('Dejar de vigilar', function () { GM_setValue('lista', ''); alert('Ya no vigilo ninguna lista.'); });
+  GM_registerMenuCommand('🤖 Asignación automática (prender / apagar)', function () {
+    sbRpc('bot_autoasignar', {p_on: null, p_quien: null}).then(function (e) {
+      var on = e && e.estado === 'on';
+      if (!confirm('Asignación automática: ' + (on ? 'PRENDIDA' : 'apagada') + (e && e.quien ? ' (último cambio: ' + e.quien + ')' : '') +
+                   '\n\n¿' + (on ? 'Apagarla' : 'Prenderla') + ' para todas las PCs?')) return;
+      sbRpc('bot_autoasignar', {p_on: !on, p_quien: 'Tampermonkey (' + pcId() + ')'}).then(function (e2) {
+        autoAsig = e2; autoAsigT = Date.now();
+        alert('🤖 Asignación automática: ' + (e2.estado === 'on' ? 'prendida ✅' : 'apagada ⏸️'));
+      }, function (er) { alert('No pude cambiarla: ' + er.message); });
+    }, function (er) { alert('No pude leer la asignación automática: ' + er.message + '\n¿Ya se corrió asignacion.sql en Supabase?'); });
+  });
   GM_registerMenuCommand('🤖 Vigilar bot (esta pestaña)', function () {
     if (window.top !== window.self || !token()) { alert('Esta pestaña no puede atender el bot (no tiene la sesión de ServiceNow a mano).'); return; }
     GM_setValue('bot_elegida', MI_TAB);
@@ -1077,14 +1088,15 @@
     if (!hayGrupo() || !soyLider()) return;
     reintentarAvisos();
     atenderPendientes();
-    if (GM_getValue('tg_cmds', 0) < 11) {     // menú de comandos del bot (aparece al escribir "/" en el grupo)
+    if (GM_getValue('tg_cmds', 0) < 12) {     // menú de comandos del bot (aparece al escribir "/" en el grupo)
       tg('setMyCommands', {commands: [{command: 'bandeja', description: 'Casos abiertos de Lineales y GPON'},
                                       {command: 'caso', description: 'Detalle de un caso: /caso WO0096818'},
                                       {command: 'activos', description: 'Quién está activo ahora y quién entra'},
                                       {command: 'status', description: 'Resumen del día (Lineales y GPON)'},
                                       {command: 'semana', description: 'Resumen de esta semana (o /semana 13-10-2026)'},
                                       {command: 'mes', description: 'Resumen de este mes (o /mes 09-2026)'},
-                                      {command: 'historial', description: 'Qué pasó cerca de una botella, coordenadas o link'}]}, function () { GM_setValue('tg_cmds', 11); });
+                                      {command: 'historial', description: 'Qué pasó cerca de una botella, coordenadas o link'},
+                                      {command: 'autoasignar', description: 'Asignación automática: ver, on u off'}]}, function () { GM_setValue('tg_cmds', 12); });
     }
     if (modoBot === null) {                    // ¿el bot está conectado a Supabase?
       modoBot = 'esperando';
@@ -1154,21 +1166,94 @@
   // Usa la misma clave que el aviso de la lista (el sys_id), así Supabase no deja que salga dos veces.
   // En la misma consulta se ve si alguno lleva 7 min en Pending Dispatch sin asignar.
   var PENDIENTE_MIN = 7;               // minutos en Pending Dispatch sin asignar antes de avisar
+  // ---- ASIGNACIÓN AUTOMÁTICA (/autoasignar on|off en Telegram, o el menú de Tampermonkey). Arranca apagada.
+  // A los 7 min sin asignar: la cuadrilla activa del proyecto (cuadro ACTIVOS de la planilla de horarios, que Supabase
+  // guarda cada 5 min) con menos casos abiertos. Cuadrilla de la planilla -> cuenta de ServiceNow (la pasa el Chino).
+  // la tabla cuadrilla -> cuenta de ServiceNow vive en Supabase (no en este repo público): viene con el estado
+  function cuentas() { try { return JSON.parse((autoAsig && autoAsig.cuentas) || '[]'); } catch (e) { return []; } }
+  var autoAsig = null, autoAsigT = 0;
+  function normNom(t) { return String(t || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z]/g, ''); }
+  function cuentaDe(nombrePlanilla, proy) {           // "Hugo - Dylan" -> la cuenta de Hugo (solo la parte antes del guion)
+    var k = normNom(String(nombrePlanilla).split(' - ')[0]);
+    return cuentas().filter(function (c) { return c.proyecto === proy && normNom(c.clave) === k; })[0] || null;
+  }
+  function apiPatch(tabla, id, datos) {
+    var h = {'Accept': 'application/json', 'Content-Type': 'application/json'}, t = token(); if (t) h['X-UserToken'] = t;
+    return fetch(location.origin + '/api/now/table/' + tabla + '/' + id + '?sysparm_fields=assigned_to&sysparm_display_value=all',
+                 {method: 'PATCH', credentials: 'same-origin', headers: h, body: JSON.stringify(datos)}).then(function (r) {
+      if (r.status === 401) sesionPerdida();
+      if (!r.ok) throw new Error('ServiceNow ' + r.status);
+      return r.json();
+    }).then(function (j) { return j.result || {}; });
+  }
+  function autoAsignar(r, min, avisoSin) {
+    var id = vl(r, 'sys_id'), proy = proyecto(r) || 'Lineales';
+    var act = null;
+    try { act = JSON.parse(autoAsig.activos || 'null'); } catch (e) {}
+    var viejo = !autoAsig.activos_t || Date.now() - new Date(autoAsig.activos_t).getTime() > 30 * 60000;
+    if (!act || viejo) return avisoSin('No lo asigné: no tengo la planilla de horarios al día');
+    var nombres = (proy === 'GPON' ? act.gpon : act.tl) || [];
+    if (!nombres.length) return avisoSin('No lo asigné: no hay nadie activo en ' + proy);
+    var cand = [], raros = [];
+    nombres.forEach(function (n) { var c = cuentaDe(n, proy); if (c) { if (cand.indexOf(c) < 0) cand.push(c); } else raros.push(String(n).split(' - ')[0]); });
+    if (!cand.length) return avisoSin('No lo asigné: no reconozco a ' + raros.join(', ') + ' en la tabla de cuentas');
+    // árbitro: con varias PCs, asigna una sola
+    sbRpc('bot_reclamar', {p_aviso: 'asig:' + id, p_pc: pcId()}).then(function (gano) {
+      if (gano === false) return;
+      var usuarios = cand.map(function (c) { return c.usuario; });
+      return Promise.all([
+        api('wm_task', 'active=true^assigned_to.user_nameIN' + usuarios.join(','), 'assigned_to.user_name'),
+        api('sys_user', 'user_nameIN' + usuarios.join(','), 'sys_id,user_name'),
+        api('wm_task', 'sys_id=' + id, 'assigned_to,state')
+      ]).then(function (res) {
+        var ahora = res[2][0];
+        if (!ahora || vl(ahora, 'assigned_to') || !/pending dispatch|pendiente/i.test(dv(ahora, 'state'))) { botLog('autoasignar: ' + woDe(r) + ' ya no está sin asignar'); return; }
+        var cuenta = {}; res[0].forEach(function (t) { var u = vl(t, 'assigned_to.user_name'); cuenta[u] = (cuenta[u] || 0) + 1; });
+        var sysDe = {}; res[1].forEach(function (u) { sysDe[vl(u, 'user_name')] = vl(u, 'sys_id'); });
+        var elegible = cand.filter(function (c) { return sysDe[c.usuario]; });
+        if (!elegible.length) return avisoSin('No lo asigné: no encontré las cuentas ' + usuarios.join(', ') + ' en ServiceNow');
+        elegible.sort(function (a, b) { return (cuenta[a.usuario] || 0) - (cuenta[b.usuario] || 0); });   // empate: el orden de la planilla
+        var c = elegible[0], n = cuenta[c.usuario] || 0;
+        return apiPatch('wm_task', id, {assigned_to: sysDe[c.usuario]}).then(function (x) {
+          if (vl(x, 'assigned_to') !== sysDe[c.usuario]) throw new Error('ServiceNow no tomó el cambio');
+          botLog('autoasignar: ' + woDe(r) + ' -> ' + c.quien + ' (' + c.usuario + ')');
+          var prio = dv(r, 'priority');
+          unaVezAlGrupo('pend:' + id, '🤖 <b>Asignado automáticamente</b>\n\n<i>Estuvo ' + Math.floor(min) + ' min sin asignar</i>' +
+            (prio ? '\n\n' + colorPrio(prio) + ' <b>' + esc(prio) + '</b>' : '') +
+            cuerpo(r, '👷 <b>' + esc(c.quien) + '</b> (' + esc(c.usuario) + ')\n<i>activo en ' + proy + ' · tenía ' + n +
+                      (n === 1 ? ' caso abierto' : ' casos abiertos') + (elegible.length > 1 ? ' (el que menos)' : '') + '</i>'));
+        }, function (e) {
+          botLog('autoasignar: no pude asignar ' + woDe(r) + ': ' + e.message);
+          avisoSin('No lo pude asignar (' + e.message + '): asignalo a mano');
+        });
+      });
+    }).catch(function (e) { botLog('autoasignar: ' + e.message); avisoSin(''); });
+  }
+
   function casosPorDetras() {
     if (!hayGrupo() || !soyLider()) return;
     var ahora = Date.now();
     if (ahora - GM_getValue('ult_nuevos', 0) < 25000) return;
     GM_setValue('ult_nuevos', ahora);
+    if (ahora - autoAsigT > 60000) {
+      autoAsigT = ahora;
+      sbRpc('bot_autoasignar', {p_on: null, p_quien: null}).then(function (e) { autoAsig = e; }, function () {});
+    }
     var q = 'active=true^opened_at>javascript:gs.minutesAgoStart(15)^assignment_group.nameSTARTSWITH' + GRUPOS.lineales +
             '^ORassignment_group.nameSTARTSWITH' + GRUPOS.gpon;
-    api('wm_task', q, 'sys_id,number,parent,priority,cmdb_ci,short_description,opened_at,state,assigned_to').then(function (rs) {
+    api('wm_task', q, 'sys_id,number,parent,priority,cmdb_ci,short_description,opened_at,state,assigned_to,assignment_group').then(function (rs) {
       // SIN ASIGNAR: sigue en Pending Dispatch, sin nadie asignado, 7 min (o más) después de entrar -> avisa una vez
       rs.forEach(function (r) {
         var min = (ahora - utc(vl(r, 'opened_at'))) / 60000;
         if (min >= PENDIENTE_MIN && /pending dispatch|pendiente/i.test(dv(r, 'state')) && !vl(r, 'assigned_to')) {
           var prio = dv(r, 'priority');
-          unaVezAlGrupo('pend:' + vl(r, 'sys_id'), '⏰ <b>Caso sin asignar hace ' + Math.floor(min) + ' min</b>\n\n<i>Sigue en Pending Dispatch</i>' +
-            (prio ? '\n\n' + colorPrio(prio) + ' <b>' + esc(prio) + '</b>' : '') + cuerpo(r));
+          var avisoSin = function (motivo) {
+            unaVezAlGrupo('pend:' + vl(r, 'sys_id'), '⏰ <b>Caso sin asignar hace ' + Math.floor(min) + ' min</b>\n\n<i>' +
+              (motivo ? esc(motivo) : 'Sigue en Pending Dispatch') + '</i>' +
+              (prio ? '\n\n' + colorPrio(prio) + ' <b>' + esc(prio) + '</b>' : '') + cuerpo(r));
+          };
+          if (autoAsig && autoAsig.estado === 'on') autoAsignar(r, min, avisoSin);
+          else avisoSin('');
         }
       });
       var avisados = GM_getValue('nuevos_avisados', {});
