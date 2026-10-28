@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Mobisond · Avisador
 // @namespace    mobisond
-// @version      3.20
+// @version      3.21
 // @description  Avisa los casos nuevos (celular, campana y grupo de Telegram), los Lineales sin notas hace 25 min, los SLA y los aceptados; botón de resumen de turno y comandos del bot.
 // @match        https://*.service-now.com/*
 // @grant        GM_xmlhttpRequest
@@ -315,7 +315,7 @@
     var k = claveLista();
     if (!k) { alert('Abrí la lista de ServiceNow (la de Pending Dispatch) y volvé a elegir esta opción.'); return; }
     GM_setValue('lista', k);
-    GM_setValue('lista_titulo', (document.title || '').replace(/\s*\|\s*ServiceNow\s*$/i, '').trim());
+    GM_setValue('lista_titulo', (document.title || '').replace(/^(\(\d+ s\)|\(⏸\)|\(sin conexión\))\s*/, '').replace(/^(🔔 |🔊 |🔇 |🤖 Bot · )+/, '').replace(/\s*\|\s*ServiceNow\s*$/i, '').trim());
     GM_setValue('vistos2', {});
     GM_setValue('base', false);
     revisar();                         // los casos que ya están no avisan; solo los que entren desde ahora
@@ -1886,15 +1886,18 @@
     return Object.keys(ps).some(function (k) { return k !== MI_TAB && !ps[k].refresca; });
   }
   // Marcas en el título (después del segundero del Refrescador): 🔔 = vigila la lista de casos nuevos, 🤖 Bot = atiende el bot
-  var MARCA_BOT = '🤖 Bot · ', MARCA_LISTA = '🔔 ';
+  // Marcas compartidas con el script de Alexa, siempre en este orden después del segundero del Refrescador:
+  // 🔔 (casos nuevos al grupo) · 🔊/🔇 (Alexa) · 🤖 Bot · (atiende el bot). Cada script toca solo la suya.
+  var MARCAS = ['🔔 ', '🔊 ', '🔇 ', '🤖 Bot · '];
   function marcarTitulo(lider) {
     if (window.top !== window.self) return;
     var t = document.title || '';
-    var m = t.match(/^(\(\d+ s\)|\(⏸\)|\(sin conexión\))\s*/), pre = m ? m[0] : '';
-    var resto = t.slice(pre.length);
-    while (resto.indexOf(MARCA_LISTA) === 0 || resto.indexOf(MARCA_BOT) === 0)
-      resto = resto.slice(resto.indexOf(MARCA_LISTA) === 0 ? MARCA_LISTA.length : MARCA_BOT.length);
-    var nuevo = pre + (vigilada() ? MARCA_LISTA : '') + (lider ? MARCA_BOT : '') + resto;
+    var m = t.match(/^(\(\d+ s\)|\(⏸\)|\(sin conexión\)|⚠ SESIÓN CERRADA ·)\s*/), pre = m ? m[0] : '', resto = t.slice(pre.length), hay = {}, seguir = true;
+    while (seguir) { seguir = false; MARCAS.forEach(function (k) { if (resto.indexOf(k) === 0) { hay[k] = 1; resto = resto.slice(k.length); seguir = true; } }); }
+    delete hay['🔔 ']; delete hay['🤖 Bot · '];
+    if (vigilada()) hay['🔔 '] = 1;
+    if (lider) hay['🤖 Bot · '] = 1;
+    var nuevo = pre + MARCAS.filter(function (k) { return hay[k]; }).join('') + resto;
     if (nuevo !== t) document.title = nuevo;
   }
   function soyLider() {
