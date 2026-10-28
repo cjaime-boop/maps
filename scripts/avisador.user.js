@@ -1259,7 +1259,7 @@
           var prio = dv(r, 'priority');
           unaVezAlGrupo('pend:' + id, '🤖 <b>Asignado automáticamente</b>\n\n<i>Estuvo ' + Math.floor(min) + ' min sin asignar</i>' +
             (prio ? '\n\n' + colorPrio(prio) + ' <b>' + esc(prio) + '</b>' : '') +
-            cuerpo(r, '<b>Asignado a:</b>\n👷 <b>' + esc(c.quien) + '</b> (' + esc(c.usuario) + ')'));
+            cuerpo(r, '👉 <b>Asignado automáticamente a:</b>\n\n👷 <b>' + esc(c.quien) + '</b> (' + esc(c.usuario) + ')\n'));
         }, function (e) {
           botLog('autoasignar: no pude asignar ' + woDe(r) + ': ' + e.message);
           avisoSin('No lo pude asignar (' + e.message + '): asignalo a mano');
