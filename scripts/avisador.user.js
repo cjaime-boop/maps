@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Mobisond · Avisador
 // @namespace    mobisond
-// @version      3.18
+// @version      3.19
 // @description  Avisa los casos nuevos (celular, campana y grupo de Telegram), los Lineales sin notas hace 25 min, los SLA y los aceptados; botón de resumen de turno y comandos del bot.
 // @match        https://*.service-now.com/*
 // @grant        GM_xmlhttpRequest
@@ -1177,6 +1177,32 @@
     var k = normNom(String(nombrePlanilla).split(' - ')[0]);
     return cuentas().filter(function (c) { return c.proyecto === proy && normNom(c.clave) === k; })[0] || null;
   }
+  // cuadrillas de GPON según la tabla "Semana …" de la planilla: las que ENTRAN a las 7 (inicio) o TERMINAN a las 19 (fin) ese día
+  function turnoGPON(semanas, dia, fin) {
+    var nombreDia = ['domingo', 'lunes', 'martes', 'miercoles', 'jueves', 'viernes', 'sabado'][dia.getDay()];
+    var dd = ('0' + dia.getDate()).slice(-2) + '/' + ('0' + (dia.getMonth() + 1)).slice(-2);
+    var tabla = null;
+    semanas.forEach(function (t) {                       // la semana que incluye ese día ("Semana 26/10 al 01/11"); si no, la primera con ese día
+      var m = /(\d{1,2})\/(\d{1,2})\D+(\d{1,2})\/(\d{1,2})/.exec(t.titulo || '');
+      if (m) {
+        var y = dia.getFullYear(), ini = new Date(y, m[2] - 1, +m[1], 0, 0), finS = new Date(y, m[4] - 1, +m[3], 23, 59);
+        if (finS < ini) finS.setFullYear(y + 1);
+        if (dia >= ini && dia <= finS) tabla = t;
+      }
+    });
+    if (!tabla) tabla = semanas.filter(function (t) { return (t.dias || []).indexOf(nombreDia) >= 0; })[0] || null;
+    if (!tabla) return {error: 'no encontré la semana del ' + dd + ' en la planilla'};
+    var col = tabla.dias.indexOf(nombreDia);
+    if (col < 0) return {error: 'no encontré el ' + nombreDia + ' en la planilla'};
+    var nombres = [];
+    tabla.filas.forEach(function (f) {
+      if (!cuentaDe(f.nombre, 'GPON')) return;
+      var rangos = [], m, re = /(\d{1,2})\s*a\s*(\d{1,2})/gi, txt = f.horas[col] || '';
+      while ((m = re.exec(txt))) rangos.push([+m[1], +m[2]]);
+      if (rangos.some(function (x) { return fin ? x[1] === 19 : x[0] === 7; })) nombres.push(f.nombre);
+    });
+    return {nombres: nombres, dia: nombreDia.replace('miercoles', 'miércoles').replace('sabado', 'sábado') + ' ' + dd};
+  }
   function apiPatch(tabla, id, datos) {
     var h = {'Accept': 'application/json', 'Content-Type': 'application/json'}, t = token(); if (t) h['X-UserToken'] = t;
     return fetch(location.origin + '/api/now/table/' + tabla + '/' + id + '?sysparm_fields=assigned_to&sysparm_display_value=all',
@@ -1192,7 +1218,20 @@
     try { act = JSON.parse(autoAsig.activos || 'null'); } catch (e) {}
     var viejo = !autoAsig.activos_t || Date.now() - new Date(autoAsig.activos_t).getTime() > 30 * 60000;
     if (!act || viejo) return avisoSin('No lo asigné: no tengo la planilla de horarios al día');
-    var nombres = (proy === 'GPON' ? act.gpon : act.tl) || [];
+    var nombres = (proy === 'GPON' ? act.gpon : act.tl) || [], porque = 'activo en ' + proy;
+    // GPON fuera de horario (19 a 07): P3 o más baja -> las que arrancan a las 7; P1/P2 -> las que terminaron a las 19
+    var hora = new Date().getHours();
+    if (proy === 'GPON' && (hora >= 19 || hora < 7)) {
+      var alta = /^[12]\b/.test(dv(r, 'priority')) || /^[12]$/.test(vl(r, 'priority'));
+      var dia = new Date(); dia.setHours(12, 0, 0, 0);
+      if (alta && hora < 7) dia.setDate(dia.getDate() - 1);            // P1/P2 de madrugada: las de la tarde anterior
+      if (!alta && hora >= 19) dia.setDate(dia.getDate() + 1);          // P3+ a la noche: las de mañana a la mañana
+      var turno = turnoGPON(act.semanas || [], dia, alta);
+      if (turno.error) return avisoSin('No lo asigné: ' + turno.error);
+      nombres = turno.nombres;
+      porque = 'fuera de horario · ' + (alta ? 'P1/P2 → la que terminó a las 19' : 'P3 o menor → la que entra a las 7') + ' (' + turno.dia + ')';
+      if (!nombres.length) return avisoSin('No lo asigné: ' + (alta ? 'nadie de GPON terminó a las 19' : 'nadie de GPON entra a las 7') + ' el ' + turno.dia + ' (francos)');
+    }
     if (!nombres.length) return avisoSin('No lo asigné: no hay nadie activo en ' + proy);
     var cand = [], raros = [];
     nombres.forEach(function (n) { var c = cuentaDe(n, proy); if (c) { if (cand.indexOf(c) < 0) cand.push(c); } else raros.push(String(n).split(' - ')[0]); });
@@ -1220,7 +1259,7 @@
           var prio = dv(r, 'priority');
           unaVezAlGrupo('pend:' + id, '🤖 <b>Asignado automáticamente</b>\n\n<i>Estuvo ' + Math.floor(min) + ' min sin asignar</i>' +
             (prio ? '\n\n' + colorPrio(prio) + ' <b>' + esc(prio) + '</b>' : '') +
-            cuerpo(r, '👷 <b>' + esc(c.quien) + '</b> (' + esc(c.usuario) + ')\n<i>activo en ' + proy + ' · tenía ' + n +
+            cuerpo(r, '👷 <b>' + esc(c.quien) + '</b> (' + esc(c.usuario) + ')\n<i>' + esc(porque) + ' · tenía ' + n +
                       (n === 1 ? ' caso abierto' : ' casos abiertos') + (elegible.length > 1 ? ' (el que menos)' : '') + '</i>'));
         }, function (e) {
           botLog('autoasignar: no pude asignar ' + woDe(r) + ': ' + e.message);
