@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Mobisond · Avisador
 // @namespace    mobisond
-// @version      3.22
+// @version      3.23
 // @description  Avisa los casos nuevos (celular, campana y grupo de Telegram), los Lineales sin notas hace 25 min, los SLA y los aceptados; comandos del bot (/status, /bandeja, /autoasignar…).
 // @match        https://*.service-now.com/*
 // @grant        GM_xmlhttpRequest
@@ -120,7 +120,8 @@
     var d = f.datos, prio = d.priority || '';
     var titulo = prueba ? '🧪 <b>Prueba de caso nuevo</b>'
                         : '🚨🚨 <b>¡Entró un caso!</b> 🚨🚨\n\n<i>' + DRAMA[Math.floor(Math.random() * DRAMA.length)] + '</i>';
-    var lineaPrio = prio ? '\n\n' + colorPrio(prio) + ' <b>' + esc(prio) + '</b>' + (/^1/.test(prio) && !prueba ? ' 🔥' : '') : '';
+    var pr = f.proyecto === 'GPON' ? '🟣 <b>GPON</b>' : f.proyecto === 'Lineales' ? '🔵 <b>Lineales</b>' : '';   // pedido de Iván
+    var lineaPrio = prio ? '\n\n' + colorPrio(prio) + ' <b>' + esc(prio) + '</b>' + (/^1/.test(prio) && !prueba ? ' 🔥' : '') + (pr ? '  ·  ' + pr : '') : pr ? '\n\n' + pr : '';
     return titulo + lineaPrio + bloqueCaso(f.numero, d.cmdb_ci, d.short_description, f.link, extra);
   }
   // GPON: si el CI del caso nuevo ya tuvo casos en los últimos 90 días, se agrega al aviso (con la causa del cierre)
@@ -164,7 +165,14 @@
     return Promise.race([paso, limite]);
   }
   function avisoCasoNuevo(f) {
-    antecedentesGPON(f.id).then(function (extra) { unaVezAlGrupo(f.id, mensajeGrupo(f, false, extra || '')); });
+    // el proyecto (GPON / Lineales) sale del grupo de asignación; si la lista no lo trae, se pregunta (hasta 8 s)
+    var proy = f.proyecto ? Promise.resolve(f.proyecto) : Promise.race([
+      api('wm_task', 'sys_id=' + f.id, 'sys_id,assignment_group').then(function (rs) { return rs[0] ? proyecto(rs[0]) : ''; }).catch(function () { return ''; }),
+      new Promise(function (ok) { setTimeout(function () { ok(''); }, 8000); })]);
+    Promise.all([antecedentesGPON(f.id), proy]).then(function (x) {
+      f.proyecto = x[1] || '';
+      unaVezAlGrupo(f.id, mensajeGrupo(f, false, x[0] || ''));
+    });
   }
   // Manda al grupo una sola vez por "clave", aunque varias PCs lo detecten (Supabase decide quién lo manda).
   function unaVezAlGrupo(clave, html, responderA, chatId, alTerminar, reintento, primero) {   // chatId: para contestar por privado (si no, al grupo)
@@ -1333,7 +1341,7 @@
         var id = vl(r, 'sys_id');
         if (avisados[id]) return;
         avisados[id] = ahora;
-        var f = {id: id, numero: woDe(r), link: linkCaso(r),
+        var f = {id: id, numero: woDe(r), link: linkCaso(r), proyecto: proyecto(r),
                  datos: {priority: dv(r, 'priority'), cmdb_ci: dv(r, 'cmdb_ci'), short_description: dv(r, 'short_description')}};
         botLog('caso nuevo (por detrás) ' + f.numero);
         avisoCasoNuevo(f);
