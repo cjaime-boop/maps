@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Mobisond · Avisador
 // @namespace    mobisond
-// @version      3.39
+// @version      3.40
 // @description  Avisa los casos nuevos (celular, campana y grupo de Telegram), los Lineales sin notas hace 25 min, los SLA y los aceptados; comandos del bot (/status, /bandeja, /autoasignar…).
 // @match        https://*.service-now.com/*
 // @grant        GM_xmlhttpRequest
@@ -974,7 +974,7 @@
       if (vl(r, 'active') === 'false') return textoCerrado(r);
       var ids = [vl(r, 'sys_id')]; if (vl(r, 'parent')) ids.push(vl(r, 'parent'));
       return Promise.all([
-        ultimasNotas([r]).catch(function () { return {}; }),
+        ultimasNotas([r]).catch(function (e) { return {_error: e.message}; }),
         api('task_sla', 'active=true^taskIN' + ids.join(','), 'sla,stage,has_breached,planned_end_time,business_time_left').catch(function () { return null; })
       ]).then(function (res) {
         var nota = res[0][vl(r, 'sys_id')], slas = res[1];
@@ -987,6 +987,7 @@
                  '👷 ' + esc(dv(r, 'assigned_to') || 'sin asignar'));
         out.push('', '📝 <b>Última actividad Mobisond</b>');
         if (nota && nota.t) out.push(esc(nota.quien || 'sin nombre') + (nota.foto ? ' (foto)' : ''), 'hace ' + duracion((ahora - nota.t) / 60000) + ' · ' + hhmm(nota.t));
+        else if (res[0]._error) out.push('⚠️ no pude leer las notas (' + esc(res[0]._error) + ')');
         else out.push('ninguna todavía');
         out.push('', '⏱️ <b>SLA neto</b>');
         var neto = (slas || []).filter(function (x) { return /neto/i.test(dv(x, 'sla')); })[0];
@@ -1282,10 +1283,11 @@
   // la tabla cuadrilla -> cuenta de ServiceNow vive en Supabase (no en este repo público): viene con el estado
   function cuentas() { try { return JSON.parse((autoAsig && autoAsig.cuentas) || '[]'); } catch (e) { return []; } }
   var autoAsig = null, autoAsigT = 0;
-  function normNom(t) { return String(t || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z]/g, ''); }
+  // ojo: no llamarla normNom (esa es la de las notas de Mobisond; con el mismo nombre una pisaba a la otra)
+  function normCuenta(t) { return String(t || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z]/g, ''); }
   function cuentaDe(nombrePlanilla, proy) {           // "Hugo - Dylan" -> la cuenta de Hugo (solo la parte antes del guion)
-    var k = normNom(String(nombrePlanilla).split(' - ')[0]);
-    return cuentas().filter(function (c) { return c.proyecto === proy && normNom(c.clave) === k; })[0] || null;
+    var k = normCuenta(String(nombrePlanilla).split(' - ')[0]);
+    return cuentas().filter(function (c) { return c.proyecto === proy && normCuenta(c.clave) === k; })[0] || null;
   }
   // cuadrillas de GPON según la tabla "Semana …" de la planilla: las que ENTRAN a las 7 (inicio) o TERMINAN a las 19 (fin) ese día
   function turnoGPON(semanas, dia, fin) {
@@ -1369,7 +1371,7 @@
           var prio = dv(r, 'priority');
           unaVezAlGrupo('asigok:' + id, '🤖 <b>Asignado automáticamente</b>\n\n<i>Estuvo ' + Math.floor(min) + ' min sin asignar</i>' +
             (prio ? '\n\n' + colorPrio(prio) + ' <b>' + esc(prio) + '</b>' : '') +
-            cuerpo(r, '👉 <b>Asignado automáticamente a:</b>\n\n👷 <b>' + esc(c.quien) + '</b> (' + esc(c.usuario) + ')\n'));
+            cuerpo(r, '👉 <b>Asignado automáticamente a:</b>\n\n👷 <b>' + esc(c.quien) + '</b> (<code>' + esc(c.usuario) + '</code>)\n'));
         }, function (e) {
           botLog('autoasignar: no pude asignar ' + woDe(r) + ': ' + e.message);
           avisoSin('No lo pude asignar (' + e.message + '): asignalo a mano');
