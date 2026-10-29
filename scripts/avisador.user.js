@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Mobisond · Avisador
 // @namespace    mobisond
-// @version      3.29
+// @version      3.30
 // @description  Avisa los casos nuevos (celular, campana y grupo de Telegram), los Lineales sin notas hace 25 min, los SLA y los aceptados; comandos del bot (/status, /bandeja, /autoasignar…).
 // @match        https://*.service-now.com/*
 // @grant        GM_xmlhttpRequest
@@ -929,9 +929,9 @@
       var hoySem = new Date(); hoySem.setHours(0, 0, 0, 0);
       var semanaTxt = fs === 'mal' ? Promise.resolve('No entendí la fecha. Usalo así: <code>/semana 13-10-2026</code>')
         : fs && fs > hoySem ? Promise.resolve('Esa fecha todavía no llegó 🙂')
-        : RESUMEN.semana(fs || (automatico ? undefined : hoySem));
+        : (RESUMEN.limpiarGraf(), RESUMEN.semana(fs || (automatico ? undefined : hoySem)));
       semanaTxt.then(function (t) {
-        unaVezAlGrupo('cmd:' + p.id, t, p.msg, p.chat, function (ok) { listo(ok ? 'contestado' : 'no se pudo contestar'); });
+        conGraficos(p, t, function (ok) { listo(ok ? 'contestado' : 'no se pudo contestar'); });
       }, function (e) { unaVezAlGrupo('cmd:' + p.id, 'No pude armar el resumen semanal (' + esc(e.message) + ').', p.msg, p.chat); listo('error ServiceNow ' + e.message); });
       return;
     }
@@ -941,9 +941,9 @@
       var hoyM = new Date(); hoyM.setHours(0, 0, 0, 0);
       var fm = am ? new Date(+am[2], +am[1] - 1, 1) : (autoMes ? undefined : hoyM);
       var mesTxt = (am && (+am[1] < 1 || +am[1] > 12)) ? Promise.resolve('No entendí el mes. Usalo así: <code>/mes 09-2026</code>')
-        : fm && fm > hoyM ? Promise.resolve('Ese mes todavía no llegó 🙂') : RESUMEN.mes(fm);
+        : fm && fm > hoyM ? Promise.resolve('Ese mes todavía no llegó 🙂') : (RESUMEN.limpiarGraf(), RESUMEN.mes(fm));
       mesTxt.then(function (t) {
-        unaVezAlGrupo('cmd:' + p.id, t, p.msg, p.chat, function (ok) { listo(ok ? 'contestado' : 'no se pudo contestar'); });
+        conGraficos(p, t, function (ok) { listo(ok ? 'contestado' : 'no se pudo contestar'); });
       }, function (e) { unaVezAlGrupo('cmd:' + p.id, 'No pude armar el resumen mensual (' + esc(e.message) + ').', p.msg, p.chat); listo('error ServiceNow ' + e.message); });
       return;
     }
@@ -1827,7 +1827,7 @@
             if (n && dentro(d) && d.getTime() <= Date.now()) venc[n] = 1;
           });
           var calc = function (proy) {
-            var r = {ing: 0, res: 0, venc: [], vencBaja: [], vencCli: [], emerg: 0, clientes: [], porDia: {}, cerr: 0, cerrVenc: 0, cerrTodos: 0};
+            var r = {ing: 0, res: 0, venc: [], vencBaja: [], vencCli: [], emerg: 0, clientes: [], porDia: {}, vDia: {}, cerr: 0, cerrVenc: 0, cerrTodos: 0};
             casos.forEach(function (c) {
               if (proyecto(c) !== proy) return;
               var n = dv(c, 'number'), ab = deUtc(val(c, 'opened_at'));
@@ -1836,6 +1836,7 @@
                 if (/^[12]$/.test(val(c, 'priority')) || /^[12]\b/.test(dv(c, 'priority'))) r.emerg++;
                 if (proy === 'lineales') r.clientes.push(cliente(c) || 'otro');
                 var k = iso(ab); r.porDia[k] = (r.porDia[k] || 0) + 1;
+                if (vencAlguna[n] && !prioBaja(c)) r.vDia[k] = (r.vDia[k] || 0) + 1;   // gráficos: vencidos por día de ingreso
               }
               if (prim[n] && dentro(prim[n].d)) r.res++;
               if (venc[n]) (prioBaja(c) ? r.vencBaja : r.venc).push(dv(c, 'parent') || n);   // baja: aparte, no afecta el % en término
@@ -1903,6 +1904,7 @@
       return periodo(lunes, domingo).then(function (d) {
         var L = d.L, G = d.G, hoy0 = new Date(); hoy0.setHours(0, 0, 0, 0);
         var encurso = domingo >= hoy0;           // semana en curso: va del lunes hasta hoy
+        ultimo = {tipo: 'semana', desde: lunes, hasta: encurso ? hoy0 : domingo, hastaTitulo: domingo, L: L, G: G};
         var out = ['📅 <b>Resumen semanal</b> · ' + dm(lunes) + ' al ' + (encurso ? dm(hoy0) + ' <i>(semana en curso)</i>' : dm(domingo)), '', '🔧 <b>Lineales</b>', '',
                    'Ingresados: ' + L.ing, 'Cerrados: ' + L.cerrTodos, 'Vencidos: ' + esc(vencTxtP(L))].concat(vencCliTxt(L), vencBajaTxt(L), [cumplTxt(L)]);
         if (porCliente(L)) out.push(porCliente(L));
@@ -1926,6 +1928,7 @@
       var iniAnt = new Date(ini.getFullYear(), ini.getMonth() - 1, 1), finAnt = new Date(ini.getFullYear(), ini.getMonth(), 0);
       return Promise.all([periodo(ini, encurso ? hoy0 : fin), periodo(iniAnt, finAnt).catch(function () { return null; })]).then(function (r) {
         var d = r[0], a = r[1], L = d.L, G = d.G, mesAnt = MESES[iniAnt.getMonth()];
+        ultimo = {tipo: 'mes', desde: ini, hasta: encurso ? hoy0 : fin, L: L, G: G};
         var cmp = function (x, y, pts) {             // ▲ / ▼ / = contra el mes anterior
           if (y === null || y === undefined || x === null) return '';
           var dif = x - y;
@@ -1950,8 +1953,153 @@
     function esc(t) { return String(t).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
 
     if (window.top === window.self) montar();
-    return {armar: armar, semana: semana, mes: mes};
+    var ultimo = null;                     // datos del último /semana o /mes (para los gráficos)
+    return {armar: armar, semana: semana, mes: mes, ultimoGraf: function () { return ultimo; }, limpiarGraf: function () { ultimo = null; }};
   })();
+  // ---------------------------------------------------------------- gráficos de /semana y /mes (una foto por proyecto)
+  // Barras por día con los casos INGRESADOS ese día; la parte roja son los de esos que se vencieron (SLA neto, sin prioridad baja).
+  // Se dibujan en un canvas en la misma pestaña y van a Telegram como foto, antes del texto.
+  var GRAF = (function () {
+    var TX = '#1f2937', MU = '#6b7280', GR = '#e5e7eb', RED = '#dc2626', FUENTE = '"Segoe UI", Roboto, Arial, sans-serif';
+    var DSEM = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'];
+    function dd(d) { return ('0' + d.getDate()).slice(-2); }
+    function ddmm(d) { return dd(d) + '/' + ('0' + (d.getMonth() + 1)).slice(-2); }
+    function isoD(d) { return d.getFullYear() + '-' + ('0' + (d.getMonth() + 1)).slice(-2) + '-' + dd(d); }
+    function pct(a, b) { return a ? Math.round(100 * b / a) : 0; }
+    function lienzo(w, h) {
+      var c = document.createElement('canvas'); c.width = w * 2; c.height = h * 2;
+      var x = c.getContext('2d'); x.scale(2, 2); x.fillStyle = '#fff'; x.fillRect(0, 0, w, h); x.textBaseline = 'alphabetic';
+      return {c: c, x: x};
+    }
+    function texto(x, t, px, py, tam, color, peso, alin) {
+      x.font = (peso || '400') + ' ' + tam + 'px ' + FUENTE; x.fillStyle = color; x.textAlign = alin || 'left'; x.fillText(t, px, py);
+      return x.measureText(t).width;
+    }
+    function rect(x, px, py, w, h, color, r) {
+      if (h <= 0 || w <= 0) return;
+      x.fillStyle = color; r = Math.min(r || 0, w / 2, h / 2); x.beginPath();
+      if (x.roundRect) x.roundRect(px, py, w, h, r); else x.rect(px, py, w, h);
+      x.fill();
+    }
+    function chip(x, cx, cy, p) {          // etiqueta del % (verde 0, amarilla hasta 20, roja desde 20)
+      var bg = p >= 20 ? '#fee2e2' : p > 0 ? '#fef3c7' : '#dcfce7', fg = p >= 20 ? '#991b1b' : p > 0 ? '#92400e' : '#166534';
+      rect(x, cx - 23, cy - 14, 46, 20, bg, 10); texto(x, p + '%', cx, cy, 11.5, fg, '700', 'center');
+    }
+    function leyenda(x, color, conFinde) {
+      var px = 24, items = [[color, 'En término'], [RED, 'Vencidos']].concat(conFinde ? [['#f1f5f9', 'Fin de semana']] : []);
+      items.forEach(function (it) {
+        rect(x, px, 72, 12, 12, it[0], 2); if (it[0] === '#f1f5f9') { x.strokeStyle = '#cbd5e1'; x.strokeRect(px + 0.5, 72.5, 11, 11); }
+        px += 18 + texto(x, it[1], px + 18, 83, 12.5, TX) + 20;
+      });
+      if (!conFinde) texto(x, '% = vencidos sobre ingresados', px, 83, 12.5, MU);
+    }
+    // datos: {proy, color, dias: [Date], ing: [n], ven: [n], titulo}
+    function barras(x, dt, x0, y0, x1, y1, mes) {
+      var vmax = Math.max(4, Math.ceil((Math.max.apply(null, dt.ing.concat([0])) + 1) / 4) * 4), n = dt.dias.length, cw = (x1 - x0) / n, bw = cw * (mes ? 0.66 : 0.5);
+      if (mes) dt.dias.forEach(function (d, i) { if (d.getDay() === 0 || d.getDay() === 6) rect(x, x0 + cw * i, y0 - 6, cw, y1 - y0 + 6, '#f1f5f9'); });
+      for (var v = 0; v <= vmax; v += vmax / 4) {
+        var y = y1 - (y1 - y0) * v / vmax; x.fillStyle = GR; x.fillRect(x0, Math.round(y), x1 - x0, 1);
+        texto(x, String(v), x0 - 8, y + 4, 11, MU, '400', 'right');
+      }
+      dt.dias.forEach(function (d, i) {
+        var cx = x0 + cw * i + cw / 2, ht = (y1 - y0) * dt.ing[i] / vmax, hv = (y1 - y0) * dt.ven[i] / vmax;
+        rect(x, cx - bw / 2, y1 - ht, bw, ht, dt.color, mes ? 2 : 4);
+        if (dt.ven[i]) { rect(x, cx - bw / 2, y1 - hv, bw, hv, RED, 0); if (!mes && hv >= 14) texto(x, String(dt.ven[i]), cx, y1 - hv / 2 + 4, 11.5, '#fff', '700', 'center'); }
+        if (dt.ing[i]) texto(x, String(dt.ing[i]), cx, y1 - ht - (mes ? 4 : 6), mes ? 9.5 : 12, TX, mes ? '400' : '700', 'center');
+        if (mes) { if (i === 0 || (d.getDate()) % 5 === 0) texto(x, String(d.getDate()), cx, y1 + 16, 11, MU, '400', 'center'); }
+        else { texto(x, DSEM[d.getDay()] + ' ' + dd(d), cx, y1 + 20, 12, MU, '400', 'center'); if (dt.falta && dt.falta[i]) texto(x, '—', cx, y1 + 42, 12, MU, '400', 'center'); else chip(x, cx, y1 + 42, pct(dt.ing[i], dt.ven[i])); }
+      });
+    }
+    function pie(x, dt, y, cuando) {
+      var ti = dt.ing.reduce(function (a, b) { return a + b; }, 0), tv = dt.ven.reduce(function (a, b) { return a + b; }, 0), px = 24;
+      px += texto(x, 'Ingresados ' + ti, px, y, 14, TX, '700'); px += texto(x, '  ·  ', px, y, 14, TX);
+      px += texto(x, 'Vencidos ' + tv, px, y, 14, RED, '700'); px += texto(x, '  ·  ', px, y, 14, TX);
+      texto(x, pct(ti, tv) + '% vencidos en ' + cuando, px, y, 14, TX, '700');
+    }
+    function fotoSemana(dt) {
+      var L = lienzo(640, 440), x = L.x;
+      texto(x, dt.titulo, 24, 36, 20, TX, '700');
+      texto(x, 'Casos ingresados por día: la parte roja son los que se vencieron', 24, 58, 13, MU);
+      leyenda(x, dt.color, false);
+      barras(x, dt, 50, 110, 620, 350, false);
+      pie(x, dt, 425, 'la semana');
+      return L.c;
+    }
+    function fotoMes(dt) {
+      // fines de semana del período: pares sábado + domingo (o el que caiga dentro)
+      var findes = [], hab = {d: 0, i: 0, v: 0}, fin = {d: 0, i: 0, v: 0};
+      dt.dias.forEach(function (d, i) {
+        var f = d.getDay() === 0 || d.getDay() === 6, t = f ? fin : hab; t.d++; t.i += dt.ing[i]; t.v += dt.ven[i];
+        if (!f) return;
+        var ult = findes[findes.length - 1];
+        if (d.getDay() === 0 && ult && ult.sab && (d - ult.sab) < 2 * 864e5) { ult.dom = d; ult.i += dt.ing[i]; ult.v += dt.ven[i]; }
+        else findes.push({sab: d.getDay() === 6 ? d : null, dom: d.getDay() === 0 ? d : null, i: dt.ing[i], v: dt.ven[i]});
+      });
+      var h = 534 + findes.length * 22, L = lienzo(640, h), x = L.x;
+      texto(x, dt.titulo, 24, 36, 20, TX, '700');
+      texto(x, 'Casos ingresados por día: la parte roja son los que se vencieron', 24, 58, 13, MU);
+      leyenda(x, dt.color, true);
+      barras(x, dt, 50, 100, 620, 330, true);
+      pie(x, dt, 368, 'el mes');
+      x.fillStyle = GR; x.fillRect(24, 388, 592, 1);
+      texto(x, 'Fines de semana', 24, 414, 15, TX, '700');
+      [[hab, 'Días hábiles (prom. por día)', 24], [fin, 'Fines de semana (prom. por día)', 326]].forEach(function (t) {
+        rect(x, t[2], 428, 290, 58, '#f8fafc', 10); x.strokeStyle = GR; x.strokeRect(t[2] + 0.5, 428.5, 289, 57);
+        texto(x, t[1], t[2] + 14, 450, 12, MU);
+        texto(x, (t[0].d ? (t[0].i / t[0].d).toFixed(1).replace('.', ',') : '0') + ' ingresados', t[2] + 14, 476, 15, TX, '700');
+        chip(x, t[2] + 249, 474, pct(t[0].i, t[0].v));
+      });
+      var y = 514;
+      texto(x, 'Fin de semana', 24, y, 11.5, MU); texto(x, 'Ingresados', 250, y, 11.5, MU); texto(x, 'Vencidos', 360, y, 11.5, MU); texto(x, '%', 460, y, 11.5, MU);
+      findes.forEach(function (f) {
+        y += 22;
+        var lab = f.sab && f.dom ? 'Sáb ' + dd(f.sab) + ' y Dom ' + ddmm(f.dom) : f.sab ? 'Sáb ' + ddmm(f.sab) : 'Dom ' + ddmm(f.dom);
+        texto(x, lab, 24, y, 13, TX); texto(x, String(f.i), 250, y, 13, TX, '700'); texto(x, String(f.v), 360, y, 13, RED, '700');
+        chip(x, 469, y + 1, pct(f.i, f.v));
+      });
+      return L.c;
+    }
+    // g: {tipo: 'semana'|'mes', desde, hasta, L, G} (L y G con porDia y vDia por fecha ISO). Devuelve [{blob, nombre}]
+    function armar(g) {
+      var dias = [];
+      var hastaDib = g.tipo === 'semana' && g.hastaTitulo ? g.hastaTitulo : g.hasta;     // semana en curso: los 7 días igual (los que faltan, vacíos)
+      for (var d = new Date(g.desde.getTime()); d <= hastaDib; d = new Date(d.getFullYear(), d.getMonth(), d.getDate() + 1)) dias.push(d);
+      var MES = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
+      var cuando = g.tipo === 'mes' ? MES[g.desde.getMonth()].replace(/^./, function (c) { return c.toUpperCase(); }) + ' ' + g.desde.getFullYear()
+                                    : 'Semana ' + ddmm(g.desde) + ' al ' + ddmm(g.hastaTitulo || g.hasta);
+      var fotos = [['Lineales', '#2563eb', g.L], ['GPON', '#8b5cf6', g.G]].map(function (p) {
+        var dt = {proy: p[0], color: p[1], dias: dias, titulo: p[0] + ' · ' + cuando, falta: dias.map(function (d) { return d > g.hasta; }),
+                  ing: dias.map(function (d) { return p[2].porDia[isoD(d)] || 0; }), ven: dias.map(function (d) { return p[2].vDia[isoD(d)] || 0; })};
+        return {nombre: p[0], canvas: g.tipo === 'mes' ? fotoMes(dt) : fotoSemana(dt), cuando: cuando};
+      });
+      return Promise.all(fotos.map(function (f) {
+        return new Promise(function (ok, mal) { f.canvas.toBlob(function (b) { if (b) ok({blob: b, nombre: f.nombre, cuando: f.cuando}); else mal(new Error('no pude dibujar el gráfico')); }, 'image/png'); });
+      }));
+    }
+    return {armar: armar};
+  })();
+  // manda una foto (blob PNG) al grupo o al chat del pedido
+  function tgFoto(chat, blob, caption, responderA) {
+    return new Promise(function (ok, mal) {
+      var fd = new FormData();
+      fd.append('chat_id', String(chat)); fd.append('photo', blob, 'grafico.png');
+      if (caption) { fd.append('caption', caption); fd.append('parse_mode', 'HTML'); }
+      if (responderA) { fd.append('reply_to_message_id', String(responderA)); fd.append('allow_sending_without_reply', 'true'); }
+      GM_xmlhttpRequest({method: 'POST', url: 'https://api.telegram.org/bot' + GM_getValue('tg_token', '') + '/sendPhoto', data: fd, timeout: 30000,
+        onload: function (r) { var j = {}; try { j = JSON.parse(r.responseText); } catch (e) {} if (j.ok) ok(j.result); else mal(new Error(j.description || ('error ' + r.status))); },
+        ontimeout: function () { mal(new Error('Telegram tardó demasiado')); }, onerror: function () { mal(new Error('sin conexión con Telegram')); }});
+    });
+  }
+  // primero los gráficos (si se pudieron armar), después el texto de siempre. Si los gráficos fallan, el texto sale igual.
+  function conGraficos(p, texto, alTerminar) {
+    var g = RESUMEN.ultimoGraf(), chat = p.chat || GM_getValue('tg_chat');
+    var fotos = g ? GRAF.armar(g).then(function (fs) {
+      return fs.reduce(function (cad, f) {
+        return cad.then(function () { return tgFoto(chat, f.blob, '📊 <b>' + f.nombre + '</b> · ' + esc(f.cuando.replace(/^Semana/, 'semana')), p.msg); });
+      }, Promise.resolve());
+    }).catch(function (e) { botLog('gráficos: ' + e.message); }) : Promise.resolve();
+    fotos.then(function () { unaVezAlGrupo('cmd:' + p.id, texto, p.msg, p.chat, alTerminar); });
+  }
   // el resumen para Telegram: va en un recuadro que se copia con un toque, tal cual (con los * de WhatsApp)
   // "/status", "/status 09-04-2026", "/status 9/4" (sin año = este año)
   function fechaDeTexto(t) {
