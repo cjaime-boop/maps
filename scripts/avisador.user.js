@@ -2065,18 +2065,19 @@
       });
       return L.c;
     }
+    var NOMBRE_CLI = {CLR: 'Claro', EDN: 'Edenor', MUNI: 'Municipal', TP: 'Telecom'};
     // Lineales por cliente: barras horizontales (ingresados, con la parte roja de vencidos) y % en término
     function fotoClientes(titulo, ing, ven) {
       var cls = Object.keys(ing).sort(function (a, b) { return a === 'Otros' ? 1 : b === 'Otros' ? -1 : ing[b] - ing[a]; });
-      var h = 150 + cls.length * 52 + 46, L = lienzo(640, h), x = L.x, color = '#2563eb';
+      var h = 150 + cls.length * 52 + 26, L = lienzo(640, h), x = L.x, color = '#2563eb';
       texto(x, titulo, 24, 36, 20, TX, '700');
       texto(x, 'Casos ingresados por cliente: la parte roja son los que se vencieron', 24, 58, 13, MU);
       leyenda(x, color, false);
-      var x0 = 130, x1 = 520, vmax = Math.max.apply(null, cls.map(function (c) { return ing[c]; }).concat([1])), y = 112, ti = 0, tv = 0, peor = null;
+      var x0 = 130, x1 = 520, vmax = Math.max.apply(null, cls.map(function (c) { return ing[c]; }).concat([1])), y = 112, ti = 0, tv = 0;
       cls.forEach(function (c) {
         var i = ing[c] || 0, v = ven[c] || 0, wi = (x1 - x0) * i / vmax, wv = (x1 - x0) * v / vmax; ti += i; tv += v;
-        if (i && c !== 'Otros' && (!peor || v / i > peor.r)) peor = {c: c, r: v / i, p: 100 - pct(i, v)};
-        texto(x, c, 24, y + 24, 14, TX, '700');
+        texto(x, c, 24, y + 17, 14, TX, '700');
+        texto(x, NOMBRE_CLI[c] || (c === 'Otros' ? 'sin cliente' : ''), 24, y + 33, 11, MU);
         rect(x, x0, y + 4, wi, 30, color, 4);
         if (v) { rect(x, x0, y + 4, wv, 30, RED, 0); if (wv > 16) texto(x, String(v), x0 + wv / 2, y + 24, 11.5, '#fff', '700', 'center'); }
         texto(x, String(i), x0 + wi + 8, y + 24, 13, TX, '700');
@@ -2088,7 +2089,6 @@
       px += texto(x, 'Ingresados ' + ti, px, y + 32, 14, TX, '700'); px += texto(x, '  ·  ', px, y + 32, 14, TX);
       px += texto(x, 'Vencidos ' + tv, px, y + 32, 14, RED, '700'); px += texto(x, '  ·  ', px, y + 32, 14, TX);
       texto(x, (ti ? 100 - pct(ti, tv) : 100) + '% en término', px, y + 32, 14, TX, '700');
-      if (peor && peor.r > 0) texto(x, 'Cliente con menos en término: ' + peor.c + ' (' + peor.p + '%)', 24, y + 54, 12.5, MU);
       return L.c;
     }
     // g: {tipo: 'semana'|'mes', desde, hasta, L, G} (L y G con porDia y vDia por fecha ISO). Devuelve [{blob, nombre}]
