@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Mobisond · Avisador
 // @namespace    mobisond
-// @version      3.30
+// @version      3.31
 // @description  Avisa los casos nuevos (celular, campana y grupo de Telegram), los Lineales sin notas hace 25 min, los SLA y los aceptados; comandos del bot (/status, /bandeja, /autoasignar…).
 // @match        https://*.service-now.com/*
 // @grant        GM_xmlhttpRequest
@@ -1981,8 +1981,10 @@
       if (x.roundRect) x.roundRect(px, py, w, h, r); else x.rect(px, py, w, h);
       x.fill();
     }
-    function chip(x, cx, cy, p) {          // etiqueta del % (verde 0, amarilla hasta 20, roja desde 20)
-      var bg = p >= 20 ? '#fee2e2' : p > 0 ? '#fef3c7' : '#dcfce7', fg = p >= 20 ? '#991b1b' : p > 0 ? '#92400e' : '#166534';
+    function chip(x, cx, cy, ing, ven) {   // % EN TÉRMINO (ingresados que no se vencieron): verde 100, amarilla más de 80, roja 80 o menos
+      if (!ing) { texto(x, '—', cx, cy, 12, MU, '400', 'center'); return; }
+      var p = 100 - pct(ing, ven);
+      var bg = p <= 80 ? '#fee2e2' : p < 100 ? '#fef3c7' : '#dcfce7', fg = p <= 80 ? '#991b1b' : p < 100 ? '#92400e' : '#166534';
       rect(x, cx - 23, cy - 14, 46, 20, bg, 10); texto(x, p + '%', cx, cy, 11.5, fg, '700', 'center');
     }
     function leyenda(x, color, conFinde) {
@@ -1991,7 +1993,7 @@
         rect(x, px, 72, 12, 12, it[0], 2); if (it[0] === '#f1f5f9') { x.strokeStyle = '#cbd5e1'; x.strokeRect(px + 0.5, 72.5, 11, 11); }
         px += 18 + texto(x, it[1], px + 18, 83, 12.5, TX) + 20;
       });
-      if (!conFinde) texto(x, '% = vencidos sobre ingresados', px, 83, 12.5, MU);
+      if (!conFinde) texto(x, '% = en término sobre ingresados', px, 83, 12.5, MU);
     }
     // datos: {proy, color, dias: [Date], ing: [n], ven: [n], titulo}
     function barras(x, dt, x0, y0, x1, y1, mes) {
@@ -2007,14 +2009,14 @@
         if (dt.ven[i]) { rect(x, cx - bw / 2, y1 - hv, bw, hv, RED, 0); if (!mes && hv >= 14) texto(x, String(dt.ven[i]), cx, y1 - hv / 2 + 4, 11.5, '#fff', '700', 'center'); }
         if (dt.ing[i]) texto(x, String(dt.ing[i]), cx, y1 - ht - (mes ? 4 : 6), mes ? 9.5 : 12, TX, mes ? '400' : '700', 'center');
         if (mes) { if (i === 0 || (d.getDate()) % 5 === 0) texto(x, String(d.getDate()), cx, y1 + 16, 11, MU, '400', 'center'); }
-        else { texto(x, DSEM[d.getDay()] + ' ' + dd(d), cx, y1 + 20, 12, MU, '400', 'center'); if (dt.falta && dt.falta[i]) texto(x, '—', cx, y1 + 42, 12, MU, '400', 'center'); else chip(x, cx, y1 + 42, pct(dt.ing[i], dt.ven[i])); }
+        else { texto(x, DSEM[d.getDay()] + ' ' + dd(d), cx, y1 + 20, 12, MU, '400', 'center'); if (dt.falta && dt.falta[i]) texto(x, '—', cx, y1 + 42, 12, MU, '400', 'center'); else chip(x, cx, y1 + 42, dt.ing[i], dt.ven[i]); }
       });
     }
     function pie(x, dt, y, cuando) {
       var ti = dt.ing.reduce(function (a, b) { return a + b; }, 0), tv = dt.ven.reduce(function (a, b) { return a + b; }, 0), px = 24;
       px += texto(x, 'Ingresados ' + ti, px, y, 14, TX, '700'); px += texto(x, '  ·  ', px, y, 14, TX);
       px += texto(x, 'Vencidos ' + tv, px, y, 14, RED, '700'); px += texto(x, '  ·  ', px, y, 14, TX);
-      texto(x, pct(ti, tv) + '% vencidos en ' + cuando, px, y, 14, TX, '700');
+      texto(x, (ti ? 100 - pct(ti, tv) : 100) + '% en término en ' + cuando, px, y, 14, TX, '700');
     }
     function fotoSemana(dt) {
       var L = lienzo(640, 440), x = L.x;
@@ -2047,15 +2049,15 @@
         rect(x, t[2], 428, 290, 58, '#f8fafc', 10); x.strokeStyle = GR; x.strokeRect(t[2] + 0.5, 428.5, 289, 57);
         texto(x, t[1], t[2] + 14, 450, 12, MU);
         texto(x, (t[0].d ? (t[0].i / t[0].d).toFixed(1).replace('.', ',') : '0') + ' ingresados', t[2] + 14, 476, 15, TX, '700');
-        chip(x, t[2] + 249, 474, pct(t[0].i, t[0].v));
+        chip(x, t[2] + 249, 474, t[0].i, t[0].v);
       });
       var y = 514;
-      texto(x, 'Fin de semana', 24, y, 11.5, MU); texto(x, 'Ingresados', 250, y, 11.5, MU); texto(x, 'Vencidos', 360, y, 11.5, MU); texto(x, '%', 460, y, 11.5, MU);
+      texto(x, 'Fin de semana', 24, y, 11.5, MU); texto(x, 'Ingresados', 250, y, 11.5, MU); texto(x, 'Vencidos', 360, y, 11.5, MU); texto(x, 'En término', 446, y, 11.5, MU);
       findes.forEach(function (f) {
         y += 22;
         var lab = f.sab && f.dom ? 'Sáb ' + dd(f.sab) + ' y Dom ' + ddmm(f.dom) : f.sab ? 'Sáb ' + ddmm(f.sab) : 'Dom ' + ddmm(f.dom);
         texto(x, lab, 24, y, 13, TX); texto(x, String(f.i), 250, y, 13, TX, '700'); texto(x, String(f.v), 360, y, 13, RED, '700');
-        chip(x, 469, y + 1, pct(f.i, f.v));
+        chip(x, 469, y + 1, f.i, f.v);
       });
       return L.c;
     }
