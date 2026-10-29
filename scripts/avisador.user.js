@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Mobisond · Avisador
 // @namespace    mobisond
-// @version      3.37
+// @version      3.38
 // @description  Avisa los casos nuevos (celular, campana y grupo de Telegram), los Lineales sin notas hace 25 min, los SLA y los aceptados; comandos del bot (/status, /bandeja, /autoasignar…).
 // @match        https://*.service-now.com/*
 // @grant        GM_xmlhttpRequest
@@ -2271,7 +2271,7 @@
       var causasDesde = new Date(hasta.getTime()); causasDesde.setDate(causasDesde.getDate() - 2);   // causas: solo los últimos 3 días
       return Promise.all([tablaDias(desde, hasta, causasDesde), ramas]).then(function (x) {
         return sbRpc('tab_guardar', {p_dias: x[0], p_ramas: x[1]});
-      }).then(historico).then(function () { soltar(); botLog('tablero actualizado'); }, function (e) {   // falló: se suelta en Supabase para reintentar en 15 min (esta PC u otra)
+      }).then(function () { soltar(); botLog('tablero actualizado'); }, function (e) {   // falló: se suelta en Supabase para reintentar en 15 min (esta PC u otra)
         soltar(); GM_setValue('tab_hora', ''); sbRpc('bot_soltar', {p_aviso: 'tab:' + hora}).catch(function () {}); botLog('tablero: ' + e.message);
       });
     }, function () { GM_setValue('tab_hora', ''); });
@@ -2341,24 +2341,39 @@
       });
     });
   }
-  // Histórico: la primera vez (o si falta), carga hacia atrás hasta el 1° de enero de 2026, de a 4 semanas, con una pausa entre tramos.
-  // Supabase dice desde qué día ya hay datos: así se hace una sola vez, aunque haya varias PCs.
-  var TAB_INICIO = new Date(2026, 0, 1);                      // desde cuándo se carga el histórico
-  function historico() {
-    return sbRpc('tab_desde', {}).then(function (min) {
-      var hoy0 = new Date(); hoy0.setHours(0, 0, 0, 0);
-      var tope = new Date(TAB_INICIO.getTime());
-      var hasta = min ? new Date(min + 'T00:00:00') : new Date(hoy0.getTime());
-      hasta.setDate(hasta.getDate() - 1);
-      if (hasta < tope) return;                                   // ya está todo
-      var desde = new Date(hasta.getTime()); desde.setDate(desde.getDate() - 27);
-      if (desde < tope) desde = tope;
-      botLog('tablero: cargo el histórico ' + desde.toISOString().slice(0, 10) + ' a ' + hasta.toISOString().slice(0, 10));
-      return tablaDias(desde, hasta).then(function (dias) { return sbRpc('tab_guardar', {p_dias: dias, p_ramas: null}); })
-        .then(function () { return new Promise(function (ok) { setTimeout(ok, 5000); }); })
-        .then(historico);                                          // sigue con el tramo anterior
-    }, function () {});                                            // sin la función tab_desde (falta el SQL): no hace histórico
+  // CARGA INICIAL (una sola vez): arma la base desde el 1° de enero de 2026 hasta ayer, de a 4 semanas hacia atrás.
+  // Supabase dice desde qué día ya hay datos: si ya llega a enero, no hace nada. Si un tramo se guarda y Supabase no avanza,
+  // se frena y lo anota (no repite). Si se corta (recarga), sigue sola a los 15 min desde donde quedó.
+  var TAB_INICIO = new Date(2026, 0, 1), cargandoBase = false;
+  function cargaInicial() {
+    if (cargandoBase || GM_getValue('tab_base_ok', false) || !hayGrupo() || !soyLider() || sesionCaida()) return;
+    var ahora = new Date(), turno = ahora.getFullYear() + '-' + (ahora.getMonth() + 1) + '-' + ahora.getDate() + '-' + ahora.getHours() + '-' + Math.floor(ahora.getMinutes() / 15);
+    cargandoBase = true;
+    var fin = function (t) { cargandoBase = false; if (t) botLog(t); };
+    sbRpc('bot_reclamar', {p_aviso: 'tabbase:' + turno, p_pc: pcId()}).then(function (gano) {
+      if (gano === false) return fin();
+      var tramo = function (anterior) {
+        return sbRpc('tab_desde', {}).then(function (min) {
+          if (anterior !== undefined && min === anterior) throw new Error('Supabase no avanzó después de guardar ' + min + ': freno la carga inicial');
+          var hoy0 = new Date(); hoy0.setHours(0, 0, 0, 0);
+          var hasta = min ? new Date(min + 'T00:00:00') : hoy0; hasta.setDate(hasta.getDate() - 1);
+          if (hasta < TAB_INICIO) { GM_setValue('tab_base_ok', true); return 'tablero: base completa desde el 01/01'; }
+          var desde = new Date(hasta.getTime()); desde.setDate(desde.getDate() - 27);
+          if (desde < TAB_INICIO) desde = new Date(TAB_INICIO.getTime());
+          botLog('tablero: base ' + diaISO(desde) + ' a ' + diaISO(hasta));
+          var marca = String(Date.now());
+          try { if (!localStorage.getItem('mobisond_ocupado')) localStorage.setItem('mobisond_ocupado', marca); } catch (e) {}
+          var soltar = function () { try { if (localStorage.getItem('mobisond_ocupado') === marca) localStorage.removeItem('mobisond_ocupado'); } catch (e) {} };
+          return tablaDias(desde, hasta).then(function (dias) { return sbRpc('tab_guardar', {p_dias: dias, p_ramas: null}); })
+            .then(function () { soltar(); return new Promise(function (ok) { setTimeout(ok, 5000); }); }, function (e) { soltar(); throw e; })
+            .then(function () { return tramo(min); });
+        });
+      };
+      return tramo().then(function (t) { fin(t); }, function (e) { fin('tablero: ' + e.message); });
+    }, function () { fin(); });
   }
+  setTimeout(cargaInicial, 90000);
+  setInterval(cargaInicial, 15 * 60000);
   setTimeout(subirTablero, 60000);
   setInterval(subirTablero, 15 * 60000);
 
