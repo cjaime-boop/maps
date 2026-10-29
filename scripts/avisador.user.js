@@ -2242,13 +2242,13 @@
   setInterval(infoPC, 60000);
 
   // ---------------------------------------------------------------- tablero web (cjaime-boop.github.io/maps/tablero)
-  // Una vez por hora, una sola PC (Supabase decide cuál) recalcula los últimos 21 días por día de ingreso (ingresados,
+  // Una vez por día (desde las 06:00, la primera PC que esté atendiendo; Supabase decide cuál) recalcula los últimos 21 días por día de ingreso (ingresados,
   // vencidos y Lineales por cliente) y las ramas GPON con más casos en 90 días, y los sube a Supabase. Solo números.
   var TAB_DIAS = 21;
   function subirTablero() {
     if (!hayGrupo() || !soyLider() || sesionCaida()) return;
-    var ahora = new Date(), hora = ahora.getFullYear() + '-' + (ahora.getMonth() + 1) + '-' + ahora.getDate() + '-' + ahora.getHours();
-    if (GM_getValue('tab_hora', '') === hora) return;
+    var ahora = new Date(), hora = ahora.getFullYear() + '-' + (ahora.getMonth() + 1) + '-' + ahora.getDate();   // una vez por día
+    if (ahora.getHours() < 6 || GM_getValue('tab_hora', '') === hora) return;
     GM_setValue('tab_hora', hora);
     sbRpc('bot_reclamar', {p_aviso: 'tab:' + hora, p_pc: pcId()}).then(function (gano) {
       if (gano === false) return;
@@ -2281,7 +2281,7 @@
     }, function () { GM_setValue('tab_hora', ''); });
   }
   setTimeout(subirTablero, 60000);
-  setInterval(subirTablero, 5 * 60000);
+  setInterval(subirTablero, 15 * 60000);
 
   // ---------------------------------------------------------------- cuándo revisar
   setTimeout(controles, 4000);
