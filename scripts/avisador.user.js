@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Mobisond · Avisador
 // @namespace    mobisond
-// @version      3.36
+// @version      3.37
 // @description  Avisa los casos nuevos (celular, campana y grupo de Telegram), los Lineales sin notas hace 25 min, los SLA y los aceptados; comandos del bot (/status, /bandeja, /autoasignar…).
 // @match        https://*.service-now.com/*
 // @grant        GM_xmlhttpRequest
@@ -2268,7 +2268,8 @@
         return Object.keys(por).map(function (k) { return {rama: k, casos: Object.keys(por[k].wo).length, cto: Object.keys(por[k].cto).length, ult: new Date(por[k].ult).toISOString().slice(0, 10)}; })
           .sort(function (a, b) { return b.casos - a.casos || (a.ult < b.ult ? 1 : -1); }).slice(0, 10);
       }).catch(function () { return null; });
-      return Promise.all([tablaDias(desde, hasta), ramas]).then(function (x) {
+      var causasDesde = new Date(hasta.getTime()); causasDesde.setDate(causasDesde.getDate() - 2);   // causas: solo los últimos 3 días
+      return Promise.all([tablaDias(desde, hasta, causasDesde), ramas]).then(function (x) {
         return sbRpc('tab_guardar', {p_dias: x[0], p_ramas: x[1]});
       }).then(historico).then(function () { soltar(); botLog('tablero actualizado'); }, function (e) {   // falló: se suelta en Supabase para reintentar en 15 min (esta PC u otra)
         soltar(); GM_setValue('tab_hora', ''); sbRpc('bot_soltar', {p_aviso: 'tab:' + hora}).catch(function () {}); botLog('tablero: ' + e.message);
@@ -2312,7 +2313,9 @@
       return out;
     });
   }
-  function tablaDias(desde, hasta) {
+  // causasDesde: desde qué día leer los formularios de cierre (los días anteriores conservan en Supabase las causas ya guardadas)
+  function tablaDias(desde, hasta, causasDesde) {
+    var dc = causasDesde && causasDesde > desde ? causasDesde : desde;
     return RESUMEN.periodo(desde, hasta).then(function (d) {
       if (d.sinSla) throw new Error('no pude leer los SLA');               // sin SLA no se pisan los vencidos guardados
       // GPON por zona (primer tramo de la CTO: GMRN-R0503-007 -> GMRN), por día de ingreso
@@ -2323,12 +2326,13 @@
         var ci = dv(c, 'cmdb_ci'), z = ramaDe(ci) ? ci.split('-')[0].toUpperCase() : 'Otros', k = diaISO(ab);
         var zd = zonas[k] = zonas[k] || {}; zd[z] = zd[z] || [0, 0]; zd[z][0]++;
       });
-      return causasDeCerrados(d.casos || [], desde, hasta).catch(function () { return {}; }).then(function (causas) {
+      return causasDeCerrados(d.casos || [], dc, hasta).catch(function () { return null; }).then(function (causas) {
+        var conCausas = function (f) { return causas !== null && f >= dc; };   // solo esos días mandan "_c" (si no, Supabase deja las que tenía)
+        causas = causas || {};
         var dias = [];
         for (var f = new Date(desde.getTime()); f <= hasta; f = new Date(f.getFullYear(), f.getMonth(), f.getDate() + 1)) {
           var k = diaISO(f), cl = JSON.parse(JSON.stringify(d.L.cliDia[k] || {})), zg = zonas[k] || {};
-          if (causas[k] && causas[k].lineales) cl._c = causas[k].lineales;
-          if (causas[k] && causas[k].gpon) zg._c = causas[k].gpon;
+          if (conCausas(f)) { cl._c = (causas[k] && causas[k].lineales) || {}; zg._c = (causas[k] && causas[k].gpon) || {}; }
           cl._v = 2; zg._v = 2;                                             // versión de los datos (con zonas y causas): el histórico se rehace si es vieja
           dias.push({proyecto: 'lineales', dia: k, ing: d.L.porDia[k] || 0, ven: d.L.vDia[k] || 0, cli: cl});
           dias.push({proyecto: 'gpon', dia: k, ing: d.G.porDia[k] || 0, ven: d.G.vDia[k] || 0, cli: zg});
