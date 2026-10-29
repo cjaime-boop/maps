@@ -55,6 +55,12 @@
     <input type="hidden" id="canal">
     <label for="sonido" style="margin-top:0">Sonido</label>
     <select id="sonido"></select>
+    <div class="fila" style="margin-top:8px">
+      <button id="cargarMio">🎵 Cargar mi audio</button>
+      <button id="quitarMio" hidden>Quitar</button>
+      <input type="file" id="archivoMio" accept="audio/*,.ogg,.opus,.mp3,.m4a,.wav" hidden>
+    </div>
+    <div class="nota" id="notaMio" style="margin-top:6px">El que quieras: mp3, wav, m4a o una nota de voz de WhatsApp. Queda guardado en esta PC.</div>
     <label for="vol">Volumen</label>
     <div class="fila"><input type="range" id="vol" min="10" max="100" value="100"><span id="volTxt">100 %</span></div>
     <div class="fila" style="margin-top:12px"><button id="probar">Probar</button><span class="nota">Probá con el botón o con "Mandar aviso de prueba" de Tampermonkey.</span></div>
@@ -117,7 +123,83 @@
       ctx.decodeAudioData(buf.buffer, function (b) { grabado = b; }, function () { grabado = null; });
     } catch (e) { grabado = null; }
   }
+  // ---- "Mi audio": el que cada uno carga desde su PC. Se guarda en el navegador (IndexedDB), no se sube a ningún lado.
+  var MAX_SEG = 15, MAX_MB = 8;
+  var mio = null;          // {nombre, datos: ArrayBuffer}
+  var mioBuf = null;       // ya decodificado para tocar
+  function baseMio(fn) {
+    try {
+      var r = indexedDB.open('campana', 1);
+      r.onupgradeneeded = function () { r.result.createObjectStore('audios'); };
+      r.onsuccess = function () { fn(r.result); };
+      r.onerror = function () { fn(null); };
+    } catch (e) { fn(null); }
+  }
+  function leerMio(listo) {
+    baseMio(function (db) {
+      if (!db) return listo(null);
+      var q = db.transaction('audios').objectStore('audios').get('mio');
+      q.onsuccess = function () { listo(q.result || null); }; q.onerror = function () { listo(null); };
+    });
+  }
+  function guardarMio(v, listo) {
+    baseMio(function (db) {
+      if (!db) return listo(false);
+      var tx = db.transaction('audios', 'readwrite'), st = tx.objectStore('audios');
+      if (v) st.put(v, 'mio'); else st.delete('mio');
+      tx.oncomplete = function () { listo(true); }; tx.onerror = function () { listo(false); };
+    });
+  }
+  function decodificarMio(listo) {
+    if (mioBuf || !mio || !ctx) return listo && listo(!!mioBuf);
+    ctx.decodeAudioData(mio.datos.slice(0), function (b) { mioBuf = b; pintarMio(); listo && listo(true); },
+                        function () { mioBuf = null; listo && listo(false); });
+  }
+  function pintarMio() {
+    var sel = $('sonido'), op = sel.querySelector('option[value=mio]');
+    if (mio) {
+      if (!op) { op = document.createElement('option'); op.value = 'mio'; sel.insertBefore(op, sel.firstChild); }
+      op.textContent = '🎵 Mi audio: ' + mio.nombre.replace(/\.[^.]+$/, '');
+      $('quitarMio').hidden = false; $('cargarMio').textContent = '🎵 Cambiar mi audio';
+      var largo = mioBuf ? mioBuf.duration : 0;
+      $('notaMio').textContent = 'Cargado: ' + mio.nombre + (largo ? ' (' + largo.toFixed(1) + ' s' +
+        (largo > MAX_SEG ? ', suenan los primeros ' + MAX_SEG : '') + ')' : '') + '. Queda guardado en esta PC.';
+    } else {
+      if (op) op.remove();
+      $('quitarMio').hidden = true; $('cargarMio').textContent = '🎵 Cargar mi audio';
+      $('notaMio').textContent = 'El que quieras: mp3, wav, m4a o una nota de voz de WhatsApp. Queda guardado en esta PC.';
+    }
+  }
+  $('cargarMio').onclick = function () { $('archivoMio').value = ''; $('archivoMio').click(); };
+  $('archivoMio').onchange = function () {
+    var f = this.files && this.files[0]; if (!f) return;
+    if (f.size > MAX_MB * 1048576) { $('notaMio').textContent = '⚠️ Es muy pesado (más de ' + MAX_MB + ' MB). Probá con uno más corto.'; return; }
+    audio(); if (!ctx) return;
+    f.arrayBuffer().then(function (datos) {
+      ctx.decodeAudioData(datos.slice(0), function (b) {
+        var anterior = mio;
+        mio = {nombre: f.name, datos: datos}; mioBuf = b;
+        guardarMio(mio, function (ok) {
+          if (!ok) { mio = anterior; mioBuf = null; $('notaMio').textContent = '⚠️ No lo pude guardar en esta PC.'; return; }
+          pintarMio(); $('sonido').value = 'mio'; guardar('sonido', 'mio'); ctx.resume(); campanada('mio');
+        });
+      }, function () { $('notaMio').textContent = '⚠️ No pude leer ese archivo como audio. Probá con un mp3.'; });
+    });
+  };
+  $('quitarMio').onclick = function () {
+    guardarMio(null, function () {
+      var eraMio = $('sonido').value === 'mio';
+      mio = null; mioBuf = null; pintarMio();
+      if (eraMio) { $('sonido').value = 'campana'; guardar('sonido', 'campana'); }
+    });
+  };
+
   var SONIDOS = {
+    mio: {nombre: '🎵 Mi audio', lista: false, tocar: function (s, t) {
+      if (!mioBuf) { decodificarMio(); return SONIDOS.campana.tocar(s, t); }      // si todavía no está listo, la campana
+      var src = ctx.createBufferSource(); src.buffer = mioBuf; src.connect(s);
+      var dur = Math.min(mioBuf.duration, MAX_SEG); src.start(t, 0, dur);
+      return dur; }},
     grabado: {nombre: 'Casito Casito (Mati)', tocar: function (s, t) {
       if (!grabado || grabado === 'cargando') { cargarGrabado(); return SONIDOS.campana.tocar(s, t); }   // si todavía no cargó, la campana
       var src = ctx.createBufferSource(); src.buffer = grabado; src.connect(s); src.start(t);
@@ -155,9 +237,15 @@
     return dur;
   }
   Object.keys(SONIDOS).forEach(function (k) {
+    if (SONIDOS[k].lista === false) return;
     var o = document.createElement('option'); o.value = k; o.textContent = SONIDOS[k].nombre; $('sonido').appendChild(o);
   });
-  $('sonido').value = SONIDOS[guardado('sonido', 'campana')] ? guardado('sonido', 'campana') : 'campana';
+  $('sonido').value = (SONIDOS[guardado('sonido', 'campana')] && guardado('sonido', 'campana') !== 'mio') ? guardado('sonido', 'campana') : 'campana';
+  leerMio(function (v) {
+    if (!v || !v.datos) return;
+    mio = v; pintarMio(); decodificarMio();
+    if (guardado('sonido', '') === 'mio') $('sonido').value = 'mio';
+  });
   $('sonido').onchange = function () {
     guardar('sonido', this.value); try { audio(); ctx.resume(); } catch (e) {}
     if (this.value === 'grabado' && (!grabado || grabado === 'cargando')) setTimeout(campanada, 500); else campanada();
@@ -235,7 +323,7 @@
 
   // ---- arranca sola: se conecta apenas abre. El sonido lo habilita Chrome: si ya dejó sonar antes a esta
   // página arranca sonando; si no, alcanza con tocar una vez cualquier parte de la página.
-  function audio() { try { ctx = ctx || new (window.AudioContext || window.webkitAudioContext)(); } catch (e) {} cargarGrabado(); return ctx; }
+  function audio() { try { ctx = ctx || new (window.AudioContext || window.webkitAudioContext)(); } catch (e) {} cargarGrabado(); decodificarMio(); return ctx; }
   function sonido() { return !!(ctx && ctx.state === 'running'); }
   function pintarEstado() {
     var canal = $('canal').value.trim();
