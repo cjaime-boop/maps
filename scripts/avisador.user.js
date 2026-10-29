@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Mobisond · Avisador
 // @namespace    mobisond
-// @version      3.31
+// @version      3.32
 // @description  Avisa los casos nuevos (celular, campana y grupo de Telegram), los Lineales sin notas hace 25 min, los SLA y los aceptados; comandos del bot (/status, /bandeja, /autoasignar…).
 // @match        https://*.service-now.com/*
 // @grant        GM_xmlhttpRequest
@@ -1827,7 +1827,7 @@
             if (n && dentro(d) && d.getTime() <= Date.now()) venc[n] = 1;
           });
           var calc = function (proy) {
-            var r = {ing: 0, res: 0, venc: [], vencBaja: [], vencCli: [], emerg: 0, clientes: [], porDia: {}, vDia: {}, cerr: 0, cerrVenc: 0, cerrTodos: 0};
+            var r = {ing: 0, res: 0, venc: [], vencBaja: [], vencCli: [], emerg: 0, clientes: [], porDia: {}, vDia: {}, cliIng: {}, cliVen: {}, cerr: 0, cerrVenc: 0, cerrTodos: 0};
             casos.forEach(function (c) {
               if (proyecto(c) !== proy) return;
               var n = dv(c, 'number'), ab = deUtc(val(c, 'opened_at'));
@@ -1837,6 +1837,10 @@
                 if (proy === 'lineales') r.clientes.push(cliente(c) || 'otro');
                 var k = iso(ab); r.porDia[k] = (r.porDia[k] || 0) + 1;
                 if (vencAlguna[n] && !prioBaja(c)) r.vDia[k] = (r.vDia[k] || 0) + 1;   // gráficos: vencidos por día de ingreso
+                if (proy === 'lineales') {                                             // gráfico por cliente
+                  var cl = cliente(c) || 'Otros'; r.cliIng[cl] = (r.cliIng[cl] || 0) + 1;
+                  if (vencAlguna[n] && !prioBaja(c)) r.cliVen[cl] = (r.cliVen[cl] || 0) + 1;
+                }
               }
               if (prim[n] && dentro(prim[n].d)) r.res++;
               if (venc[n]) (prioBaja(c) ? r.vencBaja : r.venc).push(dv(c, 'parent') || n);   // baja: aparte, no afecta el % en término
@@ -2061,6 +2065,32 @@
       });
       return L.c;
     }
+    // Lineales por cliente: barras horizontales (ingresados, con la parte roja de vencidos) y % en término
+    function fotoClientes(titulo, ing, ven) {
+      var cls = Object.keys(ing).sort(function (a, b) { return a === 'Otros' ? 1 : b === 'Otros' ? -1 : ing[b] - ing[a]; });
+      var h = 150 + cls.length * 52 + 46, L = lienzo(640, h), x = L.x, color = '#2563eb';
+      texto(x, titulo, 24, 36, 20, TX, '700');
+      texto(x, 'Casos ingresados por cliente: la parte roja son los que se vencieron', 24, 58, 13, MU);
+      leyenda(x, color, false);
+      var x0 = 130, x1 = 520, vmax = Math.max.apply(null, cls.map(function (c) { return ing[c]; }).concat([1])), y = 112, ti = 0, tv = 0, peor = null;
+      cls.forEach(function (c) {
+        var i = ing[c] || 0, v = ven[c] || 0, wi = (x1 - x0) * i / vmax, wv = (x1 - x0) * v / vmax; ti += i; tv += v;
+        if (i && c !== 'Otros' && (!peor || v / i > peor.r)) peor = {c: c, r: v / i, p: 100 - pct(i, v)};
+        texto(x, c, 24, y + 24, 14, TX, '700');
+        rect(x, x0, y + 4, wi, 30, color, 4);
+        if (v) { rect(x, x0, y + 4, wv, 30, RED, 0); if (wv > 16) texto(x, String(v), x0 + wv / 2, y + 24, 11.5, '#fff', '700', 'center'); }
+        texto(x, String(i), x0 + wi + 8, y + 24, 13, TX, '700');
+        chip(x, 593, y + 23, i, v);
+        y += 52;
+      });
+      x.fillStyle = GR; x.fillRect(24, y + 6, 592, 1);
+      var px = 24;
+      px += texto(x, 'Ingresados ' + ti, px, y + 32, 14, TX, '700'); px += texto(x, '  ·  ', px, y + 32, 14, TX);
+      px += texto(x, 'Vencidos ' + tv, px, y + 32, 14, RED, '700'); px += texto(x, '  ·  ', px, y + 32, 14, TX);
+      texto(x, (ti ? 100 - pct(ti, tv) : 100) + '% en término', px, y + 32, 14, TX, '700');
+      if (peor && peor.r > 0) texto(x, 'Cliente con menos en término: ' + peor.c + ' (' + peor.p + '%)', 24, y + 54, 12.5, MU);
+      return L.c;
+    }
     // g: {tipo: 'semana'|'mes', desde, hasta, L, G} (L y G con porDia y vDia por fecha ISO). Devuelve [{blob, nombre}]
     function armar(g) {
       var dias = [];
@@ -2074,6 +2104,8 @@
                   ing: dias.map(function (d) { return p[2].porDia[isoD(d)] || 0; }), ven: dias.map(function (d) { return p[2].vDia[isoD(d)] || 0; })};
         return {nombre: p[0], canvas: g.tipo === 'mes' ? fotoMes(dt) : fotoSemana(dt), cuando: cuando};
       });
+      if (g.L.cliIng && Object.keys(g.L.cliIng).length)              // Lineales por cliente: entre Lineales y GPON
+        fotos.splice(1, 0, {nombre: 'Lineales por cliente', canvas: fotoClientes('Lineales por cliente · ' + cuando, g.L.cliIng, g.L.cliVen || {}), cuando: cuando});
       return Promise.all(fotos.map(function (f) {
         return new Promise(function (ok, mal) { f.canvas.toBlob(function (b) { if (b) ok({blob: b, nombre: f.nombre, cuando: f.cuando}); else mal(new Error('no pude dibujar el gráfico')); }, 'image/png'); });
       }));
