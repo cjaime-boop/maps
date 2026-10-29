@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Mobisond · Avisador
 // @namespace    mobisond
-// @version      3.27
+// @version      3.28
 // @description  Avisa los casos nuevos (celular, campana y grupo de Telegram), los Lineales sin notas hace 25 min, los SLA y los aceptados; comandos del bot (/status, /bandeja, /autoasignar…).
 // @match        https://*.service-now.com/*
 // @grant        GM_xmlhttpRequest
@@ -124,45 +124,99 @@
     var lineaPrio = prio ? '\n\n' + colorPrio(prio) + ' <b>' + esc(prio) + '</b>' + (/^1/.test(prio) && !prueba ? ' 🔥' : '') + (pr ? '  ·  ' + pr : '') : pr ? '\n\n' + pr : '';
     return titulo + lineaPrio + bloqueCaso(f.numero, d.cmdb_ci, d.short_description, f.link, extra);
   }
-  // GPON: si el CI del caso nuevo ya tuvo casos en los últimos 90 días, se agrega al aviso (con la causa del cierre)
+  // GPON: si el CI del caso nuevo (o las otras CTO de su rama) ya tuvieron casos en los últimos 90 días, se agrega al aviso
+  // (con la causa del cierre). La rama es el nombre de la CTO sin el último número: GMRN-R0503-007 -> GMRN-R0503.
+  function ramaDe(ci) { var m = /^(.+-[^-]+)-\d{1,4}$/.exec(String(ci || '').trim()); return m ? m[1] : ''; }
+  function ctoCorta(ci) { return String(ci || '').replace(/^[^-]+-/, ''); }      // GMRN-R0503-008 -> R0503-008
+  var Q90 = '^opened_at>=javascript:gs.daysAgoStart(90)';
+  function linkLista(q) { return location.origin + '/wm_task_list.do?sysparm_query=' + encodeURIComponent(q + '^ORDERBYDESCopened_at'); }
+  // casos de una consulta, uno por WO, sin cancelados, del más nuevo al más viejo
+  function casosDe(q, sacarWO) {
+    return api('wm_task', q + '^ORDERBYDESCopened_at', 'sys_id,number,parent,opened_at,state,cmdb_ci').then(function (otros) {
+      var vistos = {}, lista = [];
+      if (sacarWO) vistos[sacarWO] = 1;
+      otros.forEach(function (o) {
+        if (/cancel/i.test(dv(o, 'state'))) return;           // los cancelados no cuentan
+        var w = woDe(o); if (vistos[w]) return; vistos[w] = 1; lista.push(o);
+      });
+      return lista;
+    });
+  }
+  // un renglón por caso: "• WO · dd/mm · (CTO) · causa del cierre". Igual que /caso: el formulario puede estar en las notas
+  // de la WO o de la WOT, o en los campos de cierre. Los abiertos dicen "🟢 abierto".
+  function renglonesCausa(lista, conCTO) {
+    if (!lista.length) return Promise.resolve([]);
+    var padres = lista.map(function (o) { return vl(o, 'parent'); }).filter(Boolean);
+    return Promise.all([
+      padres.length ? api('wm_order', 'sys_idIN' + padres.join(','), '').catch(function () { return []; }) : [],
+      api('wm_task', 'sys_idIN' + lista.map(function (o) { return vl(o, 'sys_id'); }).join(','), '').catch(function () { return []; })
+    ]).then(function (rr) {
+      var porId = {}; rr[0].concat(rr[1]).forEach(function (w) { porId[vl(w, 'sys_id')] = w; });
+      return lista.map(function (o) {
+        var d = new Date(utc(vl(o, 'opened_at')));
+        var regs = [porId[vl(o, 'parent')], porId[vl(o, 'sys_id')]];
+        var fc = formularioCierre(regs) || {}, dc = datosCierre(regs);
+        var c0 = fc['CAUSA DE LA AFECTACION'] || dc.causa.join(' · ');
+        var cerrado = /cerrado|closed|resuelto|resolved|complet/i.test(dv(o, 'state'));
+        var causa = c0 ? esc(c0) : cerrado ? 'sin formulario de cierre' : '🟢 abierto';
+        return '• ' + esc(woDe(o)) + ' · ' + ('0' + d.getDate()).slice(-2) + '/' + ('0' + (d.getMonth() + 1)).slice(-2) +
+               (conCTO ? ' · <b>' + esc(ctoCorta(dv(o, 'cmdb_ci'))) + '</b>' : '') + ' · ' + causa;
+      });
+    });
+  }
+  var LINEA = '━━━━━━━━━━━━━━';
   function antecedentesGPON(id) {
     var paso = api('wm_task', 'sys_id=' + id, 'sys_id,parent,cmdb_ci,assignment_group').then(function (rs) {
       var r = rs[0];
       if (!r || proyecto(r) !== 'GPON' || !vl(r, 'cmdb_ci')) return '';
-      return api('wm_task', 'cmdb_ci=' + vl(r, 'cmdb_ci') + '^opened_at>=javascript:gs.daysAgoStart(90)^sys_id!=' + id + '^ORDERBYDESCopened_at',
-                 'sys_id,number,parent,opened_at,state').then(function (otros) {
-        var vistos = {}, lista = [];
-        vistos[woDe(r)] = 1;
-        otros.forEach(function (o) {
-          if (/cancel/i.test(dv(o, 'state'))) return;           // los cancelados no cuentan
-          var w = woDe(o); if (vistos[w]) return; vistos[w] = 1; lista.push(o);
-        });
-        if (!lista.length) return '';
-        var tres = lista.slice(0, 3);
-        var padres = tres.map(function (o) { return vl(o, 'parent'); }).filter(Boolean);
-        // igual que /caso: el formulario puede estar en las notas de la WO o de la WOT, o en los campos de cierre
-        var forms = Promise.all([
-          padres.length ? api('wm_order', 'sys_idIN' + padres.join(','), '').catch(function () { return []; }) : [],
-          api('wm_task', 'sys_idIN' + tres.map(function (o) { return vl(o, 'sys_id'); }).join(','), '').catch(function () { return []; })
-        ]);
-        return forms.then(function (rr) {
-          var porId = {}; rr[0].concat(rr[1]).forEach(function (w) { porId[vl(w, 'sys_id')] = w; });
-          var lineas = tres.map(function (o) {
-            var t = utc(vl(o, 'opened_at')), d = new Date(t);
-            var regs = [porId[vl(o, 'parent')], porId[vl(o, 'sys_id')]];
-            var fc = formularioCierre(regs) || {}, dc = datosCierre(regs);
-            var c0 = fc['CAUSA DE LA AFECTACION'] || dc.causa.join(' · ');
-            var causa = c0 ? c0 : /cerrado|closed/i.test(dv(o, 'state')) ? 'sin formulario de cierre' : dv(o, 'state');
-            return '• ' + esc(woDe(o)) + ' · ' + ('0' + d.getDate()).slice(-2) + '/' + ('0' + (d.getMonth() + 1)).slice(-2) + ' · ' + esc(causa);
-          });
-          if (lista.length > 3) lineas.push('<i>… y ' + (lista.length - 3) + ' más</i>');
-          return '━━━━━━━━━━━━━━\n🔁🚨 <b>¡Posible reincidencia!</b> 🚨🔁\n\n<i>Este CI ya tuvo ' + (lista.length === 1 ? 'otro caso' : lista.length + ' casos') +
-                 ' en los últimos 90 días 😱</i>\n\n' + lineas.join('\n') + '\n━━━━━━━━━━━━━━\n';
+      var ci = vl(r, 'cmdb_ci'), rama = ramaDe(dv(r, 'cmdb_ci'));
+      var qCI = 'cmdb_ci=' + ci + Q90, qRama = rama ? 'cmdb_ci.nameSTARTSWITH' + rama + '-' + Q90 + '^cmdb_ci!=' + ci : '';
+      return Promise.all([casosDe(qCI + '^sys_id!=' + id, woDe(r)), rama ? casosDe(qRama, woDe(r)).catch(function () { return []; }) : []]).then(function (x) {
+        var mismo = x[0], deRama = x[1];
+        return Promise.all([renglonesCausa(mismo.slice(0, 3), false), renglonesCausa(deRama.slice(0, 3), true)]).then(function (ls) {
+          var t = '';
+          if (mismo.length) {
+            t += LINEA + '\n🔁🚨 <b>¡Posible reincidencia!</b> 🚨🔁\n\n<i>Este CI ya tuvo ' + (mismo.length === 1 ? 'otro caso' : mismo.length + ' casos') +
+                 ' en los últimos 90 días 😱</i>\n\n' + ls[0].join('\n') +
+                 (mismo.length > 3 ? '\n<i>… y ' + (mismo.length - 3) + ' más</i> · <a href="' + esc(linkLista(qCI)) + '">📋 Ver los ' + mismo.length + ' en ServiceNow</a>' : '') + '\n';
+          }
+          if (deRama.length) {
+            t += LINEA + '\n🌿 <b>Misma rama (' + esc(rama) + ')</b>\n\n<i>Otras CTO de la rama tuvieron ' + (deRama.length === 1 ? '1 caso' : deRama.length + ' casos') +
+                 ' en los últimos 90 días</i>\n\n' + ls[1].join('\n') +
+                 (deRama.length > 3 ? '\n<i>… y ' + (deRama.length - 3) + ' más</i> · <a href="' + esc(linkLista(qRama)) + '">📋 Ver los ' + deRama.length + ' en ServiceNow</a> · <code>/rama ' + esc(rama) + '</code>' : '') + '\n';
+          }
+          return t ? t + LINEA + '\n' : '';
         });
       });
     }).catch(function () { return ''; });
     var limite = new Promise(function (ok) { setTimeout(function () { ok(''); }, 8000); });   // si tarda, el aviso sale igual
     return Promise.race([paso, limite]);
+  }
+  // /rama GMRN-R0503 (o una CTO: GMRN-R0503-007): todos los casos de la rama en los últimos 90 días, agrupados por CTO
+  function textoRama(arg) {
+    var a = String(arg || '').trim().toUpperCase();
+    if (!a) return Promise.resolve('Decime la rama o una CTO: <code>/rama GMRN-R0503</code> o <code>/rama GMRN-R0503-007</code>');
+    var rama = ramaDe(a) || a.replace(/-$/, '');
+    var q = 'cmdb_ci.nameSTARTSWITH' + rama + '-' + Q90;
+    return casosDe(q).then(function (lista) {
+      if (!lista.length) return '🌿 <b>Rama ' + esc(rama) + '</b> · últimos 90 días\n\n<i>Ningún caso en esa rama.</i> Fijate que esté bien escrita (ej. <code>/rama GMRN-R0503</code>).';
+      var muestra = lista.slice(0, 30);
+      return renglonesCausa(muestra, false).then(function (rs) {
+        var porCTO = {}, orden = [];
+        muestra.forEach(function (o, i) {
+          var c = dv(o, 'cmdb_ci') || 'sin CI';
+          if (!porCTO[c]) { porCTO[c] = []; orden.push(c); }
+          porCTO[c].push(rs[i]);
+        });
+        var total = {}; lista.forEach(function (o) { var c = dv(o, 'cmdb_ci') || 'sin CI'; total[c] = (total[c] || 0) + 1; });
+        orden.sort(function (x, y) { return x < y ? -1 : x > y ? 1 : 0; });
+        return '🌿 <b>Rama ' + esc(rama) + '</b> · últimos 90 días\n\n<i>' + lista.length + (lista.length === 1 ? ' caso' : ' casos') + ' en ' +
+          Object.keys(total).length + (Object.keys(total).length === 1 ? ' CTO' : ' CTO') + '</i>\n\n' +
+          orden.map(function (c) { return '<b>' + esc(ctoCorta(c)) + '</b> (' + total[c] + ')\n' + porCTO[c].join('\n'); }).join('\n\n') +
+          (lista.length > 30 ? '\n\n<i>Muestro los 30 más nuevos de ' + lista.length + '.</i>' : '') +
+          '\n\n🔗 <a href="' + esc(linkLista(q)) + '">Ver todos en ServiceNow</a>';
+      });
+    });
   }
   function avisoCasoNuevo(f) {
     // el proyecto (GPON / Lineales) sale del grupo de asignación; si la lista no lo trae, se pregunta (hasta 8 s)
@@ -856,6 +910,12 @@
     // pedido largo en curso: Supabase no se lo da a otra PC y el refrescador no recarga la pestaña en el medio
     try { localStorage.setItem('mobisond_ocupado', String(Date.now())); } catch (e) {}
     if (p.sb) latido = setInterval(function () { sbRpc('bot_sigo', {p_id: p.id, p_pc: pcId()}).catch(function () {}); }, 20000);
+    if (p.cmd === '/rama') {
+      textoRama((p.texto || '').trim().split(/\s+/).slice(1).join(' ')).then(function (t) {
+        unaVezAlGrupo('cmd:' + p.id, t, p.msg, p.chat, function (ok) { listo(ok ? 'contestado' : 'no se pudo contestar'); });
+      }, function (e) { unaVezAlGrupo('cmd:' + p.id, 'No pude leer la rama de ServiceNow (' + esc(e.message) + ').', p.msg, p.chat); listo('error ServiceNow ' + e.message); });
+      return;
+    }
     if (p.cmd === '/caso') {
       textoCaso((p.texto || '').trim().split(/\s+/)[1]).then(function (t) {
         unaVezAlGrupo('cmd:' + p.id, t, p.msg, p.chat, function (ok) { listo(ok ? 'contestado' : 'no se pudo contestar'); });
@@ -1095,7 +1155,7 @@
     if (!hayGrupo() || !soyLider()) return;
     reintentarAvisos();
     atenderPendientes();
-    if (GM_getValue('tg_cmds', 0) < 15) {     // menú de comandos del bot (aparece al escribir "/" en el grupo)
+    if (GM_getValue('tg_cmds', 0) < 16) {     // menú de comandos del bot (aparece al escribir "/" en el grupo)
       tg('setMyCommands', {commands: [{command: 'bandeja', description: 'Casos abiertos (o /bandeja gpon, /bandeja lineales)'},
                                       {command: 'caso', description: 'Detalle de un caso: /caso WO0096818'},
                                       {command: 'activos', description: 'Quién está activo ahora y quién entra'},
@@ -1104,7 +1164,8 @@
                                       {command: 'mes', description: 'Resumen de este mes (o /mes 09-2026)'},
                                       {command: 'historial', description: 'Qué pasó cerca de una botella, coordenadas o link'},
                                       {command: 'autoasignar', description: 'Asignación automática: ver, on u off'},
-                                      {command: 'pcs', description: 'PCs conectadas y su versión del Avisador'}]}, function () { GM_setValue('tg_cmds', 15); });
+                                      {command: 'rama', description: 'Casos de una rama GPON en 90 días: /rama GMRN-R0503'},
+                                      {command: 'pcs', description: 'PCs conectadas y su versión del Avisador'}]}, function () { GM_setValue('tg_cmds', 16); });
     }
     if (modoBot === null) {                    // ¿el bot está conectado a Supabase?
       modoBot = 'esperando';
