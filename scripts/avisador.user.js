@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Mobisond · Avisador
 // @namespace    mobisond
-// @version      3.38
+// @version      3.39
 // @description  Avisa los casos nuevos (celular, campana y grupo de Telegram), los Lineales sin notas hace 25 min, los SLA y los aceptados; comandos del bot (/status, /bandeja, /autoasignar…).
 // @match        https://*.service-now.com/*
 // @grant        GM_xmlhttpRequest
@@ -1987,10 +1987,10 @@
       if (x.roundRect) x.roundRect(px, py, w, h, r); else x.rect(px, py, w, h);
       x.fill();
     }
-    function chip(x, cx, cy, ing, ven) {   // % EN TÉRMINO (ingresados que no se vencieron): verde 100, amarilla más de 80, roja 80 o menos
+    function chip(x, cx, cy, ing, ven) {   // % EN TÉRMINO (ingresados que no se vencieron): verde 100, amarilla de 75 a 99, roja menos de 75
       if (!ing) { texto(x, '—', cx, cy, 12, MU, '400', 'center'); return; }
       var p = 100 - pct(ing, ven);
-      var bg = p <= 80 ? '#fee2e2' : p < 100 ? '#fef3c7' : '#dcfce7', fg = p <= 80 ? '#991b1b' : p < 100 ? '#92400e' : '#166534';
+      var bg = p < 75 ? '#fee2e2' : p < 100 ? '#fef3c7' : '#dcfce7', fg = p < 75 ? '#991b1b' : p < 100 ? '#92400e' : '#166534';
       rect(x, cx - 23, cy - 14, 46, 20, bg, 10); texto(x, p + '%', cx, cy, 11.5, fg, '700', 'center');
     }
     function leyenda(x, color, conFinde) {
