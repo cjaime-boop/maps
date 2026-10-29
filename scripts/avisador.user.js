@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Mobisond · Avisador
 // @namespace    mobisond
-// @version      3.34
+// @version      3.35
 // @description  Avisa los casos nuevos (celular, campana y grupo de Telegram), los Lineales sin notas hace 25 min, los SLA y los aceptados; comandos del bot (/status, /bandeja, /autoasignar…).
 // @match        https://*.service-now.com/*
 // @grant        GM_xmlhttpRequest
@@ -1860,7 +1860,7 @@
           var cis = contar(casos.filter(function (c) { return dentro(deUtc(val(c, 'opened_at'))) && dv(c, 'cmdb_ci'); })
                                 .map(function (c) { return dv(c, 'cmdb_ci'); }))
                     .filter(function (p) { return p[1] > 1; }).sort(function (a, b) { return b[1] - a[1]; });
-          return {L: calc('lineales'), G: calc('gpon'), cis: cis, sinVerif: false, sinSla: res[1] === null};
+          return {L: calc('lineales'), G: calc('gpon'), cis: cis, sinVerif: false, sinSla: res[1] === null, casos: casos};
         });
       });
     }
@@ -2275,17 +2275,66 @@
       });
     }, function () { GM_setValue('tab_hora', ''); });
   }
-  // los días de un rango, listos para Supabase
+  // los días de un rango, listos para Supabase. En "cli" van: Lineales por cliente / GPON por zona ({"CLR": [ing, ven]}),
+  // y en "_c" las causas de cierre de los casos CERRADOS ese día ({"Corte de fibra": 3}).
+  function diaISO(f) { return f.getFullYear() + '-' + ('0' + (f.getMonth() + 1)).slice(-2) + '-' + ('0' + f.getDate()).slice(-2); }
+  function causaLinda(t) {             // "VANDALISMO / SABOTAJE" -> "Vandalismo / sabotaje" (así se agrupan igual aunque estén escritas distinto)
+    t = String(t || '').replace(/\s+/g, ' ').trim().replace(/[.;,]+$/, '');
+    if (!t) return '';
+    t = t.toLowerCase(); return t.charAt(0).toUpperCase() + t.slice(1);
+  }
+  function enTandas(tabla, ids) {      // registros completos de a 25 (el formulario de cierre puede estar en cualquier campo o en las notas)
+    var tandas = [];
+    for (var i = 0; i < ids.length; i += 25) tandas.push(ids.slice(i, i + 25));
+    return tandas.reduce(function (cad, t) {
+      return cad.then(function (acc) { return api(tabla, 'sys_idIN' + t.join(','), '').then(function (rs) { return acc.concat(rs); }, function () { return acc; }); });
+    }, Promise.resolve([]));
+  }
+  function causasDeCerrados(casos, desde, hasta) {   // {iso del día de cierre: {lineales: {causa: n}, gpon: {...}}}
+    var fin = new Date(hasta.getTime()); fin.setHours(23, 59, 59, 999);
+    var cerr = casos.filter(function (c) {
+      var t = vl(c, 'closed_at') ? new Date(utc(vl(c, 'closed_at'))) : null;
+      return vl(c, 'active') === 'false' && t && t >= desde && t <= fin && (proyecto(c) === 'Lineales' || proyecto(c) === 'GPON');
+    });
+    if (!cerr.length) return Promise.resolve({});
+    var padres = cerr.map(function (c) { return vl(c, 'parent'); }).filter(Boolean);
+    return Promise.all([enTandas('wm_order', padres), enTandas('wm_task', cerr.map(function (c) { return vl(c, 'sys_id'); }))]).then(function (rr) {
+      var porId = {}; rr[0].concat(rr[1]).forEach(function (w) { porId[vl(w, 'sys_id')] = w; });
+      var out = {};
+      cerr.forEach(function (c) {
+        var regs = [porId[vl(c, 'parent')], porId[vl(c, 'sys_id')]];
+        var fc = formularioCierre(regs) || {}, dc = datosCierre(regs);
+        var causa = causaLinda(fc['CAUSA DE LA AFECTACION'] || dc.causa[0]) || 'Sin formulario de cierre';
+        var k = diaISO(new Date(utc(vl(c, 'closed_at')))), p = proyecto(c) === 'GPON' ? 'gpon' : 'lineales';
+        var o = (out[k] = out[k] || {})[p] = out[k][p] || {};
+        o[causa] = (o[causa] || 0) + 1;
+      });
+      return out;
+    });
+  }
   function tablaDias(desde, hasta) {
     return RESUMEN.periodo(desde, hasta).then(function (d) {
-      var dias = [];
       if (d.sinSla) throw new Error('no pude leer los SLA');               // sin SLA no se pisan los vencidos guardados
-      for (var f = new Date(desde.getTime()); f <= hasta; f = new Date(f.getFullYear(), f.getMonth(), f.getDate() + 1)) {
-        var k = f.getFullYear() + '-' + ('0' + (f.getMonth() + 1)).slice(-2) + '-' + ('0' + f.getDate()).slice(-2);
-        dias.push({proyecto: 'lineales', dia: k, ing: d.L.porDia[k] || 0, ven: d.L.vDia[k] || 0, cli: d.L.cliDia[k] || {}});
-        dias.push({proyecto: 'gpon', dia: k, ing: d.G.porDia[k] || 0, ven: d.G.vDia[k] || 0, cli: null});
-      }
-      return dias;
+      // GPON por zona (primer tramo de la CTO: GMRN-R0503-007 -> GMRN), por día de ingreso
+      var zonas = {};
+      (d.casos || []).forEach(function (c) {
+        if (proyecto(c) !== 'GPON') return;
+        var ab = new Date(utc(vl(c, 'opened_at'))); if (ab < desde) return;
+        var ci = dv(c, 'cmdb_ci'), z = ramaDe(ci) ? ci.split('-')[0].toUpperCase() : 'Otros', k = diaISO(ab);
+        var zd = zonas[k] = zonas[k] || {}; zd[z] = zd[z] || [0, 0]; zd[z][0]++;
+      });
+      return causasDeCerrados(d.casos || [], desde, hasta).catch(function () { return {}; }).then(function (causas) {
+        var dias = [];
+        for (var f = new Date(desde.getTime()); f <= hasta; f = new Date(f.getFullYear(), f.getMonth(), f.getDate() + 1)) {
+          var k = diaISO(f), cl = JSON.parse(JSON.stringify(d.L.cliDia[k] || {})), zg = zonas[k] || {};
+          if (causas[k] && causas[k].lineales) cl._c = causas[k].lineales;
+          if (causas[k] && causas[k].gpon) zg._c = causas[k].gpon;
+          cl._v = 2; zg._v = 2;                                             // versión de los datos (con zonas y causas): el histórico se rehace si es vieja
+          dias.push({proyecto: 'lineales', dia: k, ing: d.L.porDia[k] || 0, ven: d.L.vDia[k] || 0, cli: cl});
+          dias.push({proyecto: 'gpon', dia: k, ing: d.G.porDia[k] || 0, ven: d.G.vDia[k] || 0, cli: zg});
+        }
+        return dias;
+      });
     });
   }
   // Histórico: la primera vez (o si falta), carga hacia atrás hasta el 1° de enero de 2026, de a 4 semanas, con una pausa entre tramos.

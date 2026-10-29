@@ -20,7 +20,9 @@ select{background:rgba(255,255,255,.15);color:#fff;border:0;border-radius:8px;pa
 .bar i{display:block;height:20px;background:var(--lin);border-radius:4px;overflow:hidden}.bar em{display:block;height:100%;background:var(--red)}
 .pill{font-weight:700;font-size:11.5px;border-radius:10px;padding:3px 8px;text-align:center;display:inline-block}
 table{width:100%;border-collapse:collapse;font-size:13px}td,th{padding:7px 4px;border-bottom:1px solid #f1f5f9;text-align:left}th{color:var(--mu);font-weight:600;font-size:12px}
-svg{display:block;width:100%;height:auto}.vacio{color:var(--mu);font-size:13px;padding:10px 0}
+svg{display:block;width:100%;height:auto}
+.cs{display:grid;grid-template-columns:minmax(120px,240px) 1fr 34px 40px;align-items:center;gap:10px;margin:9px 0;font-size:13px}.cs small{color:var(--mu);font-size:12px;text-align:right}.cs i{display:block;height:16px;border-radius:4px}
+.zn{display:grid;grid-template-columns:70px 1fr 34px;align-items:center;gap:10px;margin:10px 0;font-size:13px}.zn i{display:block;height:20px;border-radius:4px;background:var(--gpon)}.vacio{color:var(--mu);font-size:13px;padding:10px 0}
 #login{max-width:340px;margin:80px auto;background:#fff;border-radius:16px;padding:24px;box-shadow:0 10px 30px rgba(15,23,42,.15)}
 #login h2{margin:0 0 6px;font-size:18px}#login p{color:var(--mu);font-size:13px;margin:0 0 14px}
 #login input{width:100%;border:1px solid #cbd5e1;border-radius:8px;padding:10px;font-size:14px}#login button{margin-top:10px;width:100%;border:0;background:#2563eb;color:#fff;border-radius:8px;padding:10px;font:600 14px inherit;cursor:pointer}
@@ -131,13 +133,32 @@ svg{display:block;width:100%;height:auto}.vacio{color:var(--mu);font-size:13px;p
   }
   function clientes(t) {
     var ing = {}, ven = {};
-    t.dias.forEach(function (d) { if (d.cli) Object.keys(d.cli).forEach(function (c) { ing[c] = (ing[c] || 0) + d.cli[c][0]; ven[c] = (ven[c] || 0) + d.cli[c][1]; }); });
+    t.dias.forEach(function (d) { if (d.cli) Object.keys(d.cli).forEach(function (c) { if (c.charAt(0) === '_') return; ing[c] = (ing[c] || 0) + d.cli[c][0]; ven[c] = (ven[c] || 0) + d.cli[c][1]; }); });
     var cls = Object.keys(ing).sort(function (a, b) { return a === 'Otros' ? 1 : b === 'Otros' ? -1 : ing[b] - ing[a]; });
     if (!cls.length) return '<div class="vacio">No entraron casos en este período.</div>';
     var max = Math.max.apply(null, cls.map(function (c) { return ing[c]; }));
     return cls.map(function (c) {
       return '<div class="cl"><b>' + esc(c) + '</b><span>' + esc(NOMBRE_CLI[c] || '') + '</span><div class="bar"><i style="width:' + (ing[c] / max * 100) + '%"><em style="width:' + ((ven[c] || 0) / ing[c] * 100) + '%"></em></i></div><strong>' + ing[c] + '</strong>' + pill(pctT(ing[c], ven[c] || 0)) + '</div>';
     }).join('');
+  }
+  function zonas(t) {                     // GPON: casos ingresados por zona (primer tramo de la CTO)
+    var n = {};
+    t.dias.forEach(function (d) { if (d.cli) Object.keys(d.cli).forEach(function (z) { if (z.charAt(0) !== '_') n[z] = (n[z] || 0) + d.cli[z][0]; }); });
+    var zs = Object.keys(n).sort(function (a, b) { return a === 'Otros' ? 1 : b === 'Otros' ? -1 : n[b] - n[a]; });
+    if (!zs.length) return '<div class="vacio">No entraron casos en este período.</div>';
+    var max = Math.max.apply(null, zs.map(function (z) { return n[z]; }));
+    return zs.map(function (z) { return '<div class="zn"><b>' + esc(z) + '</b><div><i style="width:' + (n[z] / max * 100) + '%"></i></div><strong>' + n[z] + '</strong></div>'; }).join('');
+  }
+  function causas(t, color) {             // causas de cierre de los casos cerrados en el período
+    var n = {}, nom = {}, tot = 0;
+    var clave = function (c) { return c.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/\s+/g, ' ').trim(); };
+    t.dias.forEach(function (d) { var c = d.cli && d.cli._c; if (c) Object.keys(c).forEach(function (x) { var k = clave(x); nom[k] = nom[k] || x; n[k] = (n[k] || 0) + c[x]; tot += c[x]; }); });
+    var ks = Object.keys(n).sort(function (a, b) { return n[b] - n[a]; });
+    if (!ks.length) return {html: '<div class="vacio">No hay casos cerrados con datos en este período.</div>', tot: 0};
+    var max = n[ks[0]], mostrar = ks.slice(0, 8), resto = ks.slice(8).reduce(function (a, k) { return a + n[k]; }, 0);
+    var h = mostrar.map(function (k) { return '<div class="cs"><span>' + esc(nom[k]) + '</span><div><i style="width:' + (n[k] / max * 100) + '%;background:' + color + '"></i></div><strong>' + n[k] + '</strong><small>' + Math.round(100 * n[k] / tot) + '%</small></div>'; }).join('');
+    if (resto) h += '<div class="cs"><span style="color:#64748b">Otras ' + (ks.length - 8) + ' causas</span><div><i style="width:' + (Math.min(resto, max) / max * 100) + '%;background:#cbd5e1"></i></div><strong>' + resto + '</strong><small>' + Math.round(100 * resto / tot) + '%</small></div>';
+    return {html: h, tot: tot};
   }
   function findes(t) {
     var h = {d: 0, i: 0, v: 0}, f = {d: 0, i: 0, v: 0};
@@ -180,6 +201,10 @@ svg{display:block;width:100%;height:auto}.vacio{color:var(--mu);font-size:13px;p
     if (st.proy === 'lineales') h += '<div class="c"><h3>Por cliente</h3><p>Ingresados y vencidos del período</p>' + clientes(t) + '<div style="margin-top:14px">' + findes(t) + '</div></div>';
     else h += '<div class="c"><h3>Ramas con más casos (90 días)</h3><p>Escribí /rama en Telegram para ver el detalle de una</p>' + ramas() + '<div style="margin-top:14px">' + findes(t) + '</div></div>';
     h += '<div class="c"><h3>En término, últimas 12 semanas</h3><p>% de los casos ingresados que no se vencieron</p>' + grafTendencia(m, color) + '</div>';
+    var cz = causas(t, color);
+    var cajaCausas = '<div class="c' + (st.proy === 'lineales' ? ' full' : '') + '"><h3>Causas de cierre</h3><p>Causa de la afectación de los casos cerrados en el período (del formulario de cierre)' + (cz.tot ? ' · ' + cz.tot + (cz.tot === 1 ? ' cerrado' : ' cerrados') : '') + '</p>' + cz.html + '</div>';
+    if (st.proy === 'gpon') h += '<div class="c"><h3>Por zona</h3><p>Casos ingresados en el período, por zona (primer tramo de la CTO)</p>' + zonas(t) + '</div>';
+    h += cajaCausas;
     $('wrap').innerHTML = h;
     var act = st.datos.actualizado ? new Date(st.datos.actualizado) : null;
     $('act').textContent = act ? 'Actualizado ' + ddmm(act) + ' ' + ('0' + act.getHours()).slice(-2) + ':' + ('0' + act.getMinutes()).slice(-2) + ' · se actualiza una vez por día' : 'Sin datos todavía';
