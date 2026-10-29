@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Mobisond · Avisador
 // @namespace    mobisond
-// @version      3.28
+// @version      3.29
 // @description  Avisa los casos nuevos (celular, campana y grupo de Telegram), los Lineales sin notas hace 25 min, los SLA y los aceptados; comandos del bot (/status, /bandeja, /autoasignar…).
 // @match        https://*.service-now.com/*
 // @grant        GM_xmlhttpRequest
@@ -127,7 +127,7 @@
   // GPON: si el CI del caso nuevo (o las otras CTO de su rama) ya tuvieron casos en los últimos 90 días, se agrega al aviso
   // (con la causa del cierre). La rama es el nombre de la CTO sin el último número: GMRN-R0503-007 -> GMRN-R0503.
   function ramaDe(ci) { var m = /^(.+-[^-]+)-\d{1,4}$/.exec(String(ci || '').trim()); return m ? m[1] : ''; }
-  function ctoCorta(ci) { return String(ci || '').replace(/^[^-]+-/, ''); }      // GMRN-R0503-008 -> R0503-008
+  function ctoCorta(ci) { return String(ci || ''); }      // la CTO completa (GMRN-R0503-008): el primer tramo es la zona
   var Q90 = '^opened_at>=javascript:gs.daysAgoStart(90)';
   function linkLista(q) { return location.origin + '/wm_task_list.do?sysparm_query=' + encodeURIComponent(q + '^ORDERBYDESCopened_at'); }
   // casos de una consulta, uno por WO, sin cancelados, del más nuevo al más viejo
