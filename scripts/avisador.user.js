@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Mobisond · Avisador
 // @namespace    mobisond
-// @version      3.26
+// @version      3.27
 // @description  Avisa los casos nuevos (celular, campana y grupo de Telegram), los Lineales sin notas hace 25 min, los SLA y los aceptados; comandos del bot (/status, /bandeja, /autoasignar…).
 // @match        https://*.service-now.com/*
 // @grant        GM_xmlhttpRequest
@@ -497,12 +497,13 @@
     var padres = Object.keys(dePadre);
     if (!padres.length) return Promise.resolve({});
     var mejor = {};                   // sys_id de la WO -> {t, quien}
+    var falloWO = null;               // si no se pudieron leer las notas de la WO, no se sabe nada: no se avisa con datos a medias
     var sumar = function (wo, n) { if (n && n.t && esNuestro(n.quien) && (!mejor[wo] || n.t > mejor[wo].t)) mejor[wo] = n; };
     var porTexto = api('wm_order', 'sys_idIN' + padres.join(','), 'sys_id,work_notes,comments').then(function (wos) {
       wos.forEach(function (w) {
         notasDelTexto(dv(w, 'work_notes') + '\n' + dv(w, 'comments')).forEach(function (n) { sumar(vl(w, 'sys_id'), n); });
       });
-    }, function (e) { console.log('[Mobisond] notas (WO): ' + e.message); });
+    }, function (e) { falloWO = e; console.log('[Mobisond] notas (WO): ' + e.message); });
     var porTabla = api('sys_journal_field', 'element=work_notes^ORelement=comments^element_idIN' + padres.join(','), 'element_id,sys_created_on,sys_created_by').then(function (ns) {
       var usuarios = {};
       ns.forEach(function (n) { if (vl(n, 'sys_created_by')) usuarios[vl(n, 'sys_created_by')] = 1; });
@@ -528,6 +529,7 @@
       });
     }).catch(function (e) { console.log('[Mobisond] adjuntos: ' + (e && e.message)); });
     return Promise.all([porTexto, porTabla, porAdjuntos]).then(function () {
+      if (falloWO) throw new Error('no pude leer las notas de la WO (' + falloWO.message + ')');
       var u = {};
       Object.keys(mejor).forEach(function (p) { (dePadre[p] || []).forEach(function (id) { u[id] = mejor[p]; }); });
       return u;
@@ -736,7 +738,7 @@
                           cuerpo(r, '📝 ' + (nota.t ? 'Última: ' + esc(nota.quien || 'sin nombre') + (nota.foto ? ' (foto)' : '') + ' · ' + hhmm(nota.t) : 'Todavía sin notas')));
           }
         });
-      });
+      }, function (e) { botLog('25 min: no avisé, ' + e.message + ' (reintento en la próxima vuelta)'); });
 
       // 2) SLA neto a 1 hora de vencer y vencido (Lineales y GPON): cualquier estado del caso, solo P1 a P3, solo con el SLA corriendo
       var p123 = function (r) { return /^[123]$/.test(vl(r, 'priority')) || /^[123]\b/.test(dv(r, 'priority')); };
