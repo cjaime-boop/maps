@@ -23,8 +23,6 @@ table{width:100%;border-collapse:collapse;font-size:13px}td,th{padding:7px 4px;b
 svg{display:block;width:100%;height:auto}
 .cs{display:grid;grid-template-columns:minmax(120px,240px) 1fr 34px 40px;align-items:center;gap:10px;margin:9px 0;font-size:13px}.cs small{color:var(--mu);font-size:12px;text-align:right}.cs i{display:block;height:16px;border-radius:4px}
 .zn{display:grid;grid-template-columns:70px 1fr 34px;align-items:center;gap:10px;margin:10px 0;font-size:13px}.zn i{display:block;height:20px;border-radius:4px;background:var(--gpon)}.vacio{color:var(--mu);font-size:13px;padding:10px 0}
-.base{grid-column:span 12;background:#fff7ed;border:1px solid #fed7aa;border-radius:12px;padding:10px 14px;font-size:13px;color:#7c2d12;display:flex;align-items:center;gap:14px;flex-wrap:wrap}
-.base .pb{flex:1;min-width:160px;height:10px;background:#fde7cf;border-radius:5px;overflow:hidden}.base .pb i{display:block;height:100%;background:#f97316;border-radius:5px}
 #login{max-width:340px;margin:80px auto;background:#fff;border-radius:16px;padding:24px;box-shadow:0 10px 30px rgba(15,23,42,.15)}
 #login h2{margin:0 0 6px;font-size:18px}#login p{color:var(--mu);font-size:13px;margin:0 0 14px}
 #login input{width:100%;border:1px solid #cbd5e1;border-radius:8px;padding:10px;font-size:14px}#login button{margin-top:10px;width:100%;border:0;background:#2563eb;color:#fff;border-radius:8px;padding:10px;font:600 14px inherit;cursor:pointer}
@@ -143,18 +141,6 @@ svg{display:block;width:100%;height:auto}
       return '<div class="cl"><b>' + esc(c) + '</b><span>' + esc(NOMBRE_CLI[c] || '') + '</span><div class="bar"><i style="width:' + (ing[c] / max * 100) + '%"><em style="width:' + ((ven[c] || 0) / ing[c] * 100) + '%"></em></i></div><strong>' + ing[c] + '</strong>' + pill(pctT(ing[c], ven[c] || 0)) + '</div>';
     }).join('');
   }
-  // Mientras se arma la base (desde el 1° de enero), una barra con el avance. Cuenta los días con datos completos (versión 2).
-  var INICIO_BASE = new Date(2026, 0, 1);
-  function barraBase() {
-    var min = null;
-    (st.datos.dias || []).forEach(function (d) { if (d.cli && +d.cli._v >= 2 && (!min || d.dia < min)) min = d.dia; });
-    var h = hoy(), total = (h - INICIO_BASE) / 864e5;
-    var desde = min ? new Date(min + 'T00:00:00') : h;
-    if (desde <= mas(INICIO_BASE, 1)) return '';                       // base completa: no se muestra nada
-    var pct = Math.max(0, Math.min(100, Math.round(100 * (h - desde) / 864e5 / total)));
-    return '<div class="base">⏳ <b>Armando la base del tablero</b><span>' + (min ? 'cargado desde el ' + ddmm(desde) : 'todavía sin datos') +
-           '</span><div class="pb"><i style="width:' + pct + '%"></i></div><b>' + pct + '%</b><span style="color:#9a3412">antes de esa fecha los números van a dar 0 · recargá la página para ver el avance</span></div>';
-  }
   function zonas(t) {                     // GPON: casos ingresados por zona (primer tramo de la CTO)
     var n = {};
     t.dias.forEach(function (d) { if (d.cli) Object.keys(d.cli).forEach(function (z) { if (z.charAt(0) !== '_') n[z] = (n[z] || 0) + d.cli[z][0]; }); });
@@ -207,7 +193,7 @@ svg{display:block;width:100%;height:auto}
     var m = porDia(st.proy), t = sumar(m, p.desde, p.hasta), a = sumar(m, ant.desde, ant.hasta);
     var color = st.proy === 'lineales' ? '#2563eb' : '#8b5cf6', nom = st.proy === 'lineales' ? 'Lineales' : 'GPON';
     var pt = pctT(t.ing, t.ven), pa = pctT(a.ing, a.ven), hayAnt = a.dias.some(function (d) { return m[iso(d.d)]; });
-    var h = barraBase();
+    var h = '';
     h += '<div class="k"><small>Ingresados</small><b>' + t.ing + '</b>' + flecha(hayAnt ? t.ing - a.ing : null, '', false).replace(/color:#(16a34a|dc2626)/, 'color:#64748b') + '</div>';
     h += '<div class="k"><small>En término</small><b style="color:' + (pt === null ? '#0f172a' : pt >= 75 ? '#16a34a' : '#dc2626') + '">' + (pt === null ? '—' : pt + '%') + '</b>' + flecha(hayAnt && pt !== null && pa !== null ? pt - pa : null, ' pts', true) + '</div>';
     h += '<div class="k"><small>Vencidos</small><b style="color:#dc2626">' + t.ven + '</b>' + flecha(hayAnt ? t.ven - a.ven : null, '', false) + '</div>';

@@ -2333,7 +2333,7 @@
         for (var f = new Date(desde.getTime()); f <= hasta; f = new Date(f.getFullYear(), f.getMonth(), f.getDate() + 1)) {
           var k = diaISO(f), cl = JSON.parse(JSON.stringify(d.L.cliDia[k] || {})), zg = zonas[k] || {};
           if (conCausas(f)) { cl._c = (causas[k] && causas[k].lineales) || {}; zg._c = (causas[k] && causas[k].gpon) || {}; }
-          cl._v = 2; zg._v = 2;                                             // versión de los datos (con zonas y causas): el histórico se rehace si es vieja
+          cl._v = 2; zg._v = 2;                                             // versión de los datos (con zonas y causas)
           dias.push({proyecto: 'lineales', dia: k, ing: d.L.porDia[k] || 0, ven: d.L.vDia[k] || 0, cli: cl});
           dias.push({proyecto: 'gpon', dia: k, ing: d.G.porDia[k] || 0, ven: d.G.vDia[k] || 0, cli: zg});
         }
@@ -2341,39 +2341,6 @@
       });
     });
   }
-  // CARGA INICIAL (una sola vez): arma la base desde el 1° de enero de 2026 hasta ayer, de a 4 semanas hacia atrás.
-  // Supabase dice desde qué día ya hay datos: si ya llega a enero, no hace nada. Si un tramo se guarda y Supabase no avanza,
-  // se frena y lo anota (no repite). Si se corta (recarga), sigue sola a los 15 min desde donde quedó.
-  var TAB_INICIO = new Date(2026, 0, 1), cargandoBase = false;
-  function cargaInicial() {
-    if (cargandoBase || GM_getValue('tab_base_ok', false) || !hayGrupo() || !soyLider() || sesionCaida()) return;
-    var ahora = new Date(), turno = ahora.getFullYear() + '-' + (ahora.getMonth() + 1) + '-' + ahora.getDate() + '-' + ahora.getHours() + '-' + Math.floor(ahora.getMinutes() / 15);
-    cargandoBase = true;
-    var fin = function (t) { cargandoBase = false; if (t) botLog(t); };
-    sbRpc('bot_reclamar', {p_aviso: 'tabbase:' + turno, p_pc: pcId()}).then(function (gano) {
-      if (gano === false) return fin();
-      var tramo = function (anterior) {
-        return sbRpc('tab_desde', {}).then(function (min) {
-          if (anterior !== undefined && min === anterior) throw new Error('Supabase no avanzó después de guardar ' + min + ': freno la carga inicial');
-          var hoy0 = new Date(); hoy0.setHours(0, 0, 0, 0);
-          var hasta = min ? new Date(min + 'T00:00:00') : hoy0; hasta.setDate(hasta.getDate() - 1);
-          if (hasta < TAB_INICIO) { GM_setValue('tab_base_ok', true); return 'tablero: base completa desde el 01/01'; }
-          var desde = new Date(hasta.getTime()); desde.setDate(desde.getDate() - 27);
-          if (desde < TAB_INICIO) desde = new Date(TAB_INICIO.getTime());
-          botLog('tablero: base ' + diaISO(desde) + ' a ' + diaISO(hasta));
-          var marca = String(Date.now());
-          try { if (!localStorage.getItem('mobisond_ocupado')) localStorage.setItem('mobisond_ocupado', marca); } catch (e) {}
-          var soltar = function () { try { if (localStorage.getItem('mobisond_ocupado') === marca) localStorage.removeItem('mobisond_ocupado'); } catch (e) {} };
-          return tablaDias(desde, hasta).then(function (dias) { return sbRpc('tab_guardar', {p_dias: dias, p_ramas: null}); })
-            .then(function () { soltar(); return new Promise(function (ok) { setTimeout(ok, 5000); }); }, function (e) { soltar(); throw e; })
-            .then(function () { return tramo(min); });
-        });
-      };
-      return tramo().then(function (t) { fin(t); }, function (e) { fin('tablero: ' + e.message); });
-    }, function () { fin(); });
-  }
-  setTimeout(cargaInicial, 90000);
-  setInterval(cargaInicial, 15 * 60000);
   setTimeout(subirTablero, 60000);
   setInterval(subirTablero, 15 * 60000);
 
