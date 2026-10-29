@@ -34,7 +34,7 @@ svg{display:block;width:100%;height:auto}
 <div id="app" hidden>
 <div class="top"><div class="r1"><div><h1>📊 Tablero Mobisond · ATC</h1><small id="act"></small></div>
 <div class="seg"><button data-v="semana" class="on">Semana</button><button data-v="mes">Mes</button><button data-v="anio">Año</button></div><select id="per"></select></div>
-<div class="tabs"><button data-p="lineales" class="on">🔧 Lineales</button><button data-p="gpon">📡 GPON</button></div></div>
+<div class="tabs"><button data-p="lineales" class="on">🔧 Lineales</button><button data-p="gpon">📡 GPON</button><button data-p="termino">📈 En término</button></div></div>
 <div class="wrap" id="wrap"></div></div>
 <script>
 (function () {
@@ -199,10 +199,55 @@ svg{display:block;width:100%;height:auto}
     }).join('') + '</table>';
   }
   function flecha(dif, sufijo, bueno) {   // bueno: true si subir es bueno
-    if (dif === null || isNaN(dif)) return '<i style="color:#94a3b8">sin comparación</i>';
+    if (dif === null || isNaN(dif)) return st.vista === 'anio' ? '' : '<i style="color:#94a3b8">sin comparación</i>';
     if (!dif) return '<i style="color:#64748b">igual que ' + st.cmpTxt + '</i>';
     var ok = (dif > 0) === bueno;
     return '<i style="color:' + (ok ? '#16a34a' : '#dc2626') + '">' + (dif > 0 ? '▲ ' : '▼ ') + Math.abs(dif) + sufijo + ' vs ' + st.cmpTxt + '</i>';
+  }
+
+  // ---------- pestaña "En término": % en término de Lineales y GPON en el tiempo (día por día, o mes por mes en Año)
+  function puntos(m, p) {
+    var t = sumar(m, p.desde, p.hasta);
+    if (st.vista === 'semana') return t.dias.map(function (d) { return {lab: DSEM[d.d.getDay()] + ' ' + dd(d.d), p: d.falta ? null : pctT(d.ing, d.ven), ing: d.ing, ven: d.ven}; });
+    if (st.vista === 'mes') {                   // mes: semana por semana (día por día salta mucho con pocos casos)
+      var sem = [], idx = {};
+      t.dias.forEach(function (d) { var k = iso(lunes(d.d)); if (!(k in idx)) { idx[k] = sem.length; sem.push({lab: 'Sem. ' + ddmm(d.d), ing: 0, ven: 0, falta: true}); }
+        var x = sem[idx[k]]; x.ing += d.ing; x.ven += d.ven; if (!d.falta) x.falta = false; });
+      return sem.map(function (x) { return {lab: x.lab, p: x.falta ? null : pctT(x.ing, x.ven), ing: x.ing, ven: x.ven}; });
+    }
+    var ms = MES_C.map(function (n) { return {lab: n, ing: 0, ven: 0, falta: true}; });
+    t.dias.forEach(function (d) { var x = ms[d.d.getMonth()]; x.ing += d.ing; x.ven += d.ven; if (!d.falta) x.falta = false; });
+    return ms.map(function (x) { return {lab: x.lab, p: x.falta ? null : pctT(x.ing, x.ven), ing: x.ing, ven: x.ven}; });
+  }
+  function grafLineas(series) {
+    var W = 1180, H = 300, x0 = 44, y0 = 16, n = series[0].pts.length, todos = [];
+    series.forEach(function (s) { s.pts.forEach(function (q) { if (q.p !== null) todos.push(q.p); }); });
+    if (!todos.length) return '<div class="vacio">Todavía no hay datos en este período.</div>';
+    var lo = Math.max(0, Math.min(70, Math.floor((Math.min.apply(null, todos) - 5) / 10) * 10));
+    var y = function (p) { return H - (H - y0) * (p - lo) / (100 - lo); }, x = function (i) { return x0 + 34 + i * (W - x0 - 80) / Math.max(1, n - 1); };
+    var o = '<svg viewBox="0 0 ' + W + ' ' + (H + 30) + '">';
+    for (var g = lo; g <= 100; g += 10) o += '<line x1="' + x0 + '" x2="' + W + '" y1="' + y(g) + '" y2="' + y(g) + '" stroke="#eef0f3"/><text x="' + (x0 - 8) + '" y="' + (y(g) + 4) + '" font-size="11" fill="#94a3b8" text-anchor="end">' + g + '%</text>';
+    o += '<line x1="' + x0 + '" x2="' + W + '" y1="' + y(75) + '" y2="' + y(75) + '" stroke="#fca5a5" stroke-dasharray="5 5"/><text x="' + (W - 4) + '" y="' + (y(75) - 5) + '" font-size="10.5" fill="#dc2626" text-anchor="end">75%</text>';
+    var cada = n > 16 ? 5 : 1;
+    series[0].pts.forEach(function (q, i) { if (i % cada === 0 || i === n - 1 && n <= 16) o += '<text x="' + x(i) + '" y="' + (H + 20) + '" font-size="11" fill="#64748b" text-anchor="middle">' + q.lab + '</text>'; });
+    series.forEach(function (s) {
+      var tramo = [], dib = function () { if (tramo.length > 1) o += '<polyline points="' + tramo.join(' ') + '" fill="none" stroke="' + s.color + '" stroke-width="2.5"/>'; tramo = []; };
+      s.pts.forEach(function (q, i) { if (q.p === null) dib(); else tramo.push(x(i) + ',' + y(q.p)); }); dib();
+      s.pts.forEach(function (q, i) { if (q.p !== null) o += '<circle cx="' + x(i) + '" cy="' + y(q.p) + '" r="3.6" fill="' + s.color + '"><title>' + s.nombre + ' · ' + q.lab + ': ' + q.p + '% (' + q.ing + ' ingresados, ' + q.ven + ' vencidos)</title></circle>'; });
+    });
+    return o + '</svg>';
+  }
+  function pintarTermino(p) {
+    var L = porDia('lineales'), G = porDia('gpon'), tl = sumar(L, p.desde, p.hasta), tg = sumar(G, p.desde, p.hasta);
+    var pl = pctT(tl.ing, tl.ven), pg = pctT(tg.ing, tg.ven), pt = pctT(tl.ing + tg.ing, tl.ven + tg.ven);
+    var kpi = function (n, v, extra) { return '<div class="k"><small>' + n + '</small><b style="color:' + (v === null ? '#0f172a' : v >= 75 ? '#16a34a' : '#dc2626') + '">' + (v === null ? '—' : v + '%') + '</b><i style="color:#64748b">' + extra + '</i></div>'; };
+    var h = kpi('Lineales en término', pl, tl.ing + ' ingresados · ' + tl.ven + ' vencidos') + kpi('GPON en término', pg, tg.ing + ' ingresados · ' + tg.ven + ' vencidos') +
+            kpi('Total en término', pt, (tl.ing + tg.ing) + ' ingresados · ' + (tl.ven + tg.ven) + ' vencidos');
+    var cada = {semana: ['por día', 'cada día'], mes: ['por semana', 'cada semana'], anio: ['por mes', 'cada mes']}[st.vista];
+    h += '<div class="c full"><h3>% en término ' + cada[0] + '</h3><p>De los casos ingresados ' + cada[1] +
+         ', cuántos no se vencieron. La línea punteada marca el 75%.</p><div style="font-size:12px;color:#475569;margin-bottom:6px"><b style="display:inline-block;width:10px;height:10px;border-radius:2px;background:#2563eb;vertical-align:-1px"></b> Lineales &nbsp; <b style="display:inline-block;width:10px;height:10px;border-radius:2px;background:#8b5cf6;vertical-align:-1px"></b> GPON</div>' +
+         grafLineas([{nombre: 'Lineales', color: '#2563eb', pts: puntos(L, p)}, {nombre: 'GPON', color: '#8b5cf6', pts: puntos(G, p)}]) + '</div>';
+    $('wrap').innerHTML = h;
   }
 
   // ---------- pantalla
@@ -216,6 +261,7 @@ svg{display:block;width:100%;height:auto}
     if (enCurso) ant.hasta = st.vista === 'semana' ? mas(ant.desde, corridos) : new Date(Math.min(mas(ant.desde, corridos), ant.hasta));
     st.cmpTxt = (enCurso ? {semana: 'mismos días de la semana anterior', mes: 'mismos días del mes anterior', anio: 'mismos días del año anterior'}
                          : {semana: 'semana anterior', mes: 'mes anterior', anio: 'año anterior'})[st.vista];
+    if (st.proy === 'termino') { pintarTermino(p); pintarAct(); return; }
     var m = porDia(st.proy), t = sumar(m, p.desde, p.hasta), a = sumar(m, ant.desde, ant.hasta);
     var color = st.proy === 'lineales' ? '#2563eb' : '#8b5cf6', nom = st.proy === 'lineales' ? 'Lineales' : 'GPON';
     var pt = pctT(t.ing, t.ven), pa = pctT(a.ing, a.ven), hayAnt = a.dias.some(function (d) { return m[iso(d.d)]; });
@@ -233,6 +279,9 @@ svg{display:block;width:100%;height:auto}
     if (st.proy === 'gpon') h += '<div class="c"><h3>Por zona</h3><p>Casos ingresados en el período, por zona (primer tramo de la CTO)</p>' + zonas(t) + '</div>';
     h += cajaCausas;
     $('wrap').innerHTML = h;
+    pintarAct();
+  }
+  function pintarAct() {
     var act = st.datos.actualizado ? new Date(st.datos.actualizado) : null;
     $('act').textContent = act ? 'Actualizado ' + ddmm(act) + ' ' + ('0' + act.getHours()).slice(-2) + ':' + ('0' + act.getMinutes()).slice(-2) + ' · se actualiza una vez por día' : 'Sin datos todavía';
   }
