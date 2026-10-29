@@ -33,14 +33,14 @@ svg{display:block;width:100%;height:auto}
 <input id="pass" type="password" autocomplete="current-password"><button id="entrar">Entrar</button><div class="err" id="err"></div></div>
 <div id="app" hidden>
 <div class="top"><div class="r1"><div><h1>📊 Tablero Mobisond · ATC</h1><small id="act"></small></div>
-<div class="seg"><button data-v="semana" class="on">Semana</button><button data-v="mes">Mes</button></div><select id="per"></select></div>
+<div class="seg"><button data-v="semana" class="on">Semana</button><button data-v="mes">Mes</button><button data-v="anio">Año</button></div><select id="per"></select></div>
 <div class="tabs"><button data-p="lineales" class="on">🔧 Lineales</button><button data-p="gpon">📡 GPON</button></div></div>
 <div class="wrap" id="wrap"></div></div>
 <script>
 (function () {
   'use strict';
   var SB = 'https://gnqvhlpknxtdnzuxfybc.supabase.co', KEY = 'sb_publishable_dUhjyCfRfNtLVLfOYnJ1WA_hfPD3kk9';
-  var DIAS_ATRAS = 400;                    // poco más de un año (lo que guarda Supabase)
+  var DIAS_ATRAS = 800;                    // dos años y algo (para comparar un año con el anterior)
   var DSEM = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'];
   var MES = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
   var NOMBRE_CLI = {CLR: 'Claro', EDN: 'Edenor', MUNI: 'Municipal', TP: 'Telecom', MVS: 'Movistar', Otros: 'sin cliente'};
@@ -75,10 +75,12 @@ svg{display:block;width:100%;height:auto}
   function periodos() {                    // lista para el selector (más nuevo primero)
     var h = hoy(), o = [];
     if (st.vista === 'semana') for (var i = 0; i < 26; i++) { var l = mas(lunes(h), -7 * i); o.push({desde: l, hasta: mas(l, 6)}); }
+    else if (st.vista === 'anio') for (var y = h.getFullYear(); y >= 2026; y--) o.push({desde: new Date(y, 0, 1), hasta: new Date(y, 11, 31)});
     else for (var j = 0; j < 12; j++) { var a = new Date(h.getFullYear(), h.getMonth() - j, 1); o.push({desde: a, hasta: new Date(a.getFullYear(), a.getMonth() + 1, 0)}); }
     return o;
   }
   function nombrePer(p) {
+    if (st.vista === 'anio') return String(p.desde.getFullYear());
     return st.vista === 'semana' ? ddmm(p.desde) + ' al ' + ddmm(p.hasta) : MES[p.desde.getMonth()].replace(/^./, function (c) { return c.toUpperCase(); }) + ' ' + p.desde.getFullYear();
   }
   function sumar(m, desde, hasta) {
@@ -111,6 +113,28 @@ svg{display:block;width:100%;height:auto}
         else { var bg = p < 75 ? '#fee2e2' : p < 100 ? '#fef3c7' : '#dcfce7', fg = p < 75 ? '#991b1b' : p < 100 ? '#92400e' : '#166534';
           s += '<rect x="' + (cx - 22) + '" y="' + (y1 + 27) + '" width="44" height="19" rx="9" fill="' + bg + '"/><text x="' + cx + '" y="' + (y1 + 40) + '" font-size="11.5" font-weight="700" fill="' + fg + '" text-anchor="middle">' + p + '%</text>'; }
       }
+    });
+    return s + '</svg>';
+  }
+  // Año: una barra por mes (mismo dibujo que la semana, con el % de cada mes abajo)
+  var MES_C = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'];
+  function grafMeses(t, color) {
+    var ms = MES_C.map(function (n, i) { return {n: n, ing: 0, ven: 0, falta: true}; });
+    t.dias.forEach(function (d) { var m = ms[d.d.getMonth()]; m.ing += d.ing; m.ven += d.ven; if (!d.falta) m.falta = false; });
+    var W = 1180, H = 230, x0 = 34, y0 = 20, y1 = 190, n = 12, cw = (W - x0) / n, bw = cw * 0.55;
+    var top = Math.max(4, Math.max.apply(null, ms.map(function (m) { return m.ing; })));
+    var paso = [1, 2, 5, 10, 20, 25, 50, 100, 200, 250, 500].filter(function (x) { return x * 4 >= top; })[0] || 1000, vmax = paso * 4;
+    var s = '<svg viewBox="0 0 ' + W + ' ' + (H + 26) + '">';
+    for (var v = 0; v <= vmax; v += paso) { var y = y1 - (y1 - y0) * v / vmax; s += '<line x1="' + x0 + '" x2="' + W + '" y1="' + y + '" y2="' + y + '" stroke="#eef0f3"/><text x="' + (x0 - 8) + '" y="' + (y + 4) + '" font-size="11" fill="#94a3b8" text-anchor="end">' + Math.round(v) + '</text>'; }
+    ms.forEach(function (m, i) {
+      var cx = x0 + cw * i + cw / 2, hi = (y1 - y0) * m.ing / vmax, hv = (y1 - y0) * m.ven / vmax;
+      if (m.ing) s += '<rect x="' + (cx - bw / 2) + '" y="' + (y1 - hi) + '" width="' + bw + '" height="' + hi + '" rx="3" fill="' + color + '"/><text x="' + cx + '" y="' + (y1 - hi - 5) + '" font-size="12" font-weight="700" fill="#1f2937" text-anchor="middle">' + m.ing + '</text>';
+      if (m.ven) s += '<rect x="' + (cx - bw / 2) + '" y="' + (y1 - hv) + '" width="' + bw + '" height="' + hv + '" fill="#dc2626"/>' + (hv > 16 ? '<text x="' + cx + '" y="' + (y1 - hv / 2 + 4) + '" font-size="12" font-weight="700" fill="#fff" text-anchor="middle">' + m.ven + '</text>' : '');
+      s += '<text x="' + cx + '" y="' + (y1 + 18) + '" font-size="12" fill="#64748b" text-anchor="middle">' + m.n + '</text>';
+      var p = m.falta ? null : pctT(m.ing, m.ven);
+      if (p === null) s += '<text x="' + cx + '" y="' + (y1 + 40) + '" font-size="12" fill="#94a3b8" text-anchor="middle">—</text>';
+      else { var bg = p < 75 ? '#fee2e2' : p < 100 ? '#fef3c7' : '#dcfce7', fg = p < 75 ? '#991b1b' : p < 100 ? '#92400e' : '#166534';
+        s += '<rect x="' + (cx - 22) + '" y="' + (y1 + 27) + '" width="44" height="19" rx="9" fill="' + bg + '"/><text x="' + cx + '" y="' + (y1 + 40) + '" font-size="11.5" font-weight="700" fill="' + fg + '" text-anchor="middle">' + p + '%</text>'; }
     });
     return s + '</svg>';
   }
@@ -184,12 +208,14 @@ svg{display:block;width:100%;height:auto}
   // ---------- pantalla
   function pintar() {
     var ps = periodos(), p = ps[st.per] || ps[0], ant = st.vista === 'semana' ? {desde: mas(p.desde, -7), hasta: mas(p.hasta, -7)}
+      : st.vista === 'anio' ? {desde: new Date(p.desde.getFullYear() - 1, 0, 1), hasta: new Date(p.desde.getFullYear() - 1, 11, 31)}
       : {desde: new Date(p.desde.getFullYear(), p.desde.getMonth() - 1, 1), hasta: new Date(p.desde.getFullYear(), p.desde.getMonth(), 0)};
     $('per').innerHTML = ps.map(function (x, i) { return '<option value="' + i + '"' + (i === st.per ? ' selected' : '') + '>' + nombrePer(x) + (i === 0 ? ' (en curso)' : '') + '</option>'; }).join('');
     // período en curso: se compara con los mismos días del período anterior (ej. lunes a miércoles contra lunes a miércoles)
     var h0 = hoy(), enCurso = p.hasta > h0, corridos = Math.round((Math.min(h0, p.hasta) - p.desde) / 864e5);
     if (enCurso) ant.hasta = st.vista === 'semana' ? mas(ant.desde, corridos) : new Date(Math.min(mas(ant.desde, corridos), ant.hasta));
-    st.cmpTxt = enCurso ? (st.vista === 'semana' ? 'mismos días de la semana anterior' : 'mismos días del mes anterior') : (st.vista === 'semana' ? 'semana anterior' : 'mes anterior');
+    st.cmpTxt = (enCurso ? {semana: 'mismos días de la semana anterior', mes: 'mismos días del mes anterior', anio: 'mismos días del año anterior'}
+                         : {semana: 'semana anterior', mes: 'mes anterior', anio: 'año anterior'})[st.vista];
     var m = porDia(st.proy), t = sumar(m, p.desde, p.hasta), a = sumar(m, ant.desde, ant.hasta);
     var color = st.proy === 'lineales' ? '#2563eb' : '#8b5cf6', nom = st.proy === 'lineales' ? 'Lineales' : 'GPON';
     var pt = pctT(t.ing, t.ven), pa = pctT(a.ing, a.ven), hayAnt = a.dias.some(function (d) { return m[iso(d.d)]; });
@@ -197,7 +223,8 @@ svg{display:block;width:100%;height:auto}
     h += '<div class="k"><small>Ingresados</small><b>' + t.ing + '</b>' + flecha(hayAnt ? t.ing - a.ing : null, '', false).replace(/color:#(16a34a|dc2626)/, 'color:#64748b') + '</div>';
     h += '<div class="k"><small>En término</small><b style="color:' + (pt === null ? '#0f172a' : pt >= 75 ? '#16a34a' : '#dc2626') + '">' + (pt === null ? '—' : pt + '%') + '</b>' + flecha(hayAnt && pt !== null && pa !== null ? pt - pa : null, ' pts', true) + '</div>';
     h += '<div class="k"><small>Vencidos</small><b style="color:#dc2626">' + t.ven + '</b>' + flecha(hayAnt ? t.ven - a.ven : null, '', false) + '</div>';
-    h += '<div class="c full"><h3>' + nom + ' · por día de ingreso</h3><p>Casos ingresados por día; en rojo, los que se vencieron.' + (st.vista === 'semana' ? ' Abajo, el % en término de cada día.' : ' En gris, los fines de semana.') + '</p>' + grafDias(t, color) + '</div>';
+    if (st.vista === 'anio') h += '<div class="c full"><h3>' + nom + ' · por mes de ingreso</h3><p>Casos ingresados por mes; en rojo, los que se vencieron. Abajo, el % en término de cada mes.</p>' + grafMeses(t, color) + '</div>';
+    else h += '<div class="c full"><h3>' + nom + ' · por día de ingreso</h3><p>Casos ingresados por día; en rojo, los que se vencieron.' + (st.vista === 'semana' ? ' Abajo, el % en término de cada día.' : ' En gris, los fines de semana.') + '</p>' + grafDias(t, color) + '</div>';
     if (st.proy === 'lineales') h += '<div class="c"><h3>Por cliente</h3><p>Ingresados y vencidos del período</p>' + clientes(t) + '<div style="margin-top:14px">' + findes(t) + '</div></div>';
     else h += '<div class="c"><h3>Ramas con más casos (90 días)</h3>' + ramas() + '<div style="margin-top:14px">' + findes(t) + '</div></div>';
     h += '<div class="c"><h3>En término, últimas 12 semanas</h3><p>% de los casos ingresados que no se vencieron</p>' + grafTendencia(m, color) + '</div>';
