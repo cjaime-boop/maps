@@ -38,7 +38,7 @@ svg{display:block;width:100%;height:auto}.vacio{color:var(--mu);font-size:13px;p
 (function () {
   'use strict';
   var SB = 'https://gnqvhlpknxtdnzuxfybc.supabase.co', KEY = 'sb_publishable_dUhjyCfRfNtLVLfOYnJ1WA_hfPD3kk9';
-  var DIAS_ATRAS = 190;
+  var DIAS_ATRAS = 400;                    // poco más de un año (lo que guarda Supabase)
   var DSEM = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'];
   var MES = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
   var NOMBRE_CLI = {CLR: 'Claro', EDN: 'Edenor', MUNI: 'Municipal', TP: 'Telecom', Otros: 'sin cliente'};
@@ -72,8 +72,8 @@ svg{display:block;width:100%;height:auto}.vacio{color:var(--mu);font-size:13px;p
   }
   function periodos() {                    // lista para el selector (más nuevo primero)
     var h = hoy(), o = [];
-    if (st.vista === 'semana') for (var i = 0; i < 12; i++) { var l = mas(lunes(h), -7 * i); o.push({desde: l, hasta: mas(l, 6)}); }
-    else for (var j = 0; j < 6; j++) { var a = new Date(h.getFullYear(), h.getMonth() - j, 1); o.push({desde: a, hasta: new Date(a.getFullYear(), a.getMonth() + 1, 0)}); }
+    if (st.vista === 'semana') for (var i = 0; i < 26; i++) { var l = mas(lunes(h), -7 * i); o.push({desde: l, hasta: mas(l, 6)}); }
+    else for (var j = 0; j < 12; j++) { var a = new Date(h.getFullYear(), h.getMonth() - j, 1); o.push({desde: a, hasta: new Date(a.getFullYear(), a.getMonth() + 1, 0)}); }
     return o;
   }
   function nombrePer(p) {

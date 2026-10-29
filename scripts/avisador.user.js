@@ -2288,13 +2288,13 @@
       return dias;
     });
   }
-  // Histórico: la primera vez (o si falta), carga hacia atrás hasta 6 meses, de a 4 semanas, con una pausa entre tramos.
+  // Histórico: la primera vez (o si falta), carga hacia atrás hasta el 1° de enero de 2026, de a 4 semanas, con una pausa entre tramos.
   // Supabase dice desde qué día ya hay datos: así se hace una sola vez, aunque haya varias PCs.
-  var TAB_HISTORIA = 190;
+  var TAB_INICIO = new Date(2026, 0, 1);                      // desde cuándo se carga el histórico
   function historico() {
     return sbRpc('tab_desde', {}).then(function (min) {
       var hoy0 = new Date(); hoy0.setHours(0, 0, 0, 0);
-      var tope = new Date(hoy0.getTime()); tope.setDate(tope.getDate() - TAB_HISTORIA);
+      var tope = new Date(TAB_INICIO.getTime());
       var hasta = min ? new Date(min + 'T00:00:00') : new Date(hoy0.getTime());
       hasta.setDate(hasta.getDate() - 1);
       if (hasta < tope) return;                                   // ya está todo
