@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Mobisond · Avisador
 // @namespace    mobisond
-// @version      3.35
+// @version      3.36
 // @description  Avisa los casos nuevos (celular, campana y grupo de Telegram), los Lineales sin notas hace 25 min, los SLA y los aceptados; comandos del bot (/status, /bandeja, /autoasignar…).
 // @match        https://*.service-now.com/*
 // @grant        GM_xmlhttpRequest
@@ -2067,7 +2067,7 @@
       });
       return L.c;
     }
-    var NOMBRE_CLI = {CLR: 'Claro', EDN: 'Edenor', MUNI: 'Municipal', TP: 'Telecom'};
+    var NOMBRE_CLI = {CLR: 'Claro', EDN: 'Edenor', MUNI: 'Municipal', TP: 'Telecom', MVS: 'Movistar'};
     // Lineales por cliente: barras horizontales (ingresados, con la parte roja de vencidos) y % en término
     function fotoClientes(titulo, ing, ven) {
       var cls = Object.keys(ing).sort(function (a, b) { return a === 'Otros' ? 1 : b === 'Otros' ? -1 : ing[b] - ing[a]; });
