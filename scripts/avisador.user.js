@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Mobisond · Avisador
 // @namespace    mobisond
-// @version      3.33
+// @version      3.34
 // @description  Avisa los casos nuevos (celular, campana y grupo de Telegram), los Lineales sin notas hace 25 min, los SLA y los aceptados; comandos del bot (/status, /bandeja, /autoasignar…).
 // @match        https://*.service-now.com/*
 // @grant        GM_xmlhttpRequest
@@ -2242,19 +2242,19 @@
   setInterval(infoPC, 60000);
 
   // ---------------------------------------------------------------- tablero web (cjaime-boop.github.io/maps/tablero)
-  // Una vez por día (desde las 06:00, la primera PC que esté atendiendo; Supabase decide cuál) recalcula los últimos 21 días por día de ingreso (ingresados,
+  // Una vez por día (la primera PC que esté atendiendo después de medianoche; Supabase decide cuál) recalcula los últimos 21 días por día de ingreso (ingresados,
   // vencidos y Lineales por cliente) y las ramas GPON con más casos en 90 días, y los sube a Supabase. Solo números.
   var TAB_DIAS = 21;
   function subirTablero() {
     if (!hayGrupo() || !soyLider() || sesionCaida()) return;
     var ahora = new Date(), hora = ahora.getFullYear() + '-' + (ahora.getMonth() + 1) + '-' + ahora.getDate();   // una vez por día
-    if (ahora.getHours() < 6 || GM_getValue('tab_hora', '') === hora) return;
+    if (GM_getValue('tab_hora', '') === hora) return;
     GM_setValue('tab_hora', hora);
     sbRpc('bot_reclamar', {p_aviso: 'tab:' + hora, p_pc: pcId()}).then(function (gano) {
       if (gano === false) return;
       var hasta = new Date(); hasta.setHours(0, 0, 0, 0);
       var desde = new Date(hasta.getTime()); desde.setDate(desde.getDate() - (TAB_DIAS - 1));
-      var marca = 'tab' + Date.now();
+      var marca = String(Date.now());                     // el Refrescador espera hasta 3 min mientras esté esta marca
       try { if (!localStorage.getItem('mobisond_ocupado')) localStorage.setItem('mobisond_ocupado', marca); } catch (e) {}
       var soltar = function () { try { if (localStorage.getItem('mobisond_ocupado') === marca) localStorage.removeItem('mobisond_ocupado'); } catch (e) {} };
       var ramas = api('wm_task', 'assignment_group.nameSTARTSWITH' + GRUPOS.gpon + Q90, 'sys_id,number,parent,opened_at,state,cmdb_ci').then(function (rs) {
@@ -2268,19 +2268,43 @@
         return Object.keys(por).map(function (k) { return {rama: k, casos: Object.keys(por[k].wo).length, cto: Object.keys(por[k].cto).length, ult: new Date(por[k].ult).toISOString().slice(0, 10)}; })
           .sort(function (a, b) { return b.casos - a.casos || (a.ult < b.ult ? 1 : -1); }).slice(0, 10);
       }).catch(function () { return null; });
-      return Promise.all([RESUMEN.periodo(desde, hasta), ramas]).then(function (x) {
-        var d = x[0], dias = [];
-        if (d.sinSla) throw new Error('no pude leer los SLA');               // sin SLA no se pisan los vencidos guardados
-        for (var f = new Date(desde.getTime()); f <= hasta; f = new Date(f.getFullYear(), f.getMonth(), f.getDate() + 1)) {
-          var k = f.getFullYear() + '-' + ('0' + (f.getMonth() + 1)).slice(-2) + '-' + ('0' + f.getDate()).slice(-2);
-          dias.push({proyecto: 'lineales', dia: k, ing: d.L.porDia[k] || 0, ven: d.L.vDia[k] || 0, cli: d.L.cliDia[k] || {}});
-          dias.push({proyecto: 'gpon', dia: k, ing: d.G.porDia[k] || 0, ven: d.G.vDia[k] || 0, cli: null});
-        }
-        return sbRpc('tab_guardar', {p_dias: dias, p_ramas: x[1]});
-      }).then(function () { soltar(); botLog('tablero actualizado'); }, function (e) {   // falló: se suelta en Supabase para reintentar en 15 min (esta PC u otra)
+      return Promise.all([tablaDias(desde, hasta), ramas]).then(function (x) {
+        return sbRpc('tab_guardar', {p_dias: x[0], p_ramas: x[1]});
+      }).then(historico).then(function () { soltar(); botLog('tablero actualizado'); }, function (e) {   // falló: se suelta en Supabase para reintentar en 15 min (esta PC u otra)
         soltar(); GM_setValue('tab_hora', ''); sbRpc('bot_soltar', {p_aviso: 'tab:' + hora}).catch(function () {}); botLog('tablero: ' + e.message);
       });
     }, function () { GM_setValue('tab_hora', ''); });
+  }
+  // los días de un rango, listos para Supabase
+  function tablaDias(desde, hasta) {
+    return RESUMEN.periodo(desde, hasta).then(function (d) {
+      var dias = [];
+      if (d.sinSla) throw new Error('no pude leer los SLA');               // sin SLA no se pisan los vencidos guardados
+      for (var f = new Date(desde.getTime()); f <= hasta; f = new Date(f.getFullYear(), f.getMonth(), f.getDate() + 1)) {
+        var k = f.getFullYear() + '-' + ('0' + (f.getMonth() + 1)).slice(-2) + '-' + ('0' + f.getDate()).slice(-2);
+        dias.push({proyecto: 'lineales', dia: k, ing: d.L.porDia[k] || 0, ven: d.L.vDia[k] || 0, cli: d.L.cliDia[k] || {}});
+        dias.push({proyecto: 'gpon', dia: k, ing: d.G.porDia[k] || 0, ven: d.G.vDia[k] || 0, cli: null});
+      }
+      return dias;
+    });
+  }
+  // Histórico: la primera vez (o si falta), carga hacia atrás hasta 6 meses, de a 4 semanas, con una pausa entre tramos.
+  // Supabase dice desde qué día ya hay datos: así se hace una sola vez, aunque haya varias PCs.
+  var TAB_HISTORIA = 190;
+  function historico() {
+    return sbRpc('tab_desde', {}).then(function (min) {
+      var hoy0 = new Date(); hoy0.setHours(0, 0, 0, 0);
+      var tope = new Date(hoy0.getTime()); tope.setDate(tope.getDate() - TAB_HISTORIA);
+      var hasta = min ? new Date(min + 'T00:00:00') : new Date(hoy0.getTime());
+      hasta.setDate(hasta.getDate() - 1);
+      if (hasta < tope) return;                                   // ya está todo
+      var desde = new Date(hasta.getTime()); desde.setDate(desde.getDate() - 27);
+      if (desde < tope) desde = tope;
+      botLog('tablero: cargo el histórico ' + desde.toISOString().slice(0, 10) + ' a ' + hasta.toISOString().slice(0, 10));
+      return tablaDias(desde, hasta).then(function (dias) { return sbRpc('tab_guardar', {p_dias: dias, p_ramas: null}); })
+        .then(function () { return new Promise(function (ok) { setTimeout(ok, 5000); }); })
+        .then(historico);                                          // sigue con el tramo anterior
+    }, function () {});                                            // sin la función tab_desde (falta el SQL): no hace histórico
   }
   setTimeout(subirTablero, 60000);
   setInterval(subirTablero, 15 * 60000);

@@ -182,7 +182,7 @@ svg{display:block;width:100%;height:auto}.vacio{color:var(--mu);font-size:13px;p
     h += '<div class="c"><h3>En término, últimas 12 semanas</h3><p>% de los casos ingresados que no se vencieron</p>' + grafTendencia(m, color) + '</div>';
     $('wrap').innerHTML = h;
     var act = st.datos.actualizado ? new Date(st.datos.actualizado) : null;
-    $('act').textContent = act ? 'Actualizado ' + ddmm(act) + ' ' + ('0' + act.getHours()).slice(-2) + ':' + ('0' + act.getMinutes()).slice(-2) + ' · se actualiza una vez por día, a la mañana' : 'Sin datos todavía';
+    $('act').textContent = act ? 'Actualizado ' + ddmm(act) + ' ' + ('0' + act.getHours()).slice(-2) + ':' + ('0' + act.getMinutes()).slice(-2) + ' · se actualiza una vez por día' : 'Sin datos todavía';
   }
   function arrancar(pass) {
     $('err').textContent = 'Cargando…';
