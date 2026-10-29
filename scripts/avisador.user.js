@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Mobisond · Avisador
 // @namespace    mobisond
-// @version      3.32
+// @version      3.33
 // @description  Avisa los casos nuevos (celular, campana y grupo de Telegram), los Lineales sin notas hace 25 min, los SLA y los aceptados; comandos del bot (/status, /bandeja, /autoasignar…).
 // @match        https://*.service-now.com/*
 // @grant        GM_xmlhttpRequest
@@ -1827,7 +1827,7 @@
             if (n && dentro(d) && d.getTime() <= Date.now()) venc[n] = 1;
           });
           var calc = function (proy) {
-            var r = {ing: 0, res: 0, venc: [], vencBaja: [], vencCli: [], emerg: 0, clientes: [], porDia: {}, vDia: {}, cliIng: {}, cliVen: {}, cerr: 0, cerrVenc: 0, cerrTodos: 0};
+            var r = {ing: 0, res: 0, venc: [], vencBaja: [], vencCli: [], emerg: 0, clientes: [], porDia: {}, vDia: {}, cliIng: {}, cliVen: {}, cliDia: {}, cerr: 0, cerrVenc: 0, cerrTodos: 0};
             casos.forEach(function (c) {
               if (proyecto(c) !== proy) return;
               var n = dv(c, 'number'), ab = deUtc(val(c, 'opened_at'));
@@ -1840,6 +1840,8 @@
                 if (proy === 'lineales') {                                             // gráfico por cliente
                   var cl = cliente(c) || 'Otros'; r.cliIng[cl] = (r.cliIng[cl] || 0) + 1;
                   if (vencAlguna[n] && !prioBaja(c)) r.cliVen[cl] = (r.cliVen[cl] || 0) + 1;
+                  var cd = r.cliDia[k] = r.cliDia[k] || {}; cd[cl] = cd[cl] || [0, 0]; cd[cl][0]++;   // tablero: por cliente y día
+                  if (vencAlguna[n] && !prioBaja(c)) cd[cl][1]++;
                 }
               }
               if (prim[n] && dentro(prim[n].d)) r.res++;
@@ -1958,7 +1960,7 @@
 
     if (window.top === window.self) montar();
     var ultimo = null;                     // datos del último /semana o /mes (para los gráficos)
-    return {armar: armar, semana: semana, mes: mes, ultimoGraf: function () { return ultimo; }, limpiarGraf: function () { ultimo = null; }};
+    return {armar: armar, semana: semana, mes: mes, ultimoGraf: function () { return ultimo; }, limpiarGraf: function () { ultimo = null; }, periodo: periodo};
   })();
   // ---------------------------------------------------------------- gráficos de /semana y /mes (una foto por proyecto)
   // Barras por día con los casos INGRESADOS ese día; la parte roja son los de esos que se vencieron (SLA neto, sin prioridad baja).
@@ -2238,6 +2240,48 @@
   }
   setTimeout(infoPC, 8000);
   setInterval(infoPC, 60000);
+
+  // ---------------------------------------------------------------- tablero web (cjaime-boop.github.io/maps/tablero)
+  // Una vez por hora, una sola PC (Supabase decide cuál) recalcula los últimos 21 días por día de ingreso (ingresados,
+  // vencidos y Lineales por cliente) y las ramas GPON con más casos en 90 días, y los sube a Supabase. Solo números.
+  var TAB_DIAS = 21;
+  function subirTablero() {
+    if (!hayGrupo() || !soyLider() || sesionCaida()) return;
+    var ahora = new Date(), hora = ahora.getFullYear() + '-' + (ahora.getMonth() + 1) + '-' + ahora.getDate() + '-' + ahora.getHours();
+    if (GM_getValue('tab_hora', '') === hora) return;
+    GM_setValue('tab_hora', hora);
+    sbRpc('bot_reclamar', {p_aviso: 'tab:' + hora, p_pc: pcId()}).then(function (gano) {
+      if (gano === false) return;
+      var hasta = new Date(); hasta.setHours(0, 0, 0, 0);
+      var desde = new Date(hasta.getTime()); desde.setDate(desde.getDate() - (TAB_DIAS - 1));
+      var marca = 'tab' + Date.now();
+      try { if (!localStorage.getItem('mobisond_ocupado')) localStorage.setItem('mobisond_ocupado', marca); } catch (e) {}
+      var soltar = function () { try { if (localStorage.getItem('mobisond_ocupado') === marca) localStorage.removeItem('mobisond_ocupado'); } catch (e) {} };
+      var ramas = api('wm_task', 'assignment_group.nameSTARTSWITH' + GRUPOS.gpon + Q90, 'sys_id,number,parent,opened_at,state,cmdb_ci').then(function (rs) {
+        var por = {};
+        rs.forEach(function (r) {
+          if (/cancel/i.test(dv(r, 'state'))) return;
+          var ci = dv(r, 'cmdb_ci'), rama = ramaDe(ci); if (!rama) return;
+          var x = por[rama] = por[rama] || {wo: {}, cto: {}, ult: 0};
+          x.wo[woDe(r)] = 1; x.cto[ci] = 1; x.ult = Math.max(x.ult, utc(vl(r, 'opened_at')));
+        });
+        return Object.keys(por).map(function (k) { return {rama: k, casos: Object.keys(por[k].wo).length, cto: Object.keys(por[k].cto).length, ult: new Date(por[k].ult).toISOString().slice(0, 10)}; })
+          .sort(function (a, b) { return b.casos - a.casos || (a.ult < b.ult ? 1 : -1); }).slice(0, 10);
+      }).catch(function () { return null; });
+      return Promise.all([RESUMEN.periodo(desde, hasta), ramas]).then(function (x) {
+        var d = x[0], dias = [];
+        if (d.sinSla) throw new Error('no pude leer los SLA');               // sin SLA no se pisan los vencidos guardados
+        for (var f = new Date(desde.getTime()); f <= hasta; f = new Date(f.getFullYear(), f.getMonth(), f.getDate() + 1)) {
+          var k = f.getFullYear() + '-' + ('0' + (f.getMonth() + 1)).slice(-2) + '-' + ('0' + f.getDate()).slice(-2);
+          dias.push({proyecto: 'lineales', dia: k, ing: d.L.porDia[k] || 0, ven: d.L.vDia[k] || 0, cli: d.L.cliDia[k] || {}});
+          dias.push({proyecto: 'gpon', dia: k, ing: d.G.porDia[k] || 0, ven: d.G.vDia[k] || 0, cli: null});
+        }
+        return sbRpc('tab_guardar', {p_dias: dias, p_ramas: x[1]});
+      }).then(function () { soltar(); botLog('tablero actualizado'); }, function (e) { soltar(); GM_setValue('tab_hora', ''); botLog('tablero: ' + e.message); });
+    }, function () { GM_setValue('tab_hora', ''); });
+  }
+  setTimeout(subirTablero, 60000);
+  setInterval(subirTablero, 5 * 60000);
 
   // ---------------------------------------------------------------- cuándo revisar
   setTimeout(controles, 4000);

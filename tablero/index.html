@@ -1,0 +1,206 @@
+<!doctype html>
+<html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Tablero Mobisond</title>
+<meta name="robots" content="noindex">
+<style>
+:root{--bg:#f1f5f9;--card:#fff;--tx:#0f172a;--mu:#64748b;--gr:#eef0f3;--red:#dc2626;--lin:#2563eb;--gpon:#8b5cf6}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);font-family:"Segoe UI",Roboto,Arial,sans-serif;color:var(--tx)}
+.top{background:linear-gradient(135deg,#1e3a5f,#2b5c8a);color:#fff;padding:16px 28px 0}
+.r1{display:flex;align-items:center;gap:14px;flex-wrap:wrap}.top h1{font-size:20px;margin:0}.top small{opacity:.75}
+.seg{margin-left:auto;display:flex;background:rgba(255,255,255,.15);border-radius:10px;padding:3px}
+.seg button{border:0;background:none;color:#fff;padding:6px 14px;border-radius:8px;font:13px inherit;cursor:pointer}.seg .on{background:#fff;color:#1e3a5f;font-weight:700}
+select{background:rgba(255,255,255,.15);color:#fff;border:0;border-radius:8px;padding:7px 10px;font:13px inherit}select option{color:#0f172a}
+.tabs{display:flex;gap:4px;margin-top:14px}.tabs button{border:0;background:none;padding:10px 22px;border-radius:10px 10px 0 0;font:600 14px inherit;color:#cbd5e1;cursor:pointer}.tabs .on{background:var(--bg);color:var(--tx)}
+.wrap{padding:20px 28px;display:grid;grid-template-columns:repeat(12,1fr);gap:16px;max-width:1280px}
+.k{grid-column:span 4;background:var(--card);border-radius:14px;padding:14px 16px;box-shadow:0 1px 3px rgba(15,23,42,.08)}
+.k small{color:var(--mu);font-size:12.5px}.k b{display:block;font-size:30px;margin-top:4px}.k i{font-style:normal;font-size:12px}
+.c{grid-column:span 6;background:var(--card);border-radius:14px;padding:16px 18px;box-shadow:0 1px 3px rgba(15,23,42,.08);min-width:0}.c.full{grid-column:span 12}
+.c h3{margin:0 0 2px;font-size:15px}.c p{margin:0 0 10px;color:var(--mu);font-size:12.5px}
+.cl{display:grid;grid-template-columns:52px 80px 1fr 34px 56px;align-items:center;gap:8px;margin:12px 0;font-size:13px}.cl span{color:var(--mu);font-size:12px}
+.bar i{display:block;height:20px;background:var(--lin);border-radius:4px;overflow:hidden}.bar em{display:block;height:100%;background:var(--red)}
+.pill{font-weight:700;font-size:11.5px;border-radius:10px;padding:3px 8px;text-align:center;display:inline-block}
+table{width:100%;border-collapse:collapse;font-size:13px}td,th{padding:7px 4px;border-bottom:1px solid #f1f5f9;text-align:left}th{color:var(--mu);font-weight:600;font-size:12px}
+svg{display:block;width:100%;height:auto}.vacio{color:var(--mu);font-size:13px;padding:10px 0}
+#login{max-width:340px;margin:80px auto;background:#fff;border-radius:16px;padding:24px;box-shadow:0 10px 30px rgba(15,23,42,.15)}
+#login h2{margin:0 0 6px;font-size:18px}#login p{color:var(--mu);font-size:13px;margin:0 0 14px}
+#login input{width:100%;border:1px solid #cbd5e1;border-radius:8px;padding:10px;font-size:14px}#login button{margin-top:10px;width:100%;border:0;background:#2563eb;color:#fff;border-radius:8px;padding:10px;font:600 14px inherit;cursor:pointer}
+#login .err{color:var(--red);font-size:12.5px;margin-top:8px;min-height:16px}
+@media (max-width:820px){.k{grid-column:span 12}.c{grid-column:span 12}.wrap{padding:14px}.top{padding:14px 14px 0}.seg{margin-left:0}}
+</style></head><body>
+<div id="login" hidden><h2>📊 Tablero Mobisond</h2><p>Escribí la contraseña del tablero (pedísela al Chino).</p>
+<input id="pass" type="password" autocomplete="current-password"><button id="entrar">Entrar</button><div class="err" id="err"></div></div>
+<div id="app" hidden>
+<div class="top"><div class="r1"><div><h1>📊 Tablero Mobisond · ATC</h1><small id="act"></small></div>
+<div class="seg"><button data-v="semana" class="on">Semana</button><button data-v="mes">Mes</button></div><select id="per"></select></div>
+<div class="tabs"><button data-p="lineales" class="on">🔧 Lineales</button><button data-p="gpon">📡 GPON</button></div></div>
+<div class="wrap" id="wrap"></div></div>
+<script>
+(function () {
+  'use strict';
+  var SB = 'https://gnqvhlpknxtdnzuxfybc.supabase.co', KEY = 'sb_publishable_dUhjyCfRfNtLVLfOYnJ1WA_hfPD3kk9';
+  var DIAS_ATRAS = 190;
+  var DSEM = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'];
+  var MES = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
+  var NOMBRE_CLI = {CLR: 'Claro', EDN: 'Edenor', MUNI: 'Municipal', TP: 'Telecom', Otros: 'sin cliente'};
+  var st = {vista: 'semana', proy: 'lineales', per: 0, datos: null};
+  var $ = function (id) { return document.getElementById(id); };
+  function lsGet(k) { try { return localStorage.getItem(k); } catch (e) { return null; } }
+  function lsSet(k, v) { try { if (v === null) localStorage.removeItem(k); else localStorage.setItem(k, v); } catch (e) {} }
+  function iso(d) { return d.getFullYear() + '-' + ('0' + (d.getMonth() + 1)).slice(-2) + '-' + ('0' + d.getDate()).slice(-2); }
+  function dd(d) { return ('0' + d.getDate()).slice(-2); }
+  function ddmm(d) { return dd(d) + '/' + ('0' + (d.getMonth() + 1)).slice(-2); }
+  function mas(d, n) { return new Date(d.getFullYear(), d.getMonth(), d.getDate() + n); }
+  function lunes(d) { var x = new Date(d.getFullYear(), d.getMonth(), d.getDate()); return mas(x, -((x.getDay() + 6) % 7)); }
+  function hoy() { var d = new Date(); d.setHours(0, 0, 0, 0); return d; }
+  function esc(t) { return String(t).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
+  function pctT(i, v) { return i ? 100 - Math.round(100 * v / i) : null; }
+  function pill(p) {
+    if (p === null) return '<span style="color:#94a3b8">—</span>';
+    var bg = p <= 80 ? '#fee2e2' : p < 100 ? '#fef3c7' : '#dcfce7', fg = p <= 80 ? '#991b1b' : p < 100 ? '#92400e' : '#166534';
+    return '<span class="pill" style="background:' + bg + ';color:' + fg + '">' + p + '%</span>';
+  }
+
+  // ---------- datos
+  function leer(pass) {
+    var h = hoy();
+    return fetch(SB + '/rest/v1/rpc/tab_leer', {method: 'POST', headers: {apikey: KEY, 'Content-Type': 'application/json'},
+      body: JSON.stringify({p_pass: pass, p_desde: iso(mas(h, -DIAS_ATRAS)), p_hasta: iso(h)})})
+      .then(function (r) { return r.json().then(function (j) { if (!r.ok) throw new Error(/contrase/i.test(j.message || '') ? 'pass' : (j.message || r.status)); return j; }); });
+  }
+  function porDia(proy) {                  // {iso: {ing, ven, cli}}
+    var m = {}; (st.datos.dias || []).forEach(function (d) { if (d.proyecto === proy) m[d.dia] = d; }); return m;
+  }
+  function periodos() {                    // lista para el selector (más nuevo primero)
+    var h = hoy(), o = [];
+    if (st.vista === 'semana') for (var i = 0; i < 12; i++) { var l = mas(lunes(h), -7 * i); o.push({desde: l, hasta: mas(l, 6)}); }
+    else for (var j = 0; j < 6; j++) { var a = new Date(h.getFullYear(), h.getMonth() - j, 1); o.push({desde: a, hasta: new Date(a.getFullYear(), a.getMonth() + 1, 0)}); }
+    return o;
+  }
+  function nombrePer(p) {
+    return st.vista === 'semana' ? ddmm(p.desde) + ' al ' + ddmm(p.hasta) : MES[p.desde.getMonth()].replace(/^./, function (c) { return c.toUpperCase(); }) + ' ' + p.desde.getFullYear();
+  }
+  function sumar(m, desde, hasta) {
+    var t = {ing: 0, ven: 0, dias: []}, h = hoy();
+    for (var d = new Date(desde.getTime()); d <= hasta; d = mas(d, 1)) {
+      var x = m[iso(d)] || {ing: 0, ven: 0, cli: null};
+      t.dias.push({d: d, ing: x.ing || 0, ven: x.ven || 0, cli: x.cli, falta: d > h});
+      t.ing += x.ing || 0; t.ven += x.ven || 0;
+    }
+    return t;
+  }
+
+  // ---------- gráficos (SVG)
+  function grafDias(t, color) {
+    var mes = st.vista === 'mes', W = 1180, H = 230, x0 = 34, y0 = 20, y1 = mes ? 200 : 190, n = t.dias.length, cw = (W - x0) / n, bw = cw * (mes ? 0.66 : 0.5);
+    var vmax = Math.max(4, Math.ceil((Math.max.apply(null, t.dias.map(function (d) { return d.ing; }).concat([0])) + 1) / 4) * 4);
+    var s = '<svg viewBox="0 0 ' + W + ' ' + (H + (mes ? 0 : 26)) + '">';
+    if (mes) t.dias.forEach(function (d, i) { if (d.d.getDay() % 6 === 0) s += '<rect x="' + (x0 + cw * i) + '" y="' + (y0 - 6) + '" width="' + cw + '" height="' + (y1 - y0 + 6) + '" fill="#f1f5f9"/>'; });
+    for (var v = 0; v <= vmax; v += vmax / 4) { var y = y1 - (y1 - y0) * v / vmax; s += '<line x1="' + x0 + '" x2="' + W + '" y1="' + y + '" y2="' + y + '" stroke="#eef0f3"/><text x="' + (x0 - 8) + '" y="' + (y + 4) + '" font-size="11" fill="#94a3b8" text-anchor="end">' + v + '</text>'; }
+    t.dias.forEach(function (d, i) {
+      var cx = x0 + cw * i + cw / 2, hi = (y1 - y0) * d.ing / vmax, hv = (y1 - y0) * d.ven / vmax;
+      if (d.ing) s += '<rect x="' + (cx - bw / 2) + '" y="' + (y1 - hi) + '" width="' + bw + '" height="' + hi + '" rx="3" fill="' + color + '"/>';
+      if (d.ven) s += '<rect x="' + (cx - bw / 2) + '" y="' + (y1 - hv) + '" width="' + bw + '" height="' + hv + '" fill="#dc2626"/>' + (!mes && hv > 16 ? '<text x="' + cx + '" y="' + (y1 - hv / 2 + 4) + '" font-size="12" font-weight="700" fill="#fff" text-anchor="middle">' + d.ven + '</text>' : '');
+      if (d.ing) s += '<text x="' + cx + '" y="' + (y1 - hi - 5) + '" font-size="' + (mes ? 10 : 12) + '" font-weight="700" fill="#1f2937" text-anchor="middle">' + d.ing + '</text>';
+      if (mes) { if (i === 0 || d.d.getDate() % 5 === 0) s += '<text x="' + cx + '" y="' + (y1 + 18) + '" font-size="11" fill="#64748b" text-anchor="middle">' + d.d.getDate() + '</text>'; }
+      else {
+        s += '<text x="' + cx + '" y="' + (y1 + 18) + '" font-size="12" fill="#64748b" text-anchor="middle">' + DSEM[d.d.getDay()] + ' ' + dd(d.d) + '</text>';
+        var p = d.falta ? null : pctT(d.ing, d.ven);
+        if (p === null) s += '<text x="' + cx + '" y="' + (y1 + 40) + '" font-size="12" fill="#94a3b8" text-anchor="middle">—</text>';
+        else { var bg = p <= 80 ? '#fee2e2' : p < 100 ? '#fef3c7' : '#dcfce7', fg = p <= 80 ? '#991b1b' : p < 100 ? '#92400e' : '#166534';
+          s += '<rect x="' + (cx - 22) + '" y="' + (y1 + 27) + '" width="44" height="19" rx="9" fill="' + bg + '"/><text x="' + cx + '" y="' + (y1 + 40) + '" font-size="11.5" font-weight="700" fill="' + fg + '" text-anchor="middle">' + p + '%</text>'; }
+      }
+    });
+    return s + '</svg>';
+  }
+  function grafTendencia(m, color) {       // % en término de las últimas 12 semanas (cerradas o en curso)
+    var l0 = lunes(hoy()), pts = [];
+    for (var i = 11; i >= 0; i--) { var l = mas(l0, -7 * i), t = sumar(m, l, mas(l, 6)); pts.push({l: l, p: pctT(t.ing, t.ven)}); }
+    var vals = pts.filter(function (x) { return x.p !== null; }).map(function (x) { return x.p; });
+    if (!vals.length) return '<div class="vacio">Todavía no hay datos.</div>';
+    var lo = Math.max(0, Math.min(70, Math.floor((Math.min.apply(null, vals) - 5) / 10) * 10)), W = 560, H = 170, x0 = 40, y0 = 10;
+    var y = function (p) { return H - (H - y0) * (p - lo) / (100 - lo); }, x = function (i) { return x0 + i * (W - x0 - 20) / 11; };
+    var s = '<svg viewBox="0 0 ' + W + ' ' + (H + 26) + '">';
+    for (var g = lo; g <= 100; g += 10) s += '<line x1="' + x0 + '" x2="' + W + '" y1="' + y(g) + '" y2="' + y(g) + '" stroke="#eef0f3"/><text x="' + (x0 - 6) + '" y="' + (y(g) + 4) + '" font-size="10" fill="#94a3b8" text-anchor="end">' + Math.round(g) + '%</text>';
+    var camino = pts.map(function (q, i) { return q.p === null ? null : x(i) + ',' + y(q.p); }).filter(Boolean).join(' ');
+    s += '<polyline points="' + camino + '" fill="none" stroke="' + color + '" stroke-width="2.5"/>';
+    pts.forEach(function (q, i) {
+      if (q.p !== null) s += '<circle cx="' + x(i) + '" cy="' + y(q.p) + '" r="3.4" fill="' + color + '"><title>Semana del ' + ddmm(q.l) + ': ' + q.p + '%</title></circle>';
+      if (i % 3 === 0 || i === 11) s += '<text x="' + x(i) + '" y="' + (H + 18) + '" font-size="10.5" fill="#64748b" text-anchor="middle">' + ddmm(q.l) + '</text>';
+    });
+    return s + '</svg>';
+  }
+  function clientes(t) {
+    var ing = {}, ven = {};
+    t.dias.forEach(function (d) { if (d.cli) Object.keys(d.cli).forEach(function (c) { ing[c] = (ing[c] || 0) + d.cli[c][0]; ven[c] = (ven[c] || 0) + d.cli[c][1]; }); });
+    var cls = Object.keys(ing).sort(function (a, b) { return a === 'Otros' ? 1 : b === 'Otros' ? -1 : ing[b] - ing[a]; });
+    if (!cls.length) return '<div class="vacio">No entraron casos en este período.</div>';
+    var max = Math.max.apply(null, cls.map(function (c) { return ing[c]; }));
+    return cls.map(function (c) {
+      return '<div class="cl"><b>' + esc(c) + '</b><span>' + esc(NOMBRE_CLI[c] || '') + '</span><div class="bar"><i style="width:' + (ing[c] / max * 100) + '%"><em style="width:' + ((ven[c] || 0) / ing[c] * 100) + '%"></em></i></div><strong>' + ing[c] + '</strong>' + pill(pctT(ing[c], ven[c] || 0)) + '</div>';
+    }).join('');
+  }
+  function findes(t) {
+    var h = {d: 0, i: 0, v: 0}, f = {d: 0, i: 0, v: 0};
+    t.dias.forEach(function (d) { if (d.falta) return; var x = d.d.getDay() % 6 === 0 ? f : h; x.d++; x.i += d.ing; x.v += d.ven; });
+    var fila = function (n, x) { return '<tr><td>' + n + '</td><td><b>' + (x.d ? (x.i / x.d).toFixed(1).replace('.', ',') : '—') + '</b></td><td>' + pill(pctT(x.i, x.v)) + '</td></tr>'; };
+    return '<table><tr><th>Fines de semana</th><th>Ingresados por día</th><th>En término</th></tr>' + fila('Días hábiles', h) + fila('Fines de semana', f) + '</table>';
+  }
+  function ramas() {
+    var r = st.datos.ramas || [];
+    if (!r.length) return '<div class="vacio">Sin datos de ramas todavía.</div>';
+    return '<table><tr><th>Rama</th><th>Casos</th><th>CTO</th><th>Último</th></tr>' + r.map(function (x) {
+      var u = x.ult ? x.ult.split('-') : null;
+      return '<tr><td>' + esc(x.rama) + '</td><td><b>' + x.casos + '</b></td><td>' + x.cto + '</td><td>' + (u ? u[2] + '/' + u[1] : '') + '</td></tr>';
+    }).join('') + '</table>';
+  }
+  function flecha(dif, sufijo, bueno) {   // bueno: true si subir es bueno
+    if (dif === null || isNaN(dif)) return '<i style="color:#94a3b8">sin comparación</i>';
+    if (!dif) return '<i style="color:#64748b">igual que ' + st.cmpTxt + '</i>';
+    var ok = (dif > 0) === bueno;
+    return '<i style="color:' + (ok ? '#16a34a' : '#dc2626') + '">' + (dif > 0 ? '▲ ' : '▼ ') + Math.abs(dif) + sufijo + ' vs ' + st.cmpTxt + '</i>';
+  }
+
+  // ---------- pantalla
+  function pintar() {
+    var ps = periodos(), p = ps[st.per] || ps[0], ant = st.vista === 'semana' ? {desde: mas(p.desde, -7), hasta: mas(p.hasta, -7)}
+      : {desde: new Date(p.desde.getFullYear(), p.desde.getMonth() - 1, 1), hasta: new Date(p.desde.getFullYear(), p.desde.getMonth(), 0)};
+    $('per').innerHTML = ps.map(function (x, i) { return '<option value="' + i + '"' + (i === st.per ? ' selected' : '') + '>' + nombrePer(x) + (i === 0 ? ' (en curso)' : '') + '</option>'; }).join('');
+    // período en curso: se compara con los mismos días del período anterior (ej. lunes a miércoles contra lunes a miércoles)
+    var h0 = hoy(), enCurso = p.hasta > h0, corridos = Math.round((Math.min(h0, p.hasta) - p.desde) / 864e5);
+    if (enCurso) ant.hasta = st.vista === 'semana' ? mas(ant.desde, corridos) : new Date(Math.min(mas(ant.desde, corridos), ant.hasta));
+    st.cmpTxt = enCurso ? (st.vista === 'semana' ? 'mismos días de la semana anterior' : 'mismos días del mes anterior') : (st.vista === 'semana' ? 'semana anterior' : 'mes anterior');
+    var m = porDia(st.proy), t = sumar(m, p.desde, p.hasta), a = sumar(m, ant.desde, ant.hasta);
+    var color = st.proy === 'lineales' ? '#2563eb' : '#8b5cf6', nom = st.proy === 'lineales' ? 'Lineales' : 'GPON';
+    var pt = pctT(t.ing, t.ven), pa = pctT(a.ing, a.ven), hayAnt = a.dias.some(function (d) { return m[iso(d.d)]; });
+    var h = '';
+    h += '<div class="k"><small>Ingresados</small><b>' + t.ing + '</b>' + flecha(hayAnt ? t.ing - a.ing : null, '', false).replace(/color:#(16a34a|dc2626)/, 'color:#64748b') + '</div>';
+    h += '<div class="k"><small>En término</small><b style="color:' + (pt === null ? '#0f172a' : pt > 80 ? '#16a34a' : '#dc2626') + '">' + (pt === null ? '—' : pt + '%') + '</b>' + flecha(hayAnt && pt !== null && pa !== null ? pt - pa : null, ' pts', true) + '</div>';
+    h += '<div class="k"><small>Vencidos</small><b style="color:#dc2626">' + t.ven + '</b>' + flecha(hayAnt ? t.ven - a.ven : null, '', false) + '</div>';
+    h += '<div class="c full"><h3>' + nom + ' · por día de ingreso</h3><p>Casos ingresados por día; en rojo, los que se vencieron.' + (st.vista === 'semana' ? ' Abajo, el % en término de cada día.' : ' En gris, los fines de semana.') + '</p>' + grafDias(t, color) + '</div>';
+    if (st.proy === 'lineales') h += '<div class="c"><h3>Por cliente</h3><p>Ingresados y vencidos del período</p>' + clientes(t) + '<div style="margin-top:14px">' + findes(t) + '</div></div>';
+    else h += '<div class="c"><h3>Ramas con más casos (90 días)</h3><p>Escribí /rama en Telegram para ver el detalle de una</p>' + ramas() + '<div style="margin-top:14px">' + findes(t) + '</div></div>';
+    h += '<div class="c"><h3>En término, últimas 12 semanas</h3><p>% de los casos ingresados que no se vencieron</p>' + grafTendencia(m, color) + '</div>';
+    $('wrap').innerHTML = h;
+    var act = st.datos.actualizado ? new Date(st.datos.actualizado) : null;
+    $('act').textContent = act ? 'Actualizado ' + ddmm(act) + ' ' + ('0' + act.getHours()).slice(-2) + ':' + ('0' + act.getMinutes()).slice(-2) + ' · datos de ServiceNow' : 'Sin datos todavía';
+  }
+  function arrancar(pass) {
+    $('err').textContent = 'Cargando…';
+    leer(pass).then(function (j) {
+      st.datos = j; lsSet('tab_pass', pass);
+      $('login').hidden = true; $('app').hidden = false; pintar();
+    }, function (e) {
+      $('login').hidden = false; $('app').hidden = true;
+      $('err').textContent = e.message === 'pass' ? 'Contraseña incorrecta.' : 'No pude leer los datos (' + e.message + ').';
+      if (e.message === 'pass') lsSet('tab_pass', null);
+    });
+  }
+  document.querySelectorAll('.seg button').forEach(function (b) { b.onclick = function () { st.vista = b.dataset.v; st.per = 0; document.querySelectorAll('.seg button').forEach(function (x) { x.className = x === b ? 'on' : ''; }); pintar(); }; });
+  document.querySelectorAll('.tabs button').forEach(function (b) { b.onclick = function () { st.proy = b.dataset.p; document.querySelectorAll('.tabs button').forEach(function (x) { x.className = x === b ? 'on' : ''; }); pintar(); }; });
+  $('per').onchange = function () { st.per = +this.value; pintar(); };
+  $('entrar').onclick = function () { arrancar($('pass').value); };
+  $('pass').onkeydown = function (e) { if (e.key === 'Enter') arrancar($('pass').value); };
+  var guardada = lsGet('tab_pass');
+  if (guardada) arrancar(guardada); else $('login').hidden = false;
+})();
+</script></body></html>
