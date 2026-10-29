@@ -2277,7 +2277,9 @@
           dias.push({proyecto: 'gpon', dia: k, ing: d.G.porDia[k] || 0, ven: d.G.vDia[k] || 0, cli: null});
         }
         return sbRpc('tab_guardar', {p_dias: dias, p_ramas: x[1]});
-      }).then(function () { soltar(); botLog('tablero actualizado'); }, function (e) { soltar(); GM_setValue('tab_hora', ''); botLog('tablero: ' + e.message); });
+      }).then(function () { soltar(); botLog('tablero actualizado'); }, function (e) {   // falló: se suelta en Supabase para reintentar en 15 min (esta PC u otra)
+        soltar(); GM_setValue('tab_hora', ''); sbRpc('bot_soltar', {p_aviso: 'tab:' + hora}).catch(function () {}); botLog('tablero: ' + e.message);
+      });
     }, function () { GM_setValue('tab_hora', ''); });
   }
   setTimeout(subirTablero, 60000);
