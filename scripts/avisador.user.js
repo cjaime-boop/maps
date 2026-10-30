@@ -2,7 +2,7 @@
 // @name         Mobisond · Avisador
 // @namespace    mobisond
 // @version      3.41
-// @description  Avisa los casos nuevos (celular, campana y grupo de Telegram), los Lineales sin notas hace 25 min, los SLA y los aceptados; comandos del bot (/status, /bandeja, /autoasignar…).
+// @description  Avisa los casos nuevos (celular, campana y grupo de Telegram), los Lineales sin notas hace 25 min, los SLA y los aceptados; comandos del bot (/status, /bandeja, /autoasignar…); dispenser de la semana y racha sin vencidos.
 // @match        https://*.service-now.com/*
 // @grant        GM_xmlhttpRequest
 // @grant        GM_getValue
@@ -964,6 +964,17 @@
       }, function (e) { unaVezAlGrupo('cmd:' + p.id, 'No pude armar el ranking del dispenser (' + esc(e.message) + ').', p.msg, p.chat); listo('error ' + e.message); });
       return;
     }
+    if (p.cmd === '/racha') {
+      // el automático de las 20:00 (pedido sin mensaje) guarda el estado en Supabase; a mano solo muestra
+      var autoR = p.id < 0 && !p.msg;
+      RESUMEN.textoRacha(autoR).then(function (r) {
+        unaVezAlGrupo('cmd:' + p.id, r.texto, p.msg, p.chat, function (ok) {
+          if (ok && r.estado) sbRpc('bot_racha', {p_estado: r.estado}).catch(function () {});
+          listo(ok ? 'contestado' : 'no se pudo contestar');
+        });
+      }, function (e) { unaVezAlGrupo('cmd:' + p.id, 'No pude armar la racha sin vencidos (' + esc(e.message) + ').', p.msg, p.chat); listo('error ' + e.message); });
+      return;
+    }
     if (p.cmd === '/status') {
       resumenTelegram((p.texto || '').trim().split(/\s+/).slice(1).join(' ')).then(function (t) {
         unaVezAlGrupo('cmd:' + p.id, t, p.msg, p.chat, function (ok) { listo(ok ? 'contestado' : 'no se pudo contestar'); });
@@ -1184,7 +1195,8 @@
                                       {command: 'autoasignar', description: 'Asignación automática: ver, on u off'},
                                       {command: 'rama', description: 'Casos de una rama GPON en 90 días: /rama GMRN-R0503'},
                                       {command: 'pcs', description: 'PCs conectadas y su versión del Avisador'},
-                                      {command: 'dispenser', description: 'Ranking del dispenser de la semana'}]}, function () { GM_setValue('tg_cmds', 17); });
+                                      {command: 'dispenser', description: 'Ranking del dispenser de la semana'},
+                                      {command: 'racha', description: 'Racha sin vencidos de Lineales y GPON'}]}, function () { GM_setValue('tg_cmds', 17); });
     }
     if (modoBot === null) {                    // ¿el bot está conectado a Supabase?
       modoBot = 'esperando';
@@ -2098,9 +2110,101 @@
       }).then(function (x) { return typeof x === 'string' ? {texto: x, ganador: ''} : x; });
     }
 
+    // ---------- 🔥 RACHA SIN VENCIDOS (todos los días a las 20:00, y /racha a mano) ----------
+    // Por proyecto: días desde el último SLA neto vencido (por la hora en que se venció). No cuentan P4, P5 ni cancelados.
+    // El estado (último vencido y récord) vive en Supabase. La primera vez se arma con los vencidos desde el 1 de enero.
+    var DIA_MS = 86400000, RACHA_DESDE = new Date(2026, 0, 1);
+    function vencidosDesde(desde) {       // [{p: 'L'|'G', t: ms, n: 'WO…'}] ordenados por hora, de a un mes por consulta
+      var tramos = [], d = new Date(desde.getTime()), ahora = new Date();
+      while (d < ahora) { var h = new Date(d.getFullYear(), d.getMonth() + 1, 1); tramos.push([new Date(d.getTime()), h < ahora ? h : ahora]); d = h; }
+      var gd = function (x) { return "javascript:gs.dateGenerate('" + iso(x) + "','" + ('0' + x.getHours()).slice(-2) + ':' + ('0' + x.getMinutes()).slice(-2) + ":00')"; };
+      return tramos.reduce(function (prom, tr) {
+        return prom.then(function (acum) {
+          var q = 'task.assignment_group.nameSTARTSWITH' + GRUPOS.lineales + '^ORtask.assignment_group.nameSTARTSWITH' + GRUPOS.gpon +
+                  '^has_breached=true^sla.nameLIKEneto^original_breach_time>=' + gd(tr[0]) + '^original_breach_time<' + gd(tr[1]);
+          return api('task_sla', q, 'task,sla,stage,original_breach_time,task.priority,task.state,task.number,task.parent,task.assignment_group').then(function (r) { return acum.concat(r); });
+        });
+      }, Promise.resolve([])).then(function (rs) {
+        var vistos = {}, out = [];
+        rs.forEach(function (s) {
+          if (!/neto/i.test(dv(s, 'sla'))) return;
+          if (/cancel/i.test(val(s, 'stage') + ' ' + dv(s, 'stage') + ' ' + dv(s, 'task.state'))) return;    // cancelados no
+          var pr = val(s, 'task.priority') + ' ' + dv(s, 'task.priority');
+          if (/^\s*[45]\b|\b[45] - |baja|low|planning/i.test(pr)) return;                                     // P4 y P5 no
+          var g = dv(s, 'task.assignment_group').toUpperCase();
+          var p = g.indexOf(GRUPOS.lineales) === 0 ? 'L' : g.indexOf(GRUPOS.gpon) === 0 ? 'G' : '';
+          var t = deUtc(val(s, 'original_breach_time'));
+          if (!p || !t || t.getTime() > Date.now()) return;
+          var n = dv(s, 'task.parent') || dv(s, 'task.number').replace(/^WOT/i, 'WO');
+          if (vistos[p + n]) return; vistos[p + n] = 1;
+          out.push({p: p, t: t.getTime(), n: n});
+        });
+        return out.sort(function (a, b) { return a.t - b.t; });
+      });
+    }
+    // estado inicial desde el 1 de enero: último vencido y la racha más larga de cada proyecto
+    function rachaInicial() {
+      return vencidosDesde(RACHA_DESDE).then(function (vs) {
+        var e = {revisado: Date.now()};
+        ['L', 'G'].forEach(function (p) {
+          // el récord se mide entre vencidos (el tramo del 1/1 al primer vencido no cuenta: no se sabe desde cuándo venía)
+          var ant = null, rec = 0, ult = null;
+          vs.filter(function (v) { return v.p === p; }).forEach(function (v) {
+            if (ant !== null) rec = Math.max(rec, Math.floor((v.t - ant) / DIA_MS));
+            ant = v.t; ult = v;
+          });
+          e[p] = {ult: ult, rec: rec, enRec: false};
+        });
+        return e;
+      });
+    }
+    var FRASES_RACHA = {
+      corte: ['Mañana arrancamos de nuevo 🔄', 'Se cayó la torre de Jenga. A armarla otra vez 🧱', 'Duele, pero se vuelve más fuerte 💪'],
+      record: ['Historia pura. Que alguien le avise a ATC 🏆', 'Récord nuevo. Esto va para el cuadro 🖼️', 'Nunca visto. Champagne virtual 🍾'],
+      bien: ['Vamos que se puede 💪', 'Que no se corte 🔥', 'Así, tranquilos y sin vencidos 😎']
+    };
+    // final = el de las 20:00 (guarda el estado); a mano no guarda nada
+    function textoRacha(final) {
+      var hoy = new Date(), D = DIAS_SEM[hoy.getDay()] + ' ' + dm(hoy);
+      return sbRpc('bot_racha', {p_estado: null}).then(function (txt) {
+        var e = null; try { e = txt ? JSON.parse(txt) : null; } catch (x) {}
+        return e && e.L && e.G ? e : rachaInicial().then(function (ini) { ini.nuevo = true; return ini; });
+      }).then(function (e) {
+        var desdeQ = new Date((e.revisado || Date.now()) - 2 * DIA_MS);     // con margen: lo ya visto se descarta por hora
+        return (e.nuevo ? Promise.resolve([]) : vencidosDesde(desdeQ)).then(function (vs) {
+          var hh = function (t) { var d = new Date(t); return ('0' + d.getHours()).slice(-2) + ':' + ('0' + d.getMinutes()).slice(-2); };
+          var fecha = function (t) { return dm(new Date(t)) + ' ' + hh(t); };
+          var out = ['🔥 <b>Racha sin vencidos</b> · ' + D, ''], hubo = {corte: 0, record: 0};
+          [['L', '🔧 <b>Lineales</b>'], ['G', '📡 <b>GPON</b>']].forEach(function (pp, i) {
+            var p = pp[0], s = e[p], ult = s.ult;
+            var nuevos = vs.filter(function (v) { return v.p === p && (!ult || v.t > ult.t); });
+            if (i) out.push('');
+            if (nuevos.length) {
+              var llevaba = Math.floor((nuevos[0].t - (ult ? ult.t : RACHA_DESDE.getTime())) / DIA_MS);
+              if (llevaba > s.rec) s.rec = llevaba;
+              s.ult = nuevos[nuevos.length - 1]; s.enRec = false; hubo.corte++;
+              out.push(pp[1] + ': 💔 se cortó', 'Llevaba ' + llevaba + (llevaba === 1 ? ' día' : ' días') + '. Se venció ' + esc(nuevos[0].n) + ' el ' + fecha(nuevos[0].t) +
+                       (nuevos.length > 1 ? ' (y ' + (nuevos.length - 1) + ' más)' : ''), '<i>Récord: ' + s.rec + ' días</i>');
+              return;
+            }
+            var dias = Math.floor((Date.now() - (ult ? ult.t : RACHA_DESDE.getTime())) / DIA_MS), linea = pp[1] + ': ' + dias + (dias === 1 ? ' día' : ' días');
+            if (dias > s.rec) {
+              if (!s.enRec) { out.push(linea + ' 🎉 <b>¡NUEVO RÉCORD!</b>', '<i>El anterior era ' + s.rec + ' días</i>'); hubo.record++; }
+              else out.push(linea + ' 🏆 <i>(récord, sigue sumando)</i>');
+              s.rec = dias; s.enRec = true;
+            } else out.push(linea, '<i>Récord: ' + s.rec + ' días</i>');
+            if (ult) out.push('<i>Último vencido: ' + esc(ult.n) + ' · ' + fecha(ult.t) + '</i>');
+          });
+          out.push('', '<i>' + azar(hubo.record ? FRASES_RACHA.record : hubo.corte ? FRASES_RACHA.corte : FRASES_RACHA.bien) + '</i>');
+          e.revisado = Date.now(); delete e.nuevo;
+          return {texto: out.join('\n'), estado: final ? JSON.stringify(e) : null};
+        });
+      });
+    }
+
     if (window.top === window.self) montar();
     var ultimo = null;                     // datos del último /semana o /mes (para los gráficos)
-    return {armar: armar, semana: semana, mes: mes, textoDispenser: textoDispenser, ultimoGraf: function () { return ultimo; }, limpiarGraf: function () { ultimo = null; }, periodo: periodo};
+    return {armar: armar, semana: semana, mes: mes, textoDispenser: textoDispenser, textoRacha: textoRacha, ultimoGraf: function () { return ultimo; }, limpiarGraf: function () { ultimo = null; }, periodo: periodo};
   })();
   // ---------------------------------------------------------------- gráficos de /semana y /mes (una foto por proyecto)
   // Barras por día con los casos INGRESADOS ese día; la parte roja son los de esos que se vencieron (SLA neto, sin prioridad baja).
