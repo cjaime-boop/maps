@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Mobisond · Avisador
 // @namespace    mobisond
-// @version      3.40
+// @version      3.41
 // @description  Avisa los casos nuevos (celular, campana y grupo de Telegram), los Lineales sin notas hace 25 min, los SLA y los aceptados; comandos del bot (/status, /bandeja, /autoasignar…).
 // @match        https://*.service-now.com/*
 // @grant        GM_xmlhttpRequest
@@ -947,6 +947,25 @@
       }, function (e) { unaVezAlGrupo('cmd:' + p.id, 'No pude armar el resumen mensual (' + esc(e.message) + ').', p.msg, p.chat); listo('error ServiceNow ' + e.message); });
       return;
     }
+    if (p.cmd === '/dispenser') {
+      // período: desde el viernes 19:00 anterior. El automático de los viernes (pedido sin mensaje) cierra la semana a las 19:00
+      // y guarda el ganador en Supabase (para el "bicampeón")
+      var autoD = p.id < 0 && !p.msg, finD = new Date();
+      var iniD = new Date(finD.getTime()); iniD.setHours(19, 0, 0, 0);
+      while (iniD.getDay() !== 5 || iniD > finD) iniD.setDate(iniD.getDate() - 1);
+      if (autoD) { finD = new Date(iniD.getTime()); iniD = new Date(finD.getTime()); iniD.setDate(iniD.getDate() - 7); }
+      var semD = finD.getFullYear() + '-' + ('0' + (finD.getMonth() + 1)).slice(-2) + '-' + ('0' + finD.getDate()).slice(-2);
+      var antesD = autoD ? sbRpc('bot_dispenser', {p_semana: semD, p_ganador: null}).catch(function () { return null; }) : Promise.resolve(null);
+      // la lista de dispatchers viene con la planilla que guarda Supabase (junto con el estado de la asignación automática)
+      var planD = sbRpc('bot_autoasignar', {p_on: null, p_quien: null}).then(function (e) { autoAsig = e; autoAsigT = Date.now(); }, function () {});
+      Promise.all([antesD, planD]).then(function (rs) {
+        return RESUMEN.textoDispenser(iniD, finD, autoD, rs[0]);
+      }).then(function (r) {
+        if (autoD && r.ganador) sbRpc('bot_dispenser', {p_semana: semD, p_ganador: r.ganador}).catch(function () {});
+        unaVezAlGrupo('cmd:' + p.id, r.texto, p.msg, p.chat, function (ok) { listo(ok ? 'contestado' : 'no se pudo contestar'); });
+      }, function (e) { unaVezAlGrupo('cmd:' + p.id, 'No pude armar el ranking del dispenser (' + esc(e.message) + ').', p.msg, p.chat); listo('error ' + e.message); });
+      return;
+    }
     if (p.cmd === '/status') {
       resumenTelegram((p.texto || '').trim().split(/\s+/).slice(1).join(' ')).then(function (t) {
         unaVezAlGrupo('cmd:' + p.id, t, p.msg, p.chat, function (ok) { listo(ok ? 'contestado' : 'no se pudo contestar'); });
@@ -1156,7 +1175,7 @@
     if (!hayGrupo() || !soyLider()) return;
     reintentarAvisos();
     atenderPendientes();
-    if (GM_getValue('tg_cmds', 0) < 16) {     // menú de comandos del bot (aparece al escribir "/" en el grupo)
+    if (GM_getValue('tg_cmds', 0) < 17) {     // menú de comandos del bot (aparece al escribir "/" en el grupo)
       tg('setMyCommands', {commands: [{command: 'bandeja', description: 'Casos abiertos (o /bandeja gpon, /bandeja lineales)'},
                                       {command: 'caso', description: 'Detalle de un caso: /caso WO0096818'},
                                       {command: 'activos', description: 'Quién está activo ahora y quién entra'},
@@ -1166,7 +1185,8 @@
                                       {command: 'historial', description: 'Qué pasó cerca de una botella, coordenadas o link'},
                                       {command: 'autoasignar', description: 'Asignación automática: ver, on u off'},
                                       {command: 'rama', description: 'Casos de una rama GPON en 90 días: /rama GMRN-R0503'},
-                                      {command: 'pcs', description: 'PCs conectadas y su versión del Avisador'}]}, function () { GM_setValue('tg_cmds', 16); });
+                                      {command: 'pcs', description: 'PCs conectadas y su versión del Avisador'},
+                                      {command: 'dispenser', description: 'Ranking del dispenser de la semana'}]}, function () { GM_setValue('tg_cmds', 17); });
     }
     if (modoBot === null) {                    // ¿el bot está conectado a Supabase?
       modoBot = 'esperando';
@@ -1342,7 +1362,7 @@
       if (turno.error) return avisoSin('No lo asigné: ' + turno.error);
       nombres = turno.nombres;
       porque = 'fuera de horario · ' + (alta ? 'P1/P2 → la que terminó a las 19' : 'P3 o menor → la que entra a las 7') + ' (' + turno.dia + ')';
-      if (!nombres.length) return avisoSin('No lo asigné: ' + (alta ? 'nadie de GPON terminó a las 19' : 'nadie de GPON entra a las 7') + ' el ' + turno.dia + ' (francos)');
+      if (!nombres.length) return avisoSin('No lo asigné: ' + (alta ? 'en la planilla no hay nadie de GPON que termine a las 19' : 'en la planilla no hay nadie de GPON que entre a las 7') + ' el ' + turno.dia);
     }
     if (!nombres.length) return avisoSin('No lo asigné: no hay nadie activo en ' + proy);
     var cand = [], raros = [];
@@ -1960,9 +1980,150 @@
     }
     function esc(t) { return String(t).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
 
+    // ---------- 🏆 DISPENSER DE LA SEMANA (/dispenser y automático los viernes 19:00) ----------
+    // Casos de Lineales que pasaron a "Verificación del cliente" en el período. Si un caso pasó varias veces, vale el
+    // ÚLTIMO pase del período. El caso es del dispatcher que dejó la última nota (en la WO) antes de ese pase.
+    // Los dispatchers salen de la planilla de horarios (los nombres sueltos, sin " - ", que guarda Supabase), no de este
+    // repo público. El usuario que comparten Hugo y Santi se le cuenta a Hugo (Santi hace casi todo GPON).
+    var FRASES_DISP = [
+      ['La máquina de pasar a verificación. ATC ya le manda flores.', 'Imparable. Dicen que verifica casos hasta dormido.',
+       'Campeón/a. Se le cae una lágrima al Excel de tanto caso.', 'Primer puesto y ni despeinado/a.'],
+      ['Pisándole los talones. Un par de mates menos y era primero.', 'Plata, pero de la buena.',
+       'Medalla de plata y la frente en alto.', 'A un sprint del oro.'],
+      ['Bronce honorable. Mmm… bronce.', 'Podio es podio.', 'Tercero, pero con onda.', 'Se coló en el podio a último momento.']
+    ];
+    function azar(a) { return a[Math.floor(Math.random() * a.length)]; }
+    function dispatchers() {              // [{nombre: 'Carlos Jaime', claves: ['carlos jaime']}] desde la planilla (Supabase)
+      var act = null, vistos = {}, out = [];
+      try { act = JSON.parse((autoAsig && autoAsig.activos) || 'null'); } catch (e) {}
+      ((act && act.semanas) || []).forEach(function (t) {
+        (t.filas || []).forEach(function (f) {
+          var n = String(f.nombre || '').trim();
+          if (!n || / - /.test(n) || vistos[normNom(n)]) return;          // las cuadrillas van de a dos ("Hugo - Dylan")
+          vistos[normNom(n)] = 1; out.push(n);
+        });
+      });
+      return out;
+    }
+    // "Carlos Ezequiel Jaime" (ServiceNow) -> "Carlos Jaime" (planilla): mismo nombre y algún apellido igual
+    function quienEs(autor, lista) {
+      var a = normNom(autor).split(' '); if (a.length < 2) return '';
+      for (var i = 0; i < lista.length; i++) {
+        var p = normNom(lista[i]).split(' ');
+        if (p[0] === a[0] && a.slice(1).indexOf(p[p.length - 1]) >= 0) return lista[i];
+      }
+      return '';
+    }
+    function corto(nombre, lista) {       // "Carlos" (o "Carlos J." si hay dos con el mismo nombre)
+      var p = String(nombre).split(' '), igual = lista.filter(function (x) { return x.split(' ')[0] === p[0]; }).length;
+      return igual > 1 && p.length > 1 ? p[0] + ' ' + p[p.length - 1][0] + '.' : p[0];
+    }
+    function dispenser(desde, hasta) {
+      var lista = dispatchers();
+      if (!lista.length) return Promise.reject(new Error('no tengo la lista de dispatchers de la planilla'));
+      var hugo = lista.filter(function (x) { return /^hugo /i.test(normNom(x)); })[0] || '';
+      var santi = lista.filter(function (x) { return /^santiago /i.test(normNom(x)); })[0] || '';
+      var lin = 'assignment_group.nameSTARTSWITH' + GRUPOS.lineales;
+      var desdeQ = "javascript:gs.dateGenerate('" + iso(desde) + "','" + ('0' + desde.getHours()).slice(-2) + ':' + ('0' + desde.getMinutes()).slice(-2) + ":00')";
+      return api('wm_task', lin + '^sys_updated_on>=' + desdeQ, 'sys_id,number,parent,state').then(function (casos) {
+        var vistos = {};
+        casos = casos.filter(function (r) { var n = dv(r, 'number'); if (vistos[n] || /cancel/i.test(dv(r, 'state'))) return false; vistos[n] = 1; return true; });
+        var porId = {}, padres = [], woDe = {};
+        casos.forEach(function (c) {
+          porId[val(c, 'sys_id')] = dv(c, 'number');
+          var p = val(c, 'parent'); if (p) { porId[p] = dv(c, 'number'); padres.push(p); woDe[dv(c, 'number')] = p; }
+        });
+        var ids = Object.keys(porId);
+        if (!ids.length) return {casos: []};
+        var pases = {}, notas = {}, leido = false;     // número -> [fechas de pase]; sys_id WO -> [{t, quien}]
+        var pase = function (n, d) { if (n && d && !isNaN(d) && d >= desde && d <= hasta) (pases[n] = pases[n] || []).push(d); };
+        var porAudit = apiIN('sys_audit', ids, function (t) { return 'fieldname=u_pause_reason^documentkeyIN' + t.join(','); },
+                             'documentkey,newvalue,sys_created_on').then(function (as) {
+          leido = true;
+          as.forEach(function (a) {
+            if (/verific/i.test(val(a, 'newvalue') + ' ' + dv(a, 'newvalue'))) pase(porId[val(a, 'documentkey')], new Date(val(a, 'sys_created_on').replace(' ', 'T') + 'Z'));
+          });
+        }, function () {});
+        var porWO = padres.length ? apiIN('wm_order', padres, function (t) { return 'sys_idIN' + t.join(','); }, 'sys_id,comments,work_notes', 40).then(function (wos) {
+          leido = true;
+          wos.forEach(function (w) {
+            var txt = dv(w, 'comments') + '\n' + dv(w, 'work_notes'), n = porId[val(w, 'sys_id')];
+            notas[val(w, 'sys_id')] = notasDelTexto(txt);
+            var re = /(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}|\d{2}[\/-]\d{2}[\/-]\d{4} \d{2}:\d{2}:\d{2}) - [^\n]*\n([\s\S]*?)(?=\n\s*(?:\d{4}-\d{2}-\d{2}|\d{2}[\/-]\d{2}[\/-]\d{4}) \d{2}:\d{2}:\d{2} - |$)/g, m;
+            while ((m = re.exec(txt))) if (/espera la verificaci[oó]n del cliente/i.test(m[2]) && !/hijo/i.test(m[2])) pase(n, fechaEntrada(m[1]));
+          });
+        }, function () {}) : Promise.resolve();
+        return Promise.all([porAudit, porWO]).then(function () {
+          if (!leido) throw new Error('no pude leer los pases a verificación');
+          var out = [];
+          Object.keys(pases).forEach(function (n) {
+            var d = pases[n].sort(function (a, b) { return b - a; })[0];          // el último pase del período
+            var ns = (notas[woDe[n]] || []).filter(function (x) { return x.t && x.t <= d.getTime() + 60000 && quienEs(x.quien, lista); })
+                                             .sort(function (a, b) { return b.t - a.t; });
+            var q = ns.length ? quienEs(ns[0].quien, lista) : '';
+            if (q && santi && q === santi && hugo) q = hugo;                      // el usuario compartido: a Hugo
+            out.push({n: n, d: d, quien: q});
+          });
+          return {casos: out, lista: lista};
+        });
+      });
+    }
+    // texto del ranking. final = el del viernes 19:00 (con frases y premios); si no, "cómo va la carrera"
+    function textoDispenser(desde, hasta, final, antes) {
+      return dispenser(desde, hasta).then(function (r) {
+        var cuenta = {}, porDia = {}, trasnoche = null, total = r.casos.length, sinDueño = 0;
+        r.casos.forEach(function (c) {
+          if (!c.quien) { sinDueño++; return; }
+          cuenta[c.quien] = (cuenta[c.quien] || 0) + 1;
+          var k = c.quien + '|' + iso(c.d); porDia[k] = (porDia[k] || 0) + 1;
+          var h = c.d.getHours() + c.d.getMinutes() / 60;
+          if (h < 6 && (!trasnoche || h > trasnoche.h)) trasnoche = {h: h, quien: c.quien, d: c.d};
+        });
+        var rank = Object.keys(cuenta).sort(function (a, b) { return cuenta[b] - cuenta[a]; });
+        var hh = function (d) { return ('0' + d.getHours()).slice(-2) + ':' + ('0' + d.getMinutes()).slice(-2); };
+        var nom = function (x) { return esc(corto(x, r.lista || [])); };
+        var MED = ['🥇', '🥈', '🥉'];
+        var rango = DIAS_SEM[desde.getDay()] + ' ' + dm(desde) + ' ' + hh(desde) + ' → ' + (final ? DIAS_SEM[hasta.getDay()] + ' ' + dm(hasta) + ' ' + hh(hasta) : 'ahora');
+        var out = [final ? '🏆 <b>DISPENSER DE LA SEMANA</b>' : '🏁 <b>Cómo va la carrera</b>', '<i>' + rango + '</i>', ''];
+        if (!rank.length) return out.concat(['Nadie pasó casos a verificación todavía. Arranca la carrera 🏁']).join('\n');
+        rank.forEach(function (q, i) {
+          var cant = cuenta[q] + (cuenta[q] === 1 ? ' caso' : ' casos');
+          if (i < 3) {
+            out.push(MED[i] + ' <b>' + nom(q) + '</b> · ' + cant);
+            if (final) out.push('<i>' + esc(azar(FRASES_DISP[i])) + '</i>', '');
+          } else out.push((i + 1) + '. ' + nom(q) + ' · ' + cuenta[q]);
+        });
+        if (!final && rank.length > 1) {
+          var dif = cuenta[rank[0]] - cuenta[rank[1]];
+          out.push('', '<i>' + (dif === 0 ? nom(rank[0]) + ' y ' + nom(rank[1]) + ' van empatados. Se pone picante 🌶️'
+                                : dif <= 2 ? nom(rank[1]) + ' viene a ' + dif + (dif === 1 ? ' caso' : ' casos') + '. Se pone picante 🌶️'
+                                : nom(rank[0]) + ' se está escapando 🏃') + '</i>');
+        }
+        while (out[out.length - 1] === '') out.pop();
+        if (final) {
+          var rec = null;
+          Object.keys(porDia).forEach(function (k) { if (!rec || porDia[k] > rec.n) rec = {n: porDia[k], k: k}; });
+          out.push('', '📊 Total: ' + total + (total === 1 ? ' caso pasado' : ' casos pasados') + ' a verificación');
+          if (trasnoche) out.push('🌙 El más trasnochado: <b>' + nom(trasnoche.quien) + '</b>, pase a las ' + hh(trasnoche.d));
+          if (rec && rec.n > 1) {
+            var p = rec.k.split('|'), dd = new Date(p[1] + 'T12:00:00');
+            out.push('⚡ Récord del día: <b>' + nom(p[0]) + '</b>, ' + rec.n + ' el ' + DIAS_SEM[dd.getDay()]);
+          }
+          if (antes && antes.ganador === rank[0] && antes.seguidas >= 1) {
+            var veces = antes.seguidas + 1;
+            out.push('', '👑 <b>' + (veces === 2 ? 'Bicampeón/a' : veces === 3 ? 'Tricampeón/a' : veces + ' semanas seguidas') + ': ' + nom(rank[0]) + '</b>',
+                     '<i>' + (veces === 2 ? 'Segunda semana seguida arriba. Ya pide aumento.' : 'Esto ya es una dinastía.') + '</i>');
+          }
+        }
+        if (sinDueño) out.push('', '<i>' + sinDueño + (sinDueño === 1 ? ' caso sin' : ' casos sin') + ' nota de un dispatcher antes del pase (no cuentan).</i>');
+        out.push('', '<i>Cuenta el último pase a verificación de cada caso de Lineales, a nombre de quien dejó la última nota antes del pase.</i>');
+        return {texto: out.join('\n'), ganador: rank[0]};
+      }).then(function (x) { return typeof x === 'string' ? {texto: x, ganador: ''} : x; });
+    }
+
     if (window.top === window.self) montar();
     var ultimo = null;                     // datos del último /semana o /mes (para los gráficos)
-    return {armar: armar, semana: semana, mes: mes, ultimoGraf: function () { return ultimo; }, limpiarGraf: function () { ultimo = null; }, periodo: periodo};
+    return {armar: armar, semana: semana, mes: mes, textoDispenser: textoDispenser, ultimoGraf: function () { return ultimo; }, limpiarGraf: function () { ultimo = null; }, periodo: periodo};
   })();
   // ---------------------------------------------------------------- gráficos de /semana y /mes (una foto por proyecto)
   // Barras por día con los casos INGRESADOS ese día; la parte roja son los de esos que se vencieron (SLA neto, sin prioridad baja).
