@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Mobisond · Avisador
 // @namespace    mobisond
-// @version      3.41
+// @version      3.42
 // @description  Avisa los casos nuevos (celular, campana y grupo de Telegram), los Lineales sin notas hace 25 min, los SLA y los aceptados; comandos del bot (/status, /bandeja, /autoasignar…); dispenser de la semana y racha sin vencidos.
 // @match        https://*.service-now.com/*
 // @grant        GM_xmlhttpRequest
@@ -2114,30 +2114,44 @@
     // Por proyecto: días desde el último SLA neto vencido (por la hora en que se venció). No cuentan P4, P5 ni cancelados.
     // El estado (último vencido y récord) vive en Supabase. La primera vez se arma con los vencidos desde el 1 de enero.
     var DIA_MS = 86400000, RACHA_DESDE = new Date(2026, 0, 1);
-    function vencidosDesde(desde) {       // [{p: 'L'|'G', t: ms, n: 'WO…'}] ordenados por hora, de a un mes por consulta
-      var tramos = [], d = new Date(desde.getTime()), ahora = new Date();
-      while (d < ahora) { var h = new Date(d.getFullYear(), d.getMonth() + 1, 1); tramos.push([new Date(d.getTime()), h < ahora ? h : ahora]); d = h; }
+    // Primero los casos (abiertos, o cerrados desde esa fecha, de a un mes) y después sus SLA vencidos por sys_id:
+    // ServiceNow no deja (403) buscar en task_sla por el grupo del caso.
+    function vencidosDesde(desde) {       // [{p: 'L'|'G', t: ms, n: 'WO…'}] ordenados por hora
       var gd = function (x) { return "javascript:gs.dateGenerate('" + iso(x) + "','" + ('0' + x.getHours()).slice(-2) + ':' + ('0' + x.getMinutes()).slice(-2) + ":00')"; };
-      return tramos.reduce(function (prom, tr) {
-        return prom.then(function (acum) {
-          var q = 'task.assignment_group.nameSTARTSWITH' + GRUPOS.lineales + '^ORtask.assignment_group.nameSTARTSWITH' + GRUPOS.gpon +
-                  '^has_breached=true^sla.nameLIKEneto^original_breach_time>=' + gd(tr[0]) + '^original_breach_time<' + gd(tr[1]);
-          return api('task_sla', q, 'task,sla,stage,original_breach_time,task.priority,task.state,task.number,task.parent,task.assignment_group').then(function (r) { return acum.concat(r); });
+      var consultas = [grupoQ() + '^active=true'], d = new Date(desde.getTime()), ahora = new Date();
+      while (d < ahora) {
+        var h = new Date(d.getFullYear(), d.getMonth() + 1, 1);
+        consultas.push(grupoQ() + '^closed_at>=' + gd(d) + (h < ahora ? '^closed_at<' + gd(h) : ''));
+        d = h;
+      }
+      var caso = {};                       // sys_id (WOT o WO) -> {p, n}
+      return consultas.reduce(function (prom, q) {
+        return prom.then(function () {
+          return api('wm_task', q, 'sys_id,number,parent,priority,state,assignment_group').then(function (rs) {
+            rs.forEach(function (r) {
+              if (/cancel/i.test(dv(r, 'state'))) return;                                    // cancelados no
+              if (prioBaja(r)) return;                                                        // P4 y P5 no
+              var g = dv(r, 'assignment_group').toUpperCase();
+              var p = g.indexOf(GRUPOS.lineales) === 0 ? 'L' : g.indexOf(GRUPOS.gpon) === 0 ? 'G' : '';
+              if (!p) return;
+              var c = {p: p, n: dv(r, 'parent') || dv(r, 'number').replace(/^WOT/i, 'WO')};
+              caso[val(r, 'sys_id')] = c; if (val(r, 'parent')) caso[val(r, 'parent')] = c;
+            });
+          });
         });
-      }, Promise.resolve([])).then(function (rs) {
+      }, Promise.resolve()).then(function () {
+        var ids = Object.keys(caso);
+        if (!ids.length) return [];
+        return apiIN('task_sla', ids, function (t) { return 'taskIN' + t.join(',') + '^has_breached=true'; }, 'task,sla,stage,original_breach_time,planned_end_time');
+      }).then(function (rs) {
         var vistos = {}, out = [];
         rs.forEach(function (s) {
           if (!/neto/i.test(dv(s, 'sla'))) return;
-          if (/cancel/i.test(val(s, 'stage') + ' ' + dv(s, 'stage') + ' ' + dv(s, 'task.state'))) return;    // cancelados no
-          var pr = val(s, 'task.priority') + ' ' + dv(s, 'task.priority');
-          if (/^\s*[45]\b|\b[45] - |baja|low|planning/i.test(pr)) return;                                     // P4 y P5 no
-          var g = dv(s, 'task.assignment_group').toUpperCase();
-          var p = g.indexOf(GRUPOS.lineales) === 0 ? 'L' : g.indexOf(GRUPOS.gpon) === 0 ? 'G' : '';
-          var t = deUtc(val(s, 'original_breach_time'));
-          if (!p || !t || t.getTime() > Date.now()) return;
-          var n = dv(s, 'task.parent') || dv(s, 'task.number').replace(/^WOT/i, 'WO');
-          if (vistos[p + n]) return; vistos[p + n] = 1;
-          out.push({p: p, t: t.getTime(), n: n});
+          if (/cancel/i.test(val(s, 'stage') + ' ' + dv(s, 'stage'))) return;                 // SLA cancelado no
+          var c = caso[val(s, 'task')], t = deUtc(val(s, 'original_breach_time') || val(s, 'planned_end_time'));
+          if (!c || !t || t < desde || t.getTime() > Date.now()) return;
+          if (vistos[c.p + c.n]) return; vistos[c.p + c.n] = 1;
+          out.push({p: c.p, t: t.getTime(), n: c.n});
         });
         return out.sort(function (a, b) { return a.t - b.t; });
       });
