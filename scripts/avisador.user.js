@@ -955,11 +955,9 @@
       while (iniD.getDay() !== 5 || iniD > finD) iniD.setDate(iniD.getDate() - 1);
       if (autoD) { finD = new Date(iniD.getTime()); iniD = new Date(finD.getTime()); iniD.setDate(iniD.getDate() - 7); }
       var semD = finD.getFullYear() + '-' + ('0' + (finD.getMonth() + 1)).slice(-2) + '-' + ('0' + finD.getDate()).slice(-2);
-      var antesD = autoD ? sbRpc('bot_dispenser', {p_semana: semD, p_ganador: null}).catch(function () { return null; }) : Promise.resolve(null);
-      // la lista de dispatchers viene con la planilla que guarda Supabase (junto con el estado de la asignación automática)
-      var planD = sbRpc('bot_autoasignar', {p_on: null, p_quien: null}).then(function (e) { autoAsig = e; autoAsigT = Date.now(); }, function () {});
-      Promise.all([antesD, planD]).then(function (rs) {
-        return RESUMEN.textoDispenser(iniD, finD, autoD, rs[0]);
+      // devuelve los apodos y, en el automático, el ganador de la semana anterior (para el "bicampeón")
+      sbRpc('bot_dispenser', {p_semana: autoD ? semD : null, p_ganador: null}).then(function (antes) {
+        return RESUMEN.textoDispenser(iniD, finD, autoD, antes);
       }).then(function (r) {
         if (autoD && r.ganador) sbRpc('bot_dispenser', {p_semana: semD, p_ganador: r.ganador}).catch(function () {});
         unaVezAlGrupo('cmd:' + p.id, r.texto, p.msg, p.chat, function (ok) { listo(ok ? 'contestado' : 'no se pudo contestar'); });
@@ -1983,46 +1981,26 @@
     // ---------- 🏆 DISPENSER DE LA SEMANA (/dispenser y automático los viernes 19:00) ----------
     // Casos de Lineales que pasaron a "Verificación del cliente" en el período. Si un caso pasó varias veces, vale el
     // ÚLTIMO pase del período. El caso es del dispatcher que dejó la última nota (en la WO) antes de ese pase.
-    // Los dispatchers salen de la planilla de horarios (los nombres sueltos, sin " - ", que guarda Supabase), no de este
-    // repo público. El usuario que comparten Hugo y Santi se le cuenta a Hugo (Santi hace casi todo GPON).
+    // Los dispatchers (usuario de ServiceNow -> apodo) vienen de Supabase, no de este repo público.
     var FRASES_DISP = [
       ['La máquina de pasar a verificación. ATC ya le manda flores.', 'Imparable. Dicen que verifica casos hasta dormido.',
-       'Campeón/a. Se le cae una lágrima al Excel de tanto caso.', 'Primer puesto y ni despeinado/a.'],
+       'Se le cae una lágrima al Excel de tanto caso.', 'Primer puesto y sin despeinarse.'],
       ['Pisándole los talones. Un par de mates menos y era primero.', 'Plata, pero de la buena.',
        'Medalla de plata y la frente en alto.', 'A un sprint del oro.'],
       ['Bronce honorable. Mmm… bronce.', 'Podio es podio.', 'Tercero, pero con onda.', 'Se coló en el podio a último momento.']
     ];
     function azar(a) { return a[Math.floor(Math.random() * a.length)]; }
-    function dispatchers() {              // [{nombre: 'Carlos Jaime', claves: ['carlos jaime']}] desde la planilla (Supabase)
-      var act = null, vistos = {}, out = [];
-      try { act = JSON.parse((autoAsig && autoAsig.activos) || 'null'); } catch (e) {}
-      ((act && act.semanas) || []).forEach(function (t) {
-        (t.filas || []).forEach(function (f) {
-          var n = String(f.nombre || '').trim();
-          if (!n || / - /.test(n) || vistos[normNom(n)]) return;          // las cuadrillas van de a dos ("Hugo - Dylan")
-          vistos[normNom(n)] = 1; out.push(n);
-        });
-      });
-      return out;
+    // nombres: {"usuario de ServiceNow normalizado": "apodo"} (vive en Supabase, no en este repo público).
+    // El usuario que comparten Hugo y Santi ya viene como "Hugo".
+    function quienEs(autor, nombres) {
+      var a = normNom(autor); if (!a) return '';
+      if (nombres[a]) return nombres[a];
+      var p = a.split(' ');                                    // "Carlos Ezequiel Jaime" -> "carlos jaime"
+      return p.length > 2 ? (nombres[p[0] + ' ' + p[p.length - 1]] || nombres[p[0] + ' ' + p[p.length - 2]] || '') : '';
     }
-    // "Carlos Ezequiel Jaime" (ServiceNow) -> "Carlos Jaime" (planilla): mismo nombre y algún apellido igual
-    function quienEs(autor, lista) {
-      var a = normNom(autor).split(' '); if (a.length < 2) return '';
-      for (var i = 0; i < lista.length; i++) {
-        var p = normNom(lista[i]).split(' ');
-        if (p[0] === a[0] && a.slice(1).indexOf(p[p.length - 1]) >= 0) return lista[i];
-      }
-      return '';
-    }
-    function corto(nombre, lista) {       // "Carlos" (o "Carlos J." si hay dos con el mismo nombre)
-      var p = String(nombre).split(' '), igual = lista.filter(function (x) { return x.split(' ')[0] === p[0]; }).length;
-      return igual > 1 && p.length > 1 ? p[0] + ' ' + p[p.length - 1][0] + '.' : p[0];
-    }
-    function dispenser(desde, hasta) {
-      var lista = dispatchers();
-      if (!lista.length) return Promise.reject(new Error('no tengo la lista de dispatchers de la planilla'));
-      var hugo = lista.filter(function (x) { return /^hugo /i.test(normNom(x)); })[0] || '';
-      var santi = lista.filter(function (x) { return /^santiago /i.test(normNom(x)); })[0] || '';
+    function dispenser(desde, hasta, nombres) {
+      var lista = {}; Object.keys(nombres || {}).forEach(function (k) { lista[normNom(k)] = nombres[k]; });
+      if (!Object.keys(lista).length) return Promise.reject(new Error('no tengo la lista de dispatchers (Supabase)'));
       var lin = 'assignment_group.nameSTARTSWITH' + GRUPOS.lineales;
       var desdeQ = "javascript:gs.dateGenerate('" + iso(desde) + "','" + ('0' + desde.getHours()).slice(-2) + ':' + ('0' + desde.getMinutes()).slice(-2) + ":00')";
       return api('wm_task', lin + '^sys_updated_on>=' + desdeQ, 'sys_id,number,parent,state').then(function (casos) {
@@ -2061,16 +2039,15 @@
             var ns = (notas[woDe[n]] || []).filter(function (x) { return x.t && x.t <= d.getTime() + 60000 && quienEs(x.quien, lista); })
                                              .sort(function (a, b) { return b.t - a.t; });
             var q = ns.length ? quienEs(ns[0].quien, lista) : '';
-            if (q && santi && q === santi && hugo) q = hugo;                      // el usuario compartido: a Hugo
             out.push({n: n, d: d, quien: q});
           });
-          return {casos: out, lista: lista};
+          return {casos: out};
         });
       });
     }
     // texto del ranking. final = el del viernes 19:00 (con frases y premios); si no, "cómo va la carrera"
     function textoDispenser(desde, hasta, final, antes) {
-      return dispenser(desde, hasta).then(function (r) {
+      return dispenser(desde, hasta, antes && antes.nombres).then(function (r) {
         var cuenta = {}, porDia = {}, trasnoche = null, total = r.casos.length, sinDueño = 0;
         r.casos.forEach(function (c) {
           if (!c.quien) { sinDueño++; return; }
@@ -2081,7 +2058,7 @@
         });
         var rank = Object.keys(cuenta).sort(function (a, b) { return cuenta[b] - cuenta[a]; });
         var hh = function (d) { return ('0' + d.getHours()).slice(-2) + ':' + ('0' + d.getMinutes()).slice(-2); };
-        var nom = function (x) { return esc(corto(x, r.lista || [])); };
+        var nom = function (x) { return esc(x); };
         var MED = ['🥇', '🥈', '🥉'];
         var rango = DIAS_SEM[desde.getDay()] + ' ' + dm(desde) + ' ' + hh(desde) + ' → ' + (final ? DIAS_SEM[hasta.getDay()] + ' ' + dm(hasta) + ' ' + hh(hasta) : 'ahora');
         var out = [final ? '🏆 <b>DISPENSER DE LA SEMANA</b>' : '🏁 <b>Cómo va la carrera</b>', '<i>' + rango + '</i>', ''];
@@ -2111,7 +2088,7 @@
           }
           if (antes && antes.ganador === rank[0] && antes.seguidas >= 1) {
             var veces = antes.seguidas + 1;
-            out.push('', '👑 <b>' + (veces === 2 ? 'Bicampeón/a' : veces === 3 ? 'Tricampeón/a' : veces + ' semanas seguidas') + ': ' + nom(rank[0]) + '</b>',
+            out.push('', '👑 <b>' + (veces === 2 ? 'Bicampeonato' : veces === 3 ? 'Tricampeonato' : veces + ' semanas seguidas') + ' de ' + nom(rank[0]) + '</b>',
                      '<i>' + (veces === 2 ? 'Segunda semana seguida arriba. Ya pide aumento.' : 'Esto ya es una dinastía.') + '</i>');
           }
         }
