@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Mobisond · Avisador
 // @namespace    mobisond
-// @version      3.42
+// @version      3.43
 // @description  Avisa los casos nuevos (celular, campana y grupo de Telegram), los Lineales sin notas hace 25 min, los SLA y los aceptados; comandos del bot (/status, /bandeja, /autoasignar…); dispenser de la semana y racha sin vencidos.
 // @match        https://*.service-now.com/*
 // @grant        GM_xmlhttpRequest
@@ -105,7 +105,7 @@
 
   function hayGrupo() { return GM_getValue('tg_token', '') && GM_getValue('tg_chat', ''); }
   function esc(t) { return String(t).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
-  function colorPrio(p) { return /^1/.test(p) ? '🔴' : /^2/.test(p) ? '🟠' : /^3/.test(p) ? '🟡' : '⚪'; }
+  function colorPrio(p) { return /^1/.test(p) ? '🔴' : /^2/.test(p) ? '🟡' : /^3/.test(p) ? '🟢' : '⚪'; }   // P1 rojo, P2 amarillo, P3 verde, P4/P5 blanco (en todo el bot)
   // bloque común de los avisos: WO en negrita, CI, descripción en cursiva, (extra) y link
   function bloqueCaso(wo, ci, desc, link, extra) {
     return '\n\n<b>' + esc(wo) + '</b>' + (ci ? '\n' + esc(ci) : '') +
@@ -833,7 +833,7 @@
   }
   function textoBandeja(solo) {
     var q = 'active=true^assignment_group.nameSTARTSWITH' + GRUPOS.lineales + '^ORassignment_group.nameSTARTSWITH' + GRUPOS.gpon;
-    return api('wm_task', q, 'sys_id,number,parent,state,substate,u_pause_reason,assignment_group,assigned_to,cmdb_ci').then(function (casos) {
+    return api('wm_task', q, 'sys_id,number,parent,state,substate,u_pause_reason,assignment_group,assigned_to,cmdb_ci,priority').then(function (casos) {
       var out = ['📋 <b>Bandeja' + (solo ? ' ' + solo : '') + '</b> · ' + hhmm(Date.now())];
       (solo ? [solo] : ['Lineales', 'GPON']).forEach(function (pr) {
         var cs = casos.filter(function (r) { return proyecto(r) === pr; });
@@ -847,15 +847,16 @@
           else if (pausado(r)) pausa.push(r);
           else curso.push(r);
         });
-        var fila = function (r, abajo, alLado) {      // WO en negrita; abajo con sangría el CI y (en cursiva) el detalle
-          var t = '• <b>' + esc(woDe(r)) + '</b>\n   ' + esc(dv(r, 'cmdb_ci') || 'sin CI') + (alLado ? ' · <i>' + esc(alLado) + '</i>' : '');
+        var fila = function (r, abajo, alLado) {      // punto de prioridad + WO en negrita; abajo con sangría el CI y (en cursiva) el detalle
+          var t = colorPrio(dv(r, 'priority') || vl(r, 'priority')) + ' <b>' + esc(woDe(r)) + '</b>\n   ' + esc(dv(r, 'cmdb_ci') || 'sin CI') + (alLado ? ' · <i>' + esc(alLado) + '</i>' : '');
           if (abajo) t += '\n   <i>' + esc(abajo) + '</i>';
           return t;
         };
         var grupo = function (titulo, lista, abajo, alLado) {
           if (!lista.length) return;
           out.push('', '<b>' + titulo + ' (' + lista.length + ')</b>');
-          lista.forEach(function (r) { out.push(fila(r, abajo && abajo(r), alLado && alLado(r))); });
+          var pn = function (r) { return parseInt(vl(r, 'priority') || dv(r, 'priority'), 10) || 9; };   // los más urgentes arriba
+          lista.slice().sort(function (a, b) { return pn(a) - pn(b); }).forEach(function (r) { out.push(fila(r, abajo && abajo(r), alLado && alLado(r))); });
         };
         if (pr === 'GPON' && !solo) out.push('', '━━━━━━━━━━━━━━━━━━━━');      // separador entre Lineales y GPON
         out.push('', (pr === 'Lineales' ? '🔧' : '📡') + ' <b>' + pr + '</b>', '', cs.length + (cs.length === 1 ? ' abierto' : ' abiertos'));
@@ -868,6 +869,7 @@
         if (sin.length) grupo('⏳ Sin atender', sin, null, function (r) { return dv(r, 'state'); });
         else out.push('', '⏳ Sin atender: 0');
       });
+      out.push('', '🔴 P1 · 🟡 P2 · 🟢 P3 · ⚪ P4/P5');
       return out.join('\n');
     });
   }
@@ -1006,7 +1008,7 @@
         api('task_sla', 'active=true^taskIN' + ids.join(','), 'sla,stage,has_breached,planned_end_time,business_time_left').catch(function () { return null; })
       ]).then(function (res) {
         var nota = res[0][vl(r, 'sys_id')], slas = res[1];
-        var prio = dv(r, 'priority'), color = /^1/.test(prio) ? '🔴' : /^2/.test(prio) ? '🟠' : /^3/.test(prio) ? '🟡' : '⚪';
+        var prio = dv(r, 'priority'), color = colorPrio(prio);
         var out = ['🔎 <b>' + esc(woDe(r)) + '</b>', esc(dv(r, 'cmdb_ci') || 'sin CI')];
         if (dv(r, 'short_description')) out.push('<i>' + esc(dv(r, 'short_description')) + '</i>');
         out.push('', '📌 <b>Estado</b>',
@@ -1087,7 +1089,7 @@
       api('task_sla', 'taskIN' + ids.join(','), 'sla,stage,has_breached,start_time,end_time,planned_end_time,duration,pause_duration').catch(function () { return null; })
     ]).then(function (res) {
       var wot = res[0] || r, wo = res[1], slas = res[2];
-      var prio = dv(r, 'priority'), color = /^1/.test(prio) ? '🔴' : /^2/.test(prio) ? '🟠' : /^3/.test(prio) ? '🟡' : '⚪';
+      var prio = dv(r, 'priority'), color = colorPrio(prio);
       var cancel = /cancel/i.test(dv(r, 'state'));
       var out = ['🔎 <b>' + esc(woDe(r)) + '</b> · ' + (cancel ? '🚫 Cancelado' : '✅ Cerrado'), esc(dv(r, 'cmdb_ci') || 'sin CI')];
       if (dv(r, 'short_description')) out.push('<i>' + esc(dv(r, 'short_description')) + '</i>');
