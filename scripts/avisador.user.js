@@ -755,7 +755,7 @@
                 '\n\n<b>' + esc(woDe(r)) + '</b>' + (dv(r, 'cmdb_ci') ? '\n' + esc(dv(r, 'cmdb_ci')) : '') +
                 '\n⏸️ Pausado por <b>' + esc(dv(r, 'u_pause_reason')) + '</b>' + (desde ? ' hace ' + duracion((ahora - desde) / 60000) : '') +
                 '\n👷 ' + esc(dv(r, 'assigned_to') || 'sin asignar') +
-                '\n\n✍️ <b>' + esc(n.quien) + '</b> escribió a las ' + hhmm(n.t) + ' <i>(hace ' + duracion((ahora - n.t) / 60000) + ', ' + n.tipo + ')</i>:' +
+                '\n\n✍️ <b>' + esc(n.quien) + '</b> escribió a las ' + hhmm(n.t) + ':' +
                 '\n<blockquote>' + esc(txt || '(sin texto)') + '</blockquote>' +
                 (nuestra ? '\n<i>Última nota nuestra: hace ' + duracion((ahora - nuestra.t) / 60000) + ' · ' + esc(nuestra.quien) + '</i>' : '') +
                 '\n\n🔗 <a href="' + esc(linkCaso(r)) + '">Abrir en ServiceNow</a>';
