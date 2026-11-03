@@ -1180,7 +1180,7 @@
             total++;
             var nuestro = esNuestro(x.quien), corto = quien(x.quien);
             var importante = !/^(recibido|gracias|muchas gracias|quedamos atentos|ok|correcto|si correcto|en breve)\b/i.test(txt) &&
-              ((x.com || x.copiada) && !nuestro || nuestro && /en sitio|llegando|lleg[oó]|en camino|se retoma|retomamos|corte a|pausamos|reparad|empalme/i.test(txt));
+              ((x.com || x.copiada || txt.length >= 40) && !nuestro || nuestro && /en sitio|llegando|lleg[oó]|en camino|se retoma|retomamos|corte a|pausamos|reparad|empalme/i.test(txt));
             if (importante && txt) ev.push({t: x.t, txt: (nuestro ? '📝 ' : '💬 ') + esc(corto) + ': <i>"' + esc(cortar(txt, 110)) + '"</i>', nota: 1});
             else otras[corto] = (otras[corto] || 0) + 1;
           });
