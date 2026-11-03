@@ -797,7 +797,6 @@
     // la línea corta y después un "relleno" invisible (caracteres en blanco): en la barrita del grupo solo entra la línea
     // corta; el detalle queda más abajo, en el mensaje abierto
     return {clave: res.concat(det).join('\n'), html: res.join('  ') + '\n' + new Array(121).join('\u2800') + '\n' + det.join('\n') +
-      (prox ? '\n\n⏰ Próximo SLA: <b>' + esc(prox.wo) + '</b> a las ' + hhmm(prox.t) : '') +
       '\n\n<i>🔄 Actualizado ' + hhmm(Date.now()) + ' · detalle: /bandeja</i>'};
   }
   function actualizarFijado(todos) {
@@ -808,7 +807,7 @@
     actualizarFijado.ocupado = true;
     var porId = {}; todos.forEach(function (r) { porId[vl(r, 'sys_id')] = r; if (vl(r, 'parent')) porId[vl(r, 'parent')] = r; });
     var ids = Object.keys(porId);
-    (ids.length ? api('task_sla', 'active=true^has_breached=false^taskIN' + ids.join(','), 'task,sla,stage,planned_end_time').catch(function () { return []; }) : Promise.resolve([]))
+    Promise.resolve([])   // sin consulta de SLA: el mensaje fijado no lo muestra
       .then(function (slas) {
         var prox = null;
         slas.forEach(function (s) {
