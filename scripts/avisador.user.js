@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Mobisond · Avisador
 // @namespace    mobisond
-// @version      3.43
-// @description  Avisa los casos nuevos (celular, campana y grupo de Telegram), los Lineales sin notas hace 25 min, los SLA y los aceptados; comandos del bot (/status, /bandeja, /autoasignar…); dispenser de la semana y racha sin vencidos.
+// @version      3.44
+// @description  Avisa los casos nuevos (celular, campana y grupo de Telegram), los Lineales sin notas hace 25 min, los SLA y los aceptados; comandos del bot (/status, /bandeja, /autoasignar…); dispenser de la semana, racha sin vencidos y mensajes en casos pausados.
 // @match        https://*.service-now.com/*
 // @grant        GM_xmlhttpRequest
 // @grant        GM_getValue
@@ -713,6 +713,55 @@
     }).catch(function (e) { soltar(); console.log('[Mobisond] casos abiertos (QGIS): ' + (e && e.message)); });   // si la tabla no existe, no pasa nada
   }
 
+  // ---- 💬 ESCRIBIERON EN UN CASO PAUSADO: si en un caso pausado por alguno de estos motivos escribe alguien que no es de
+  // Mobisond (ATC, NOC, cliente), avisa al grupo. Mira las notas de los últimos 30 min de cada vuelta (cada 2 min) y cada
+  // mensaje sale una sola vez (Supabase decide entre las PCs). Para sumar motivos: agregarlos a esta lista.
+  var MOTIVOS_MSG_PAUSA = /nodo\/falla red del cliente/i;
+  function avisarMensajesPausa(casos) {
+    var ps = casos.filter(function (r) { return pausado(r) && MOTIVOS_MSG_PAUSA.test(dv(r, 'u_pause_reason')) && vl(r, 'parent'); });
+    if (!ps.length) return;
+    var padres = ps.map(function (r) { return vl(r, 'parent'); });
+    api('wm_order', 'sys_idIN' + padres.join(','), 'sys_id,work_notes,comments').then(function (wos) {
+      var notas = {};
+      wos.forEach(function (w) {
+        var ns = notasDelTexto(dv(w, 'work_notes')).map(function (n) { n.tipo = 'nota de trabajo'; return n; })
+          .concat(notasDelTexto(dv(w, 'comments')).map(function (n) { n.tipo = 'comentario adicional'; return n; }));
+        notas[vl(w, 'sys_id')] = ns;
+      });
+      var ahora = Date.now();
+      ps.forEach(function (r) {
+        var ns = notas[vl(r, 'parent')] || [];
+        var ajenas = ns.filter(function (n) {
+          return n.t && ahora - n.t < 30 * 60000 && n.quien && !esNuestro(n.quien) &&
+                 !/system|sistema|admin|integra/i.test(n.quien) && !/espera la verificaci|caso hijo/i.test(n.txt || '');
+        });
+        if (!ajenas.length) return;
+        var nuestra = ns.filter(function (n) { return n.t && esNuestro(n.quien); }).sort(function (a, b) { return b.t - a.t; })[0];
+        // desde cuándo está pausado por ese motivo (historial de cambios; si no hay permiso, no se muestra)
+        api('sys_audit', 'fieldname=u_pause_reason^documentkey=' + vl(r, 'sys_id') + '^ORDERBYDESCsys_created_on', 'newvalue,sys_created_on')
+          .then(function (as) { var a = as.filter(function (x) { return MOTIVOS_MSG_PAUSA.test(dv(x, 'newvalue') + ' ' + vl(x, 'newvalue')); })[0]; return a ? utc(vl(a, 'sys_created_on')) : null; },
+                function () { return null; })
+          .then(function (desde) {
+            ajenas.forEach(function (n) {
+              var prio = dv(r, 'priority'), pr = proyecto(r);
+              var txt = (n.txt || '').slice(0, 400) + ((n.txt || '').length > 400 ? '…' : '');
+              var html = '💬 <b>Escribieron en un caso pausado</b>' +
+                (prio || pr ? '\n\n' + (prio ? colorPrio(prio) + ' <b>' + esc(prio) + '</b>' : '') + (prio && pr ? '  ·  ' : '') +
+                  (pr === 'GPON' ? '🟣 <b>GPON</b>' : pr === 'Lineales' ? '🔵 <b>Lineales</b>' : '') : '') +
+                '\n\n<b>' + esc(woDe(r)) + '</b>' + (dv(r, 'cmdb_ci') ? '\n' + esc(dv(r, 'cmdb_ci')) : '') +
+                '\n⏸️ Pausado por <b>' + esc(dv(r, 'u_pause_reason')) + '</b>' + (desde ? ' hace ' + duracion((ahora - desde) / 60000) : '') +
+                '\n👷 ' + esc(dv(r, 'assigned_to') || 'sin asignar') +
+                '\n\n✍️ <b>' + esc(n.quien) + '</b> escribió a las ' + hhmm(n.t) + ' <i>(' + n.tipo + ')</i>:' +
+                '\n<blockquote>' + esc(txt || '(sin texto)') + '</blockquote>' +
+                (nuestra ? '\n<i>Última nota nuestra: hace ' + duracion((ahora - nuestra.t) / 60000) + ' · ' + esc(nuestra.quien) + '</i>' : '') +
+                '\n\n🔗 <a href="' + esc(linkCaso(r)) + '">Abrir en ServiceNow</a>';
+              unaVezAlGrupo('pmsg:' + vl(r, 'parent') + ':' + n.t + ':' + huella(normNom(n.quien)), html);
+            });
+          });
+      });
+    }, function (e) { console.log('[Mobisond] mensajes en pausados: ' + (e && e.message)); });
+  }
+
   function controles() {
     if (!hayGrupo() || !soyLider()) return;
     var ahora = Date.now();
@@ -745,6 +794,7 @@
       GM_setValue('prio_vistos', priosNuevo);
       GM_setValue('prio_iniciado', true);
       var todos = casos;                 // los avisos de SLA miran todos los abiertos, no solo los "en curso"
+      avisarMensajesPausa(todos);
       casos = casos.filter(enCurso);
       // pausas y entrada a "en curso" vistas desde esta PC (para empezar a contar los 25 min desde que se retoma)
       var visto = GM_getValue('ctl_visto', {}), nuevoVisto = {};
