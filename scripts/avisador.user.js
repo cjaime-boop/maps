@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Mobisond · Avisador
 // @namespace    mobisond
-// @version      3.56
+// @version      3.57
 // @description  Avisa los casos nuevos (celular, campana y grupo de Telegram), los Lineales sin notas hace 25 min, los SLA y los aceptados; comandos del bot (/status, /bandeja, /autoasignar…); dispenser de la semana, racha sin vencidos y mensajes en casos pausados.
 // @match        https://*.service-now.com/*
 // @grant        GM_xmlhttpRequest
@@ -1041,6 +1041,20 @@
           listo('privado de alguien de afuera, rechazado');
         }
       }, function (e) { listo('no pude verificar al usuario: ' + e); });
+      return;
+    }
+    // árbitro, igual que los avisos: si el pedido tarda y Chrome frena el "sigo" de esta pestaña, Supabase se lo
+    // puede dar a otra PC. La primera que lo reclama lo contesta; las demás lo sueltan sin contestar.
+    if (p.sb && !p.reclamado) {
+      var seguir = function () {
+        atenderPendientes.ocupado = false;
+        GM_setValue('tg_pend', GM_getValue('tg_pend', []).map(function (x) { if (x.id === p.id) x.reclamado = true; return x; }));
+        atenderPendientes();
+      };
+      sbRpc('bot_reclamar', {p_aviso: 'pedido:' + p.id, p_pc: pcId()}).then(function (gano) {
+        if (gano === false) { listo('ya lo contesta otra PC'); return; }
+        seguir();
+      }, seguir);                              // Supabase no responde: se contesta igual (mejor repetido que perdido)
       return;
     }
     // pedido largo en curso: Supabase no se lo da a otra PC y el refrescador no recarga la pestaña en el medio
@@ -2498,7 +2512,7 @@
       for (var d = new Date(g.desde.getTime()); d <= hastaDib; d = new Date(d.getFullYear(), d.getMonth(), d.getDate() + 1)) dias.push(d);
       var MES = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
       var cuando = g.tipo === 'mes' ? MES[g.desde.getMonth()].replace(/^./, function (c) { return c.toUpperCase(); }) + ' ' + g.desde.getFullYear()
-                                    : 'Semana ' + ddmm(g.desde) + ' al ' + ddmm(g.hastaTitulo || g.hasta);
+                                    : 'Semana ' + ddmm(g.desde) + ' al ' + (g.hastaTitulo && g.hastaTitulo > g.hasta ? ddmm(g.hasta) + ' (en curso)' : ddmm(g.hastaTitulo || g.hasta));
       var fotos = [['Lineales', '#2563eb', g.L], ['GPON', '#8b5cf6', g.G]].map(function (p) {
         var dt = {proy: p[0], color: p[1], dias: dias, titulo: p[0] + ' · ' + cuando, falta: dias.map(function (d) { return d > g.hasta; }),
                   ing: dias.map(function (d) { return p[2].porDia[isoD(d)] || 0; }), ven: dias.map(function (d) { return p[2].vDia[isoD(d)] || 0; })};
