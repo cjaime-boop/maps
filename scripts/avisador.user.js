@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Mobisond · Avisador
 // @namespace    mobisond
-// @version      3.49
+// @version      3.50
 // @description  Avisa los casos nuevos (celular, campana y grupo de Telegram), los Lineales sin notas hace 25 min, los SLA y los aceptados; comandos del bot (/status, /bandeja, /autoasignar…); dispenser de la semana, racha sin vencidos y mensajes en casos pausados.
 // @match        https://*.service-now.com/*
 // @grant        GM_xmlhttpRequest
@@ -69,7 +69,8 @@
   }
   // Token del bot del equipo, cerrado con la contraseña del equipo (AES). Sin la contraseña no sirve.
   var TG_CERRADO = 'R76sJdArgJd6X6GlESwFVg==.79LONunnZbdiJjqj.fnQwbbIKSKPKaV2VGj5utV/Wt0x73+pJI/94r+sRFiMgazicfSbOH1NzOUVg4SZiEZa6WuJAKmNPDPAiob8=';
-  var TG_CHAT_EQUIPO = '-5016783082';   // número del grupo "Dispensers Mobisond"
+  var TG_CHAT_EQUIPO = '-1003742643629';   // número del grupo "Dispensers Mobisond" (supergrupo desde el 03/11/2026)
+  if (GM_getValue('tg_chat', '') === '-5016783082') GM_setValue('tg_chat', TG_CHAT_EQUIPO);   // el número viejo, de antes de ser supergrupo
   function b64(t) { return Uint8Array.from(atob(t), function (ch) { return ch.charCodeAt(0); }); }
   function abrirToken(clave, cerrado) {
     var p = (cerrado || TG_CERRADO).split('.'), sub = crypto.subtle;
