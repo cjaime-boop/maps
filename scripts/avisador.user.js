@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Mobisond · Avisador
 // @namespace    mobisond
-// @version      3.55
+// @version      3.56
 // @description  Avisa los casos nuevos (celular, campana y grupo de Telegram), los Lineales sin notas hace 25 min, los SLA y los aceptados; comandos del bot (/status, /bandeja, /autoasignar…); dispenser de la semana, racha sin vencidos y mensajes en casos pausados.
 // @match        https://*.service-now.com/*
 // @grant        GM_xmlhttpRequest
@@ -2151,12 +2151,13 @@
       if (!Object.keys(lista).length) return Promise.reject(new Error('no tengo la lista de dispatchers (Supabase)'));
       var lin = 'assignment_group.nameSTARTSWITH' + GRUPOS.lineales;
       var desdeQ = "javascript:gs.dateGenerate('" + iso(desde) + "','" + ('0' + desde.getHours()).slice(-2) + ':' + ('0' + desde.getMinutes()).slice(-2) + ":00')";
-      return api('wm_task', lin + '^sys_updated_on>=' + desdeQ, 'sys_id,number,parent,state').then(function (casos) {
+      return api('wm_task', lin + '^sys_updated_on>=' + desdeQ, 'sys_id,number,parent,state,sys_created_on').then(function (casos) {
         var vistos = {};
         casos = casos.filter(function (r) { var n = dv(r, 'number'); if (vistos[n] || /cancel/i.test(dv(r, 'state'))) return false; vistos[n] = 1; return true; });
-        var porId = {}, padres = [], woDe = {};
+        var porId = {}, padres = [], woDe = {}, ingreso = {};
         casos.forEach(function (c) {
           porId[val(c, 'sys_id')] = dv(c, 'number');
+          var ci = val(c, 'sys_created_on'); if (ci) ingreso[dv(c, 'number')] = new Date(ci.replace(' ', 'T') + 'Z');
           var p = val(c, 'parent'); if (p) { porId[p] = dv(c, 'number'); padres.push(p); woDe[dv(c, 'number')] = p; }
         });
         var ids = Object.keys(porId);
@@ -2187,7 +2188,7 @@
             var ns = (notas[woDe[n]] || []).filter(function (x) { return x.t && x.t <= d.getTime() + 60000 && quienEs(x.quien, lista); })
                                              .sort(function (a, b) { return b.t - a.t; });
             var q = ns.length ? quienEs(ns[0].quien, lista) : '';
-            out.push({n: n, d: d, quien: q});
+            out.push({n: n, d: d, quien: q, ing: ingreso[n]});
           });
           return {casos: out};
         });
@@ -2196,13 +2197,13 @@
     // texto del ranking. final = el del viernes 19:00 (con frases y premios); si no, "cómo va la carrera"
     function textoDispenser(desde, hasta, final, antes) {
       return dispenser(desde, hasta, antes && antes.nombres).then(function (r) {
-        var cuenta = {}, porDia = {}, trasnoche = null, total = r.casos.length, sinDueño = 0;
+        var cuenta = {}, porDia = {}, rayo = null, total = r.casos.length, sinDueño = 0;
         r.casos.forEach(function (c) {
           if (!c.quien) { sinDueño++; return; }
           cuenta[c.quien] = (cuenta[c.quien] || 0) + 1;
           var k = c.quien + '|' + iso(c.d); porDia[k] = (porDia[k] || 0) + 1;
-          var h = c.d.getHours() + c.d.getMinutes() / 60;
-          if (h < 6 && (!trasnoche || h > trasnoche.h)) trasnoche = {h: h, quien: c.quien, d: c.d};
+          var dur = c.ing && !isNaN(c.ing) ? c.d - c.ing : NaN;                 // desde que ingresó hasta el pase (bruto)
+          if (dur > 0 && (!rayo || dur < rayo.dur)) rayo = {dur: dur, quien: c.quien, n: c.n};
         });
         var rank = Object.keys(cuenta).sort(function (a, b) { return cuenta[b] - cuenta[a]; });
         var hh = function (d) { return ('0' + d.getHours()).slice(-2) + ':' + ('0' + d.getMinutes()).slice(-2); };
@@ -2229,7 +2230,10 @@
           var rec = null;
           Object.keys(porDia).forEach(function (k) { if (!rec || porDia[k] > rec.n) rec = {n: porDia[k], k: k}; });
           out.push('', '📊 Total: ' + total + (total === 1 ? ' caso pasado' : ' casos pasados') + ' a verificación');
-          if (trasnoche) out.push('🌙 El más trasnochado: <b>' + nom(trasnoche.quien) + '</b>, pase a las ' + hh(trasnoche.d));
+          if (rayo) {
+            var mins = Math.round(rayo.dur / 60000), hs = Math.floor(mins / 60);
+            out.push('🏎️ Rayo McQueen: <b>' + nom(rayo.quien) + '</b>, ' + esc(rayo.n) + ' en ' + (hs ? hs + ' h ' + (mins % 60) + ' min' : mins + ' min'));
+          }
           if (rec && rec.n > 1) {
             var p = rec.k.split('|'), dd = new Date(p[1] + 'T12:00:00');
             out.push('⚡ Récord del día: <b>' + nom(p[0]) + '</b>, ' + rec.n + ' el ' + DIAS_SEM[dd.getDay()]);
