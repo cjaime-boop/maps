@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Mobisond · Avisador
 // @namespace    mobisond
-// @version      3.53
+// @version      3.54
 // @description  Avisa los casos nuevos (celular, campana y grupo de Telegram), los Lineales sin notas hace 25 min, los SLA y los aceptados; comandos del bot (/status, /bandeja, /autoasignar…); dispenser de la semana, racha sin vencidos y mensajes en casos pausados.
 // @match        https://*.service-now.com/*
 // @grant        GM_xmlhttpRequest
@@ -911,7 +911,15 @@
           var base = Math.max(nota.t, utc(vl(r, 'work_start')), v.pausa || 0, nota.t || utc(vl(r, 'work_start')) ? 0 : v.desde);
           var min = (ahora - base) / 60000;
           if (min >= SILENCIO_MIN && min < SILENCIO_MIN + 20) {     // recién cruzó los 25 min (no avisa de golpe los viejos)
-            var claveNota = 'nota:' + id + ':' + (nota.t || utc(vl(r, 'work_start')) || 0) + ':' + Math.floor((v.pausa || 0) / 1800000);
+            // la hora de la última nota puede venir con unos segundos de diferencia según de dónde se lea: va redondeada al minuto
+            // (si no, el mismo aviso salía dos veces: "25 min" y "27 min"). Además, esta PC no repite el aviso del mismo caso en 30 min.
+            var refNota = Math.round((nota.t || utc(vl(r, 'work_start')) || 0) / 60000);
+            var yaAvisados = GM_getValue('nota_avisados', {});
+            if (yaAvisados[id] && ahora - yaAvisados[id].t < 30 * 60000 && Math.abs(yaAvisados[id].ref - refNota) <= 2) return;
+            yaAvisados[id] = {t: ahora, ref: refNota};
+            Object.keys(yaAvisados).forEach(function (k) { if (ahora - yaAvisados[k].t > 3 * 3600000) delete yaAvisados[k]; });
+            GM_setValue('nota_avisados', yaAvisados);
+            var claveNota = 'nota:' + id + ':' + refNota + ':' + Math.floor((v.pausa || 0) / 1800000);
             unaVezAlGrupo(claveNota, '⏱️ <b>' + Math.floor(min) + ' min sin notas de Mobisond</b>' +
                           cuerpo(r, '📝 ' + (nota.t ? 'Última: ' + esc(nota.quien || 'sin nombre') + (nota.foto ? ' (foto)' : '') + ' · ' + hhmm(nota.t) : 'Todavía sin notas')));
           }
