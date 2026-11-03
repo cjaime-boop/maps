@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Mobisond · Avisador
 // @namespace    mobisond
-// @version      3.48
+// @version      3.49
 // @description  Avisa los casos nuevos (celular, campana y grupo de Telegram), los Lineales sin notas hace 25 min, los SLA y los aceptados; comandos del bot (/status, /bandeja, /autoasignar…); dispenser de la semana, racha sin vencidos y mensajes en casos pausados.
 // @match        https://*.service-now.com/*
 // @grant        GM_xmlhttpRequest
@@ -766,7 +766,74 @@
     }, function (e) { console.log('[Mobisond] mensajes en pausados: ' + (e && e.message)); });
   }
 
+  // ---- 📌 BANDEJA FIJADA: un mensaje fijado arriba del grupo con Lineales y GPON (total y sin atender) y el detalle por
+  // estado. El bot lo edita en silencio cuando cambian los números (y cada 10 min para la hora). Si no hay mensaje fijado
+  // del bot, lo crea y lo fija. Para fijar, el bot tiene que ser administrador del grupo.
+  function textoFijado(todos, prox) {
+    var res = [], det = [];
+    ['Lineales', 'GPON'].forEach(function (pr) {
+      var cs = todos.filter(function (r) { return proyecto(r) === pr; });
+      var c = {sin: 0, curso: 0, camino: 0, pausa: 0, verif: 0, acep: 0};
+      cs.forEach(function (r) {
+        var motivo = dv(r, 'u_pause_reason');
+        if (enCamino(r)) c.camino++;
+        else if (!enCurso(r)) c.sin++;
+        else if (aceptado(r)) c.acep++;
+        else if (pausado(r) && /verificaci/i.test(motivo)) c.verif++;
+        else if (pausado(r)) c.pausa++;
+        else c.curso++;
+      });
+      var ico = pr === 'GPON' ? '🟣' : '🔵';
+      res.push(ico + ' <b>' + pr + ':</b> ' + cs.length + ' · ' + (!cs.length ? '😴 sin casos' : c.sin ? '⏳ ' + c.sin + ' sin atender' : '✅ todo atendido'));
+      det.push('');
+      if (!cs.length) { det.push(ico + ' <b>' + pr + '</b> — sin casos abiertos'); return; }
+      det.push(ico + ' <b>' + pr + '</b> — ' + cs.length + (cs.length === 1 ? ' abierto' : ' abiertos'));
+      [['sin', '⏳ Sin atender'], ['camino', '🚗 Aceptados / en camino'], ['curso', '▶️ En curso'], ['pausa', '⏸️ Pausados'],
+       ['verif', '🔍 En verificación'], ['acep', '✅ Aceptados por el cliente']].forEach(function (x) {
+        if (c[x[0]]) det.push('   ' + x[1] + ': ' + (x[0] === 'sin' ? '<b>' + c[x[0]] + '</b>' : c[x[0]]));
+      });
+    });
+    return {clave: res.concat(det).join('\n'), html: res.join('\n') + '\n' + det.join('\n') +
+      (prox ? '\n\n⏰ Próximo SLA: <b>' + esc(prox.wo) + '</b> a las ' + hhmm(prox.t) : '') +
+      '\n\n<i>🔄 Actualizado ' + hhmm(Date.now()) + ' · detalle: /bandeja</i>'};
+  }
+  function actualizarFijado(todos) {
+    var chat = GM_getValue('tg_chat'); if (!chat) return;
+    var previo = textoFijado(todos, null), ahora = Date.now();
+    if (previo.clave === GM_getValue('fijado_clave', '') && ahora - GM_getValue('fijado_t', 0) < 10 * 60000) return;
+    if (actualizarFijado.ocupado) return;
+    actualizarFijado.ocupado = true;
+    var porId = {}; todos.forEach(function (r) { porId[vl(r, 'sys_id')] = r; if (vl(r, 'parent')) porId[vl(r, 'parent')] = r; });
+    var ids = Object.keys(porId);
+    (ids.length ? api('task_sla', 'active=true^has_breached=false^taskIN' + ids.join(','), 'task,sla,stage,planned_end_time').catch(function () { return []; }) : Promise.resolve([]))
+      .then(function (slas) {
+        var prox = null;
+        slas.forEach(function (s) {
+          if (!/neto/i.test(dv(s, 'sla')) || /paus|cancel/i.test(vl(s, 'stage') + ' ' + dv(s, 'stage'))) return;
+          var t = utc(vl(s, 'planned_end_time')), r = porId[vl(s, 'task')];
+          if (r && t > ahora && (!prox || t < prox.t)) prox = {t: t, wo: woDe(r)};
+        });
+        var f = textoFijado(todos, prox);
+        var listo = function () { actualizarFijado.ocupado = false; GM_setValue('fijado_clave', f.clave); GM_setValue('fijado_t', Date.now()); };
+        var fallo = function (e) { actualizarFijado.ocupado = false; botLog('mensaje fijado: ' + e); };
+        var crear = function () {
+          tg('sendMessage', {chat_id: chat, text: f.html, parse_mode: 'HTML', disable_notification: true, disable_web_page_preview: true}, function (m) {
+            tg('pinChatMessage', {chat_id: chat, message_id: m.message_id, disable_notification: true}, listo,
+               function (e) { fallo('no lo pude fijar (' + e + '): ¿el bot es administrador?'); });
+          }, fallo);
+        };
+        tg('getChat', {chat_id: chat}, function (c) {
+          var pm = c.pinned_message;
+          if (pm && pm.from && pm.from.is_bot && /^🔵 Lineales:/.test(pm.text || '')) {
+            tg('editMessageText', {chat_id: chat, message_id: pm.message_id, text: f.html, parse_mode: 'HTML', disable_web_page_preview: true}, listo,
+               function (e) { if (/not modified/i.test(e)) listo(); else if (/not found|can't be edited|message to edit/i.test(e)) crear(); else fallo(e); });
+          } else crear();
+        }, fallo);
+      });
+  }
+
   function controles() {
+
     if (!hayGrupo() || !soyLider()) return;
     var ahora = Date.now();
     if (ahora - GM_getValue('ult_control', 0) < CADA_MS) return;      // la pestaña se recarga cada 30 s: se controla cada 2 min
@@ -799,6 +866,7 @@
       GM_setValue('prio_iniciado', true);
       var todos = casos;                 // los avisos de SLA miran todos los abiertos, no solo los "en curso"
       avisarMensajesPausa(todos);
+      actualizarFijado(todos);
       casos = casos.filter(enCurso);
       // pausas y entrada a "en curso" vistas desde esta PC (para empezar a contar los 25 min desde que se retoma)
       var visto = GM_getValue('ctl_visto', {}), nuevoVisto = {};
