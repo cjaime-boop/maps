@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Mobisond · Avisador
 // @namespace    mobisond
-// @version      3.50
+// @version      3.51
 // @description  Avisa los casos nuevos (celular, campana y grupo de Telegram), los Lineales sin notas hace 25 min, los SLA y los aceptados; comandos del bot (/status, /bandeja, /autoasignar…); dispenser de la semana, racha sin vencidos y mensajes en casos pausados.
 // @match        https://*.service-now.com/*
 // @grant        GM_xmlhttpRequest
@@ -785,7 +785,7 @@
         else c.curso++;
       });
       var ico = pr === 'GPON' ? '🟣' : '🔵';
-      res.push(ico + ' <b>' + pr + ':</b> ' + cs.length + ' · ' + (!cs.length ? '😴 sin casos' : c.sin ? '⏳ ' + c.sin + ' sin atender' : '✅ todo atendido'));
+      res.push(ico + ' <b>' + pr + ' ' + cs.length + '</b> · ' + (!cs.length ? '😴' : c.sin ? '⏳ ' + c.sin : '✅'));   // corto: entra en la barrita del celular
       det.push('');
       if (!cs.length) { det.push(ico + ' <b>' + pr + '</b> — sin casos abiertos'); return; }
       det.push(ico + ' <b>' + pr + '</b> — ' + cs.length + (cs.length === 1 ? ' abierto' : ' abiertos'));
@@ -794,7 +794,7 @@
         if (c[x[0]]) det.push('   ' + x[1] + ': ' + (x[0] === 'sin' ? '<b>' + c[x[0]] + '</b>' : c[x[0]]));
       });
     });
-    return {clave: res.concat(det).join('\n'), html: res.join('\n') + '\n' + det.join('\n') +
+    return {clave: res.concat(det).join('\n'), html: res.join('  ') + '\n' + det.join('\n') +
       (prox ? '\n\n⏰ Próximo SLA: <b>' + esc(prox.wo) + '</b> a las ' + hhmm(prox.t) : '') +
       '\n\n<i>🔄 Actualizado ' + hhmm(Date.now()) + ' · detalle: /bandeja</i>'};
   }
@@ -825,7 +825,7 @@
         };
         tg('getChat', {chat_id: chat}, function (c) {
           var pm = c.pinned_message;
-          if (pm && pm.from && pm.from.is_bot && /^🔵 Lineales:/.test(pm.text || '')) {
+          if (pm && pm.from && pm.from.is_bot && /^🔵 Lineales/.test(pm.text || '')) {
             tg('editMessageText', {chat_id: chat, message_id: pm.message_id, text: f.html, parse_mode: 'HTML', disable_web_page_preview: true}, listo,
                function (e) { if (/not modified/i.test(e)) listo(); else if (/not found|can't be edited|message to edit/i.test(e)) crear(); else fallo(e); });
           } else crear();
