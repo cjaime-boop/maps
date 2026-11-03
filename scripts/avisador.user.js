@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Mobisond · Avisador
 // @namespace    mobisond
-// @version      3.51
+// @version      3.52
 // @description  Avisa los casos nuevos (celular, campana y grupo de Telegram), los Lineales sin notas hace 25 min, los SLA y los aceptados; comandos del bot (/status, /bandeja, /autoasignar…); dispenser de la semana, racha sin vencidos y mensajes en casos pausados.
 // @match        https://*.service-now.com/*
 // @grant        GM_xmlhttpRequest
@@ -796,7 +796,7 @@
     });
     // la línea corta y después un "relleno" invisible (caracteres en blanco): en la barrita del grupo solo entra la línea
     // corta; el detalle queda más abajo, en el mensaje abierto
-    return {clave: res.concat(det).join('\n'), html: res.join('  ') + '\n' + new Array(121).join('\u2800') + '\n' + det.join('\n') +
+    return {clave: res.concat(det).join('\n'), html: res.join('  │  ') + '\n' + new Array(121).join('\u2800') + '\n' + det.join('\n') +
       '\n\n<i>🔄 Actualizado ' + hhmm(Date.now()) + ' · detalle: /bandeja</i>'};
   }
   function actualizarFijado(todos) {
