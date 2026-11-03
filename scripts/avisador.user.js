@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Mobisond · Avisador
 // @namespace    mobisond
-// @version      3.47
+// @version      3.48
 // @description  Avisa los casos nuevos (celular, campana y grupo de Telegram), los Lineales sin notas hace 25 min, los SLA y los aceptados; comandos del bot (/status, /bandeja, /autoasignar…); dispenser de la semana, racha sin vencidos y mensajes en casos pausados.
 // @match        https://*.service-now.com/*
 // @grant        GM_xmlhttpRequest
@@ -972,12 +972,6 @@
       }, function (e) { unaVezAlGrupo('cmd:' + p.id, 'No pude leer la rama de ServiceNow (' + esc(e.message) + ').', p.msg, p.chat); listo('error ServiceNow ' + e.message); });
       return;
     }
-    if (p.cmd === '/detective') {
-      textoDetective((p.texto || '').trim().split(/\s+/)[1]).then(function (t) {
-        unaVezAlGrupo('cmd:' + p.id, t, p.msg, p.chat, function (ok) { listo(ok ? 'contestado' : 'no se pudo contestar'); });
-      }, function (e) { unaVezAlGrupo('cmd:' + p.id, 'No pude armar el expediente (' + esc(e.message) + ').', p.msg, p.chat); listo('error ServiceNow ' + e.message); });
-      return;
-    }
     if (p.cmd === '/caso') {
       textoCaso((p.texto || '').trim().split(/\s+/)[1]).then(function (t) {
         unaVezAlGrupo('cmd:' + p.id, t, p.msg, p.chat, function (ok) { listo(ok ? 'contestado' : 'no se pudo contestar'); });
@@ -1052,181 +1046,6 @@
   function duracion(min) {
     min = Math.round(Math.abs(min));
     return min >= 60 ? Math.floor(min / 60) + ' h' + (min % 60 ? ' ' + (min % 60) + ' min' : '') : min + ' min';
-  }
-  // ---------------------------------------------------------------- 🕵️ /detective: la historia de un caso como expediente
-  // Junta el historial de cambios (estado, pausa, técnico), las notas y comentarios de la WO, los adjuntos y el SLA neto, y lo
-  // cuenta con frases fijas según el tipo de hecho. No inventa nada: cada línea es un hecho real con su hora.
-  // Los DNI y las patentes que aparezcan en las notas se tapan.
-  var TITULOS_DET = {
-    nodo: ['El corte que se escondía en el sitio', 'El culpable estaba del otro lado', 'Misterio en el nodo'],
-    muni: ['El municipio contraataca', 'Permiso denegado', 'La ley contra la fibra'],
-    verif: ['Esperando el veredicto', 'El juicio final', 'Caso cerrado… ¿o no?'],
-    otro: ['La fibra que nadie vio cortar', 'El caso del pelo perdido', 'Expediente sin resolver', 'La noche del empalme']
-  };
-  // motivos de pausa (para reconocerlos en los comentarios automáticos cuando no se puede leer el historial)
-  var MOTIVOS_PAUSA = ['Aceptado por el cliente', 'Riesgo Eléctrico', 'No aceptado por el cliente', 'Falla en FO', 'Repuestos', 'Gestión de Acceso',
-    'Bomberos/Defensa Civil/Policía/Municipio', 'Trabajo en Conjunto', 'En espera por lluvia', 'Dificultad de Acceso', 'Fuerza Mayor',
-    'Nodo/Falla Red del Cliente', 'Verificación del cliente', 'Multiples Cortes', 'Esperando permiso municipal', 'Seguridad/Zona Peligrosa',
-    'Corte Suministro Eléctrico', 'Documentación/Esperando Información'];
-  function motivoDe(t) { var n = normNom(t); return MOTIVOS_PAUSA.filter(function (m) { return normNom(m) === n; })[0] || ''; }
-  var CLI_DET = {CL: 'Claro', EDNR: 'Edenor', MUNI: 'Municipal', TP: 'Telecom', MVS: 'Movistar', MV: 'Movistar'};
-  function tapar(t) {                  // DNI y patentes afuera
-    return String(t || '').replace(/DNI\s*:?\s*[\d.]{7,10}/gi, 'DNI [oculto]')
-      .replace(/(^|[^\w.,\-])(\d{1,2}\.\d{3}\.\d{3}|\d{7,8})(?![\w.,])/g, '$1[oculto]')
-      .replace(/(dominio|patente)\s*:?\s*[A-Z]{2,3}\s?\d{3}\s?[A-Z]{0,3}/gi, '$1: [oculto]');
-  }
-  function limpiarNota(t) {
-    return tapar(t).replace(/^(Comentario copiado del Caso|Nota de trabajo copiada del Caso)\s+\S+?:\s*/i, '')
-      .replace(/^PASE DE TURNO(\s+MDA)?\s*/i, '').replace(/^CS\d+:\s*/i, '').replace(/\s+/g, ' ').trim();
-  }
-  function durLarga(ms) { var h = Math.floor(ms / 3600000); return h >= 48 ? Math.floor(h / 24) + ' d ' + (h % 24) + ' h' : duracion(ms / 60000); }
-  function cortar(t, n) { t = String(t || ''); return t.length > n ? t.slice(0, n).replace(/\s+\S*$/, '') + '…' : t; }
-  function textoDetective(arg) {
-    var n = (arg || '').trim().toUpperCase();
-    if (!n) return Promise.resolve('Decime qué caso: <code>/detective WO0096818</code> (también sirve el WOT o el CS).');
-    var q = /^WOT/.test(n) ? 'number=' + n : /^WO/.test(n) ? 'parent.number=' + n : /^CS/.test(n) ? 'short_descriptionSTARTSWITH' + n : 'number=' + n;
-    var campos = 'sys_id,number,parent,state,u_pause_reason,priority,assigned_to,cmdb_ci,short_description,opened_at,closed_at,active,assignment_group,service_offering';
-    return api('wm_task', q + '^ORDERBYDESCopened_at', campos).then(function (rs) {
-      if (!rs.length) return 'No encontré el caso ' + esc(n) + '.';
-      var r = rs[0], id = vl(r, 'sys_id'), wo = vl(r, 'parent'), ids = [id].concat(wo ? [wo] : []);
-      var nada = function () { return []; };
-      return Promise.all([
-        api('sys_audit', 'documentkey=' + id + '^fieldnameINstate,u_pause_reason,assigned_to^ORDERBYsys_created_on', 'fieldname,oldvalue,newvalue,sys_created_on,user').catch(function () { return null; }),
-        wo ? api('wm_order', 'sys_id=' + wo, 'sys_id,work_notes,comments').catch(nada) : Promise.resolve([]),
-        api('sys_attachment', 'table_sys_idIN' + ids.join(','), 'file_name').catch(nada),
-        api('task_sla', 'taskIN' + ids.join(','), 'sla,stage,has_breached,planned_end_time,end_time').catch(nada),
-        api('sys_choice', 'name=wm_task^elementINstate,u_pause_reason^inactive=false', 'element,value,label').catch(nada),
-        sbRpc('bot_dispenser', {p_semana: null, p_ganador: null}).catch(function () { return null; })
-      ]).then(function (res) {
-        var audits = res[0], wos = res[1], adj = res[2], slas = res[3], choices = res[4], disp = res[5];
-        var etiqueta = {}; (choices || []).forEach(function (c) { etiqueta[vl(c, 'element') + ':' + vl(c, 'value')] = dv(c, 'label') || vl(c, 'label'); });
-        var apodos = {}; Object.keys((disp && disp.nombres) || {}).forEach(function (k) { apodos[normNom(k)] = disp.nombres[k]; });
-        var quien = function (nom) {
-          var a = normNom(nom); if (apodos[a]) return apodos[a];
-          var p = a.split(' '); return (p.length > 2 && (apodos[p[0] + ' ' + p[p.length - 1]] || apodos[p[0] + ' ' + p[p.length - 2]])) || nom;
-        };
-        var ev = [];                     // {t, txt}
-        var abierto = utc(vl(r, 'opened_at'));
-        if (abierto) ev.push({t: abierto, txt: '🚨 La denuncia llegó.' + (dv(r, 'cmdb_ci') ? ' ' + esc(dv(r, 'cmdb_ci')) + '.' : '')});
-        // historial de cambios: estado, pausa y técnico
-        var usuarios = {};
-        (audits || []).forEach(function (a) { if (vl(a, 'user')) usuarios[vl(a, 'user')] = 1; if (vl(a, 'fieldname') === 'assigned_to' && vl(a, 'newvalue')) usuarios['#' + vl(a, 'newvalue')] = 1; });
-        var nombresU = Object.keys(usuarios).filter(function (u) { return u[0] !== '#'; }), idsU = Object.keys(usuarios).filter(function (u) { return u[0] === '#'; }).map(function (u) { return u.slice(1); });
-        var pedirU = (nombresU.length || idsU.length) ? api('sys_user', (nombresU.length ? 'user_nameIN' + nombresU.join(',') : '') + (nombresU.length && idsU.length ? '^OR' : '') + (idsU.length ? 'sys_idIN' + idsU.join(',') : ''), 'sys_id,user_name,name').catch(nada) : Promise.resolve([]);
-        return pedirU.then(function (us) {
-          var porUser = {}, porId = {};
-          us.forEach(function (u) { porUser[vl(u, 'user_name')] = dv(u, 'name'); porId[vl(u, 'sys_id')] = dv(u, 'name'); });
-          // notas: los comentarios (los oficiales) y las notas de trabajo de la WO
-          var notas = [];
-          (wos || []).forEach(function (w) {
-            notasDelTexto(dv(w, 'comments')).forEach(function (x) { x.com = true; notas.push(x); });
-            notasDelTexto(dv(w, 'work_notes')).forEach(function (x) { x.copiada = /^nota de trabajo copiada del caso/i.test(x.txt || ''); notas.push(x); });
-          });
-          // cambios de estado, pausa y técnico: del historial; si no hay permiso para leerlo, de las notas automáticas
-          // ("Definido automáticamente en En curso…", "En pausa por …"): ahí no se sabe cuándo se levantó cada pausa
-          var cambios = (audits || []).map(function (a) {
-            var campo = vl(a, 'fieldname'), nuevo = vl(a, 'newvalue');
-            return {t: utc(vl(a, 'sys_created_on')), campo: campo, nuevo: nuevo, lab: etiqueta[campo + ':' + nuevo] || nuevo,
-                    por: porUser[vl(a, 'user')] ? quien(porUser[vl(a, 'user')]) : ''};
-          });
-          var sinHistorial = !cambios.length;
-          if (sinHistorial) notas.forEach(function (x) {
-            var txt = limpiarNota(x.txt), m, sis = /^(sistema|system)/i.test(x.quien);
-            if ((m = /definid[ao]\s+(?:autom[aá]ticamente\s+)?(?:en|como)\s+(.+?)(?:,|\.|\s+(?:porque|ya que)|$)/i.exec(txt)) ||
-                (m = /set (?:to|as)\s+(.+?)(?:,|\.|\s+because|$)/i.exec(txt))) {
-              cambios.push({t: x.t, campo: 'state', nuevo: m[1], lab: m[1], por: sis ? '' : quien(x.quien)});
-            } else if (sis && x.com) {
-              var mot = motivoDe(txt) || motivoDe((/^en pausa por\s+(.+)$/i.exec(txt) || [])[1] || '');
-              if (mot) cambios.push({t: x.t, campo: 'u_pause_reason', nuevo: mot, lab: mot, por: ''});
-            }
-          });
-          cambios.sort(function (a, b) { return a.t - b.t; });
-          var pausas = [], pausaAbierta = null, enCursoVisto = false, asignadoVisto = false, giros = 0, ultimoMotivo = '', vistosC = {};
-          cambios.forEach(function (c) {
-            var t = c.t, campo = c.campo, nuevo = c.nuevo, lab = c.lab, por = c.por;
-            var kc = campo + '|' + normNom(lab); if (sinHistorial && vistosC[kc] && t - vistosC[kc] < 120000) return; vistosC[kc] = t;
-            if (campo === 'state') {
-              if (/cancel/i.test(lab)) ev.push({t: t, txt: '🚫 Caso cancelado.'});
-              else if (/clos|cerrad|complet|resuel/i.test(lab)) ev.push({t: t, txt: '🏁 Caso cerrado.'});
-              else if (/progress|curso/i.test(lab)) { ev.push({t: t, txt: enCursoVisto ? '▶️ Volvió a estar en curso.' : '▶️ Caso en curso. Empezó la investigación.'}); enCursoVisto = true; }
-              else if (/travel|camino|viaje|route|ruta/i.test(lab)) ev.push({t: t, txt: '🚗 La cuadrilla salió hacia la escena.'});
-              else if (/accept|acept/i.test(lab)) ev.push({t: t, txt: '🤝 La cuadrilla aceptó el caso.'});
-              else if (/assign|asign/i.test(lab) && !asignadoVisto) { asignadoVisto = true; ev.push({t: t, txt: '👮 ' + (por ? esc(por) + ' tomó el caso.' : 'Caso asignado.')}); }
-            } else if (campo === 'assigned_to') {
-              if (nuevo && porId[nuevo]) ev.push({t: t, txt: '👷 Técnico: ' + esc(porId[nuevo]) + '.'});
-            } else if (campo === 'u_pause_reason') {
-              if (pausaAbierta) pausas.push({motivo: pausaAbierta.motivo, ms: sinHistorial ? null : t - pausaAbierta.t});
-              if (nuevo) {
-                ultimoMotivo = lab;
-                if (/verific/i.test(lab)) ev.push({t: t, txt: '🔍 Caso enviado a verificación del cliente.'});
-                else if (/no acept/i.test(lab)) ev.push({t: t, txt: '❌ El cliente no aceptó la reparación.'});
-                else if (/acept/i.test(lab)) ev.push({t: t, txt: '✅ El cliente aceptó la reparación.'});
-                else { giros++; ev.push({t: t, txt: '⏸️ <b>' + (giros === 1 ? 'Giro inesperado' : giros === 2 ? 'Segundo giro' : 'Otro giro') + ':</b> pausa por <b>' + esc(lab) + '</b>.' + (/nodo|cliente/i.test(lab) ? ' El culpable no era nuestro.' : '')}); }
-                pausaAbierta = {motivo: lab, t: t};
-              } else {
-                if (pausaAbierta && !/verific|acept/i.test(pausaAbierta.motivo)) ev.push({t: t, txt: '▶️ Se levantó la pausa (duró ' + duracion((t - pausaAbierta.t) / 60000) + '). La cuadrilla volvió al ruedo.'});
-                pausaAbierta = null;
-              }
-            }
-          });
-          // si la pausa del historial no es la de ahora, ya terminó (sin historial no se sabe cuánto duró)
-          if (sinHistorial && pausaAbierta && normNom(pausaAbierta.motivo) !== normNom(dv(r, 'u_pause_reason'))) { pausas.push({motivo: pausaAbierta.motivo, ms: null}); pausaAbierta = null; }
-          var vistos = {}, otras = {}, botellas = {}, total = 0;
-          notas.forEach(function (x) {
-            var txt = limpiarNota(x.txt);
-            (txt.match(/\b[A-Z]{2,4}_\d{3}-\d{3}\b/g) || []).forEach(function (b) { botellas[b] = 1; });
-            if (/^(sistema|system)/i.test(x.quien) || /automáticamente|automatically|se ha asociado/i.test(txt)) return;
-            var k = x.t + '|' + txt.slice(0, 40); if (vistos[k]) return; vistos[k] = 1;   // la misma nota copiada en WO y caso
-            total++;
-            var nuestro = esNuestro(x.quien), corto = quien(x.quien);
-            var importante = !/^(recibido|gracias|muchas gracias|quedamos atentos|ok|correcto|si correcto|en breve)\b/i.test(txt) &&
-              ((x.com || x.copiada || txt.length >= 40) && !nuestro || nuestro && /en sitio|llegando|lleg[oó]|en camino|se retoma|retomamos|corte a|pausamos|reparad|empalme/i.test(txt));
-            if (importante && txt) ev.push({t: x.t, txt: (nuestro ? '📝 ' : '💬 ') + esc(corto) + ': <i>"' + esc(cortar(txt, 110)) + '"</i>', nota: 1});
-            else otras[corto] = (otras[corto] || 0) + 1;
-          });
-          ev.sort(function (a, b) { return a.t - b.t; });
-          // si son demasiados hechos, quedan los primeros y los últimos
-          var MAX = 28, saltados = 0;
-          if (ev.length > MAX) { saltados = ev.length - MAX; ev = ev.slice(0, 10).concat([{t: 0, txt: '<i>… ' + saltados + ' hechos más en el medio …</i>'}]).concat(ev.slice(-(MAX - 10))); }
-          var cerrado = vl(r, 'active') === 'false';
-          var motivoAhora = dv(r, 'u_pause_reason') || '';
-          var sosp = motivoAhora || ultimoMotivo, tipo = /nodo|cliente/i.test(sosp) ? 'nodo' : /municip|polic|bomber/i.test(sosp) ? 'muni' : /verific/i.test(sosp) ? 'verif' : 'otro';
-          var so = /^TSO_C_TL_([A-Z0-9]+)_/i.exec(dv(r, 'service_offering') || ''), cli = so ? (CLI_DET[so[1].toUpperCase()] || so[1]) : '';
-          var pr = proyecto(r), prio = dv(r, 'priority');
-          var out = ['🕵️ <b>EXPEDIENTE ' + esc(woDe(r)) + '</b>', '<i>"' + TITULOS_DET[tipo][Math.floor(Math.random() * TITULOS_DET[tipo].length)] + '"</i>', '',
-                     [prio ? colorPrio(prio) + ' ' + esc(prio) : '', pr === 'GPON' ? '🟣 GPON' : pr === 'Lineales' ? '🔵 Lineales' : '', cli].filter(Boolean).join(' · ')];
-          if (dv(r, 'short_description')) out.push('<i>' + esc(cortar(tapar(dv(r, 'short_description')), 120)) + '</i>');
-          var DIAS = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'], dia = '';
-          ev.forEach(function (e) {
-            if (!e.t) { out.push(e.txt); return; }
-            var d = new Date(e.t), k = DIAS[d.getDay()] + ' ' + ('0' + d.getDate()).slice(-2) + '/' + ('0' + (d.getMonth() + 1)).slice(-2);
-            if (k !== dia) { out.push('', '📍 <b>' + k + '</b>', ''); dia = k; }
-            out.push('<b>' + hhmm(e.t) + '</b> ' + e.txt);
-          });
-          if (sinHistorial) out.push('', '<i>(Los cambios de estado y pausas salen de las notas automáticas: puede faltar alguno.)</i>');
-          var resto = Object.keys(otras).sort(function (a, b) { return otras[b] - otras[a]; });
-          var nOtras = resto.reduce(function (s, k) { return s + otras[k]; }, 0);
-          if (nOtras) out.push('', '<i>… y ' + nOtras + (nOtras === 1 ? ' nota más' : ' notas más') + ' (' + resto.slice(0, 4).map(function (k) { return esc(k) + ' ' + otras[k]; }).join(' · ') + ')</i>');
-          // conclusión
-          var fin = cerrado ? utc(vl(r, 'closed_at')) : Date.now();
-          out.push('', '🧾 <b>Conclusión del detective</b>');
-          if (abierto) out.push('⏱️ ' + (cerrado ? 'Duró ' : 'Abierto hace ') + durLarga(fin - abierto));
-          if (pausaAbierta) pausas.push({motivo: pausaAbierta.motivo, ms: Date.now() - pausaAbierta.t, sigue: true});
-          var pz = pausas.filter(function (p) { return !/verific|acept/i.test(p.motivo); });
-          if (pz.length) out.push('⏸️ Pausas: ' + pz.map(function (p) { return (p.ms !== null ? durLarga(p.ms) + ' por ' : '') + esc(cortar(p.motivo, 40)) + (p.sigue ? ' <i>(y sigue)</i>' : ''); }).join(' · '));
-          var sor = adj.filter(function (a) { return /\.sor/i.test(dv(a, 'file_name')); }).length;
-          if (adj.length) out.push('📎 ' + adj.length + (adj.length === 1 ? ' adjunto' : ' adjuntos') + (sor ? ' (' + sor + (sor === 1 ? ' medición' : ' mediciones') + ')' : ''));
-          var bts = Object.keys(botellas); if (bts.length) out.push('🧩 Botellas nombradas: ' + bts.slice(0, 5).map(esc).join(' · ') + (bts.length > 5 ? ' y ' + (bts.length - 5) + ' más' : ''));
-          var neto = (slas || []).filter(function (s) { return /neto/i.test(dv(s, 'sla')) && !/cancel/i.test(dv(s, 'stage')); })[0];
-          if (neto) out.push('⏲️ SLA neto: ' + (vl(neto, 'has_breached') === 'true' ? '🔴 vencido' : /complet|achiev|cumpl/i.test(dv(neto, 'stage')) ? '✅ en término' : '🟢 en término por ahora'));
-          out.push('🎯 Sospechoso principal: <b>' + (sosp ? esc(sosp) : 'ninguno, trabajo limpio 🧼') + '</b>');
-          out.push('📌 Estado: ' + (cerrado ? '🏁 cerrado' : motivoAhora ? '⏸️ ' + esc(motivoAhora) : esc(dv(r, 'state'))));
-          out.push('', '🔗 <a href="' + esc(linkCaso(r)) + '">Abrir en ServiceNow</a>');
-          var t = out.join('\n');
-          return t.length > 4000 ? t.slice(0, 3990).replace(/\n[^\n]*$/, '') + '\n…' : t;
-        });
-      });
-    });
   }
   function textoCaso(arg) {
     var n = (arg || '').trim().toUpperCase();
@@ -1421,7 +1240,7 @@
     if (!hayGrupo() || !soyLider()) return;
     reintentarAvisos();
     atenderPendientes();
-    if (GM_getValue('tg_cmds', 0) < 18) {     // menú de comandos del bot (aparece al escribir "/" en el grupo)
+    if (GM_getValue('tg_cmds', 0) < 19) {     // menú de comandos del bot (aparece al escribir "/" en el grupo)
       tg('setMyCommands', {commands: [{command: 'bandeja', description: 'Casos abiertos (o /bandeja gpon, /bandeja lineales)'},
                                       {command: 'caso', description: 'Detalle de un caso: /caso WO0096818'},
                                       {command: 'activos', description: 'Quién está activo ahora y quién entra'},
@@ -1433,8 +1252,7 @@
                                       {command: 'rama', description: 'Casos de una rama GPON en 90 días: /rama GMRN-R0503'},
                                       {command: 'pcs', description: 'PCs conectadas y su versión del Avisador'},
                                       {command: 'dispenser', description: 'Ranking del dispenser de la semana'},
-                                      {command: 'racha', description: 'Racha sin vencidos de Lineales y GPON'},
-                                      {command: 'detective', description: 'La historia de un caso: /detective WO0096818'}]}, function () { GM_setValue('tg_cmds', 18); });
+                                      {command: 'racha', description: 'Racha sin vencidos de Lineales y GPON'}]}, function () { GM_setValue('tg_cmds', 19); });
     }
     if (modoBot === null) {                    // ¿el bot está conectado a Supabase?
       modoBot = 'esperando';
