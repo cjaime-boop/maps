@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Mobisond · Avisador
 // @namespace    mobisond
-// @version      3.44
+// @version      3.45
 // @description  Avisa los casos nuevos (celular, campana y grupo de Telegram), los Lineales sin notas hace 25 min, los SLA y los aceptados; comandos del bot (/status, /bandeja, /autoasignar…); dispenser de la semana, racha sin vencidos y mensajes en casos pausados.
 // @match        https://*.service-now.com/*
 // @grant        GM_xmlhttpRequest
@@ -714,9 +714,10 @@
   }
 
   // ---- 💬 ESCRIBIERON EN UN CASO PAUSADO: si en un caso pausado por alguno de estos motivos escribe alguien que no es de
-  // Mobisond (ATC, NOC, cliente), avisa al grupo. Mira las notas de los últimos 30 min de cada vuelta (cada 2 min) y cada
-  // mensaje sale una sola vez (Supabase decide entre las PCs). Para sumar motivos: agregarlos a esta lista.
-  var MOTIVOS_MSG_PAUSA = /nodo\/falla red del cliente/i;
+  // Mobisond (ATC, NOC, cliente), avisa al grupo. Espera 10 min: si en ese rato alguien de Mobisond escribió en el caso,
+  // no avisa. Mira cada 2 min las notas de entre 10 y 40 min de antigüedad y cada mensaje sale una sola vez (Supabase decide
+  // entre las PCs). Para sumar motivos: agregarlos a esta lista.
+  var MOTIVOS_MSG_PAUSA = /nodo\/falla red del cliente/i, ESPERA_MSG_MIN = 10;
   function avisarMensajesPausa(casos) {
     var ps = casos.filter(function (r) { return pausado(r) && MOTIVOS_MSG_PAUSA.test(dv(r, 'u_pause_reason')) && vl(r, 'parent'); });
     if (!ps.length) return;
@@ -732,9 +733,12 @@
       ps.forEach(function (r) {
         var ns = notas[vl(r, 'parent')] || [];
         var ajenas = ns.filter(function (n) {
-          return n.t && ahora - n.t < 30 * 60000 && n.quien && !esNuestro(n.quien) &&
+          return n.t && ahora - n.t >= ESPERA_MSG_MIN * 60000 && ahora - n.t < (ESPERA_MSG_MIN + 30) * 60000 &&
+                 n.quien && !esNuestro(n.quien) &&
                  !/system|sistema|admin|integra/i.test(n.quien) && !/espera la verificaci|caso hijo/i.test(n.txt || '');
         });
+        // si alguien de Mobisond escribió después del mensaje, ya lo vieron: no se avisa
+        ajenas = ajenas.filter(function (n) { return !ns.some(function (x) { return x.t && x.t >= n.t && esNuestro(x.quien); }); });
         if (!ajenas.length) return;
         var nuestra = ns.filter(function (n) { return n.t && esNuestro(n.quien); }).sort(function (a, b) { return b.t - a.t; })[0];
         // desde cuándo está pausado por ese motivo (historial de cambios; si no hay permiso, no se muestra)
@@ -751,7 +755,7 @@
                 '\n\n<b>' + esc(woDe(r)) + '</b>' + (dv(r, 'cmdb_ci') ? '\n' + esc(dv(r, 'cmdb_ci')) : '') +
                 '\n⏸️ Pausado por <b>' + esc(dv(r, 'u_pause_reason')) + '</b>' + (desde ? ' hace ' + duracion((ahora - desde) / 60000) : '') +
                 '\n👷 ' + esc(dv(r, 'assigned_to') || 'sin asignar') +
-                '\n\n✍️ <b>' + esc(n.quien) + '</b> escribió a las ' + hhmm(n.t) + ' <i>(' + n.tipo + ')</i>:' +
+                '\n\n✍️ <b>' + esc(n.quien) + '</b> escribió a las ' + hhmm(n.t) + ' <i>(hace ' + duracion((ahora - n.t) / 60000) + ', ' + n.tipo + ')</i>:' +
                 '\n<blockquote>' + esc(txt || '(sin texto)') + '</blockquote>' +
                 (nuestra ? '\n<i>Última nota nuestra: hace ' + duracion((ahora - nuestra.t) / 60000) + ' · ' + esc(nuestra.quien) + '</i>' : '') +
                 '\n\n🔗 <a href="' + esc(linkCaso(r)) + '">Abrir en ServiceNow</a>';
