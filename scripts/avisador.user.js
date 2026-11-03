@@ -794,7 +794,9 @@
         if (c[x[0]]) det.push('   ' + x[1] + ': ' + (x[0] === 'sin' ? '<b>' + c[x[0]] + '</b>' : c[x[0]]));
       });
     });
-    return {clave: res.concat(det).join('\n'), html: res.join('  ') + '\n' + det.join('\n') +
+    // la línea corta y después un "relleno" invisible (caracteres en blanco): en la barrita del grupo solo entra la línea
+    // corta; el detalle queda más abajo, en el mensaje abierto
+    return {clave: res.concat(det).join('\n'), html: res.join('  ') + '\n' + new Array(121).join('\u2800') + '\n' + det.join('\n') +
       (prox ? '\n\n⏰ Próximo SLA: <b>' + esc(prox.wo) + '</b> a las ' + hhmm(prox.t) : '') +
       '\n\n<i>🔄 Actualizado ' + hhmm(Date.now()) + ' · detalle: /bandeja</i>'};
   }
