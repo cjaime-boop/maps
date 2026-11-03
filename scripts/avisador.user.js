@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Mobisond · Avisador
 // @namespace    mobisond
-// @version      3.52
+// @version      3.53
 // @description  Avisa los casos nuevos (celular, campana y grupo de Telegram), los Lineales sin notas hace 25 min, los SLA y los aceptados; comandos del bot (/status, /bandeja, /autoasignar…); dispenser de la semana, racha sin vencidos y mensajes en casos pausados.
 // @match        https://*.service-now.com/*
 // @grant        GM_xmlhttpRequest
@@ -718,7 +718,7 @@
   // Mobisond (ATC, NOC, cliente), avisa al grupo. Espera 10 min: si en ese rato alguien de Mobisond escribió en el caso,
   // no avisa. Mira cada 2 min las notas de entre 10 y 40 min de antigüedad y cada mensaje sale una sola vez (Supabase decide
   // entre las PCs). Para sumar motivos: agregarlos a esta lista.
-  var MOTIVOS_MSG_PAUSA = /nodo\/falla red del cliente/i, ESPERA_MSG_MIN = 10;
+  var MOTIVOS_MSG_PAUSA = /nodo\/falla red del cliente|trabajo en conjunto/i, ESPERA_MSG_MIN = 10;
   function avisarMensajesPausa(casos) {
     var ps = casos.filter(function (r) { return pausado(r) && MOTIVOS_MSG_PAUSA.test(dv(r, 'u_pause_reason')) && vl(r, 'parent'); });
     if (!ps.length) return;
