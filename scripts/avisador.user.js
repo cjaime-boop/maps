@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Mobisond · Avisador
 // @namespace    mobisond
-// @version      3.54
+// @version      3.55
 // @description  Avisa los casos nuevos (celular, campana y grupo de Telegram), los Lineales sin notas hace 25 min, los SLA y los aceptados; comandos del bot (/status, /bandeja, /autoasignar…); dispenser de la semana, racha sin vencidos y mensajes en casos pausados.
 // @match        https://*.service-now.com/*
 // @grant        GM_xmlhttpRequest
@@ -919,7 +919,9 @@
             yaAvisados[id] = {t: ahora, ref: refNota};
             Object.keys(yaAvisados).forEach(function (k) { if (ahora - yaAvisados[k].t > 3 * 3600000) delete yaAvisados[k]; });
             GM_setValue('nota_avisados', yaAvisados);
-            var claveNota = 'nota:' + id + ':' + refNota + ':' + Math.floor((v.pausa || 0) / 1800000);
+            // la clave tiene que ser IGUAL en todas las PCs (así Supabase deja salir el aviso una sola vez): solo el caso y la
+            // hora de la última nota. Antes llevaba también la última pausa que vio CADA PC, y con 3 PCs salía 3 veces.
+            var claveNota = 'nota:' + id + ':' + refNota;
             unaVezAlGrupo(claveNota, '⏱️ <b>' + Math.floor(min) + ' min sin notas de Mobisond</b>' +
                           cuerpo(r, '📝 ' + (nota.t ? 'Última: ' + esc(nota.quien || 'sin nombre') + (nota.foto ? ' (foto)' : '') + ' · ' + hhmm(nota.t) : 'Todavía sin notas')));
           }
