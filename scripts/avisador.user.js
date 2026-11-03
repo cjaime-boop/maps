@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Mobisond · Avisador
 // @namespace    mobisond
-// @version      3.46
+// @version      3.47
 // @description  Avisa los casos nuevos (celular, campana y grupo de Telegram), los Lineales sin notas hace 25 min, los SLA y los aceptados; comandos del bot (/status, /bandeja, /autoasignar…); dispenser de la semana, racha sin vencidos y mensajes en casos pausados.
 // @match        https://*.service-now.com/*
 // @grant        GM_xmlhttpRequest
@@ -1063,9 +1063,16 @@
     verif: ['Esperando el veredicto', 'El juicio final', 'Caso cerrado… ¿o no?'],
     otro: ['La fibra que nadie vio cortar', 'El caso del pelo perdido', 'Expediente sin resolver', 'La noche del empalme']
   };
+  // motivos de pausa (para reconocerlos en los comentarios automáticos cuando no se puede leer el historial)
+  var MOTIVOS_PAUSA = ['Aceptado por el cliente', 'Riesgo Eléctrico', 'No aceptado por el cliente', 'Falla en FO', 'Repuestos', 'Gestión de Acceso',
+    'Bomberos/Defensa Civil/Policía/Municipio', 'Trabajo en Conjunto', 'En espera por lluvia', 'Dificultad de Acceso', 'Fuerza Mayor',
+    'Nodo/Falla Red del Cliente', 'Verificación del cliente', 'Multiples Cortes', 'Esperando permiso municipal', 'Seguridad/Zona Peligrosa',
+    'Corte Suministro Eléctrico', 'Documentación/Esperando Información'];
+  function motivoDe(t) { var n = normNom(t); return MOTIVOS_PAUSA.filter(function (m) { return normNom(m) === n; })[0] || ''; }
   var CLI_DET = {CL: 'Claro', EDNR: 'Edenor', MUNI: 'Municipal', TP: 'Telecom', MVS: 'Movistar', MV: 'Movistar'};
   function tapar(t) {                  // DNI y patentes afuera
     return String(t || '').replace(/DNI\s*:?\s*[\d.]{7,10}/gi, 'DNI [oculto]')
+      .replace(/(^|[^\w.,\-])(\d{1,2}\.\d{3}\.\d{3}|\d{7,8})(?![\w.,])/g, '$1[oculto]')
       .replace(/(dominio|patente)\s*:?\s*[A-Z]{2,3}\s?\d{3}\s?[A-Z]{0,3}/gi, '$1: [oculto]');
   }
   function limpiarNota(t) {
@@ -1109,21 +1116,46 @@
         return pedirU.then(function (us) {
           var porUser = {}, porId = {};
           us.forEach(function (u) { porUser[vl(u, 'user_name')] = dv(u, 'name'); porId[vl(u, 'sys_id')] = dv(u, 'name'); });
-          var pausas = [], pausaAbierta = null, enCursoVisto = false, giros = 0, ultimoMotivo = '';
-          (audits || []).forEach(function (a) {
-            var t = utc(vl(a, 'sys_created_on')), campo = vl(a, 'fieldname'), nuevo = vl(a, 'newvalue');
-            var lab = etiqueta[campo + ':' + nuevo] || nuevo, por = porUser[vl(a, 'user')] ? quien(porUser[vl(a, 'user')]) : '';
+          // notas: los comentarios (los oficiales) y las notas de trabajo de la WO
+          var notas = [];
+          (wos || []).forEach(function (w) {
+            notasDelTexto(dv(w, 'comments')).forEach(function (x) { x.com = true; notas.push(x); });
+            notasDelTexto(dv(w, 'work_notes')).forEach(function (x) { x.copiada = /^nota de trabajo copiada del caso/i.test(x.txt || ''); notas.push(x); });
+          });
+          // cambios de estado, pausa y técnico: del historial; si no hay permiso para leerlo, de las notas automáticas
+          // ("Definido automáticamente en En curso…", "En pausa por …"): ahí no se sabe cuándo se levantó cada pausa
+          var cambios = (audits || []).map(function (a) {
+            var campo = vl(a, 'fieldname'), nuevo = vl(a, 'newvalue');
+            return {t: utc(vl(a, 'sys_created_on')), campo: campo, nuevo: nuevo, lab: etiqueta[campo + ':' + nuevo] || nuevo,
+                    por: porUser[vl(a, 'user')] ? quien(porUser[vl(a, 'user')]) : ''};
+          });
+          var sinHistorial = !cambios.length;
+          if (sinHistorial) notas.forEach(function (x) {
+            var txt = limpiarNota(x.txt), m, sis = /^(sistema|system)/i.test(x.quien);
+            if ((m = /definid[ao]\s+(?:autom[aá]ticamente\s+)?(?:en|como)\s+(.+?)(?:,|\.|\s+(?:porque|ya que)|$)/i.exec(txt)) ||
+                (m = /set (?:to|as)\s+(.+?)(?:,|\.|\s+because|$)/i.exec(txt))) {
+              cambios.push({t: x.t, campo: 'state', nuevo: m[1], lab: m[1], por: sis ? '' : quien(x.quien)});
+            } else if (sis && x.com) {
+              var mot = motivoDe(txt) || motivoDe((/^en pausa por\s+(.+)$/i.exec(txt) || [])[1] || '');
+              if (mot) cambios.push({t: x.t, campo: 'u_pause_reason', nuevo: mot, lab: mot, por: ''});
+            }
+          });
+          cambios.sort(function (a, b) { return a.t - b.t; });
+          var pausas = [], pausaAbierta = null, enCursoVisto = false, asignadoVisto = false, giros = 0, ultimoMotivo = '', vistosC = {};
+          cambios.forEach(function (c) {
+            var t = c.t, campo = c.campo, nuevo = c.nuevo, lab = c.lab, por = c.por;
+            var kc = campo + '|' + normNom(lab); if (sinHistorial && vistosC[kc] && t - vistosC[kc] < 120000) return; vistosC[kc] = t;
             if (campo === 'state') {
               if (/cancel/i.test(lab)) ev.push({t: t, txt: '🚫 Caso cancelado.'});
               else if (/clos|cerrad|complet|resuel/i.test(lab)) ev.push({t: t, txt: '🏁 Caso cerrado.'});
               else if (/progress|curso/i.test(lab)) { ev.push({t: t, txt: enCursoVisto ? '▶️ Volvió a estar en curso.' : '▶️ Caso en curso. Empezó la investigación.'}); enCursoVisto = true; }
               else if (/travel|camino|viaje|route|ruta/i.test(lab)) ev.push({t: t, txt: '🚗 La cuadrilla salió hacia la escena.'});
               else if (/accept|acept/i.test(lab)) ev.push({t: t, txt: '🤝 La cuadrilla aceptó el caso.'});
-              else if (/assign|asign/i.test(lab)) ev.push({t: t, txt: '👮 ' + (por ? esc(por) + ' tomó el caso.' : 'Caso asignado.')});
+              else if (/assign|asign/i.test(lab) && !asignadoVisto) { asignadoVisto = true; ev.push({t: t, txt: '👮 ' + (por ? esc(por) + ' tomó el caso.' : 'Caso asignado.')}); }
             } else if (campo === 'assigned_to') {
               if (nuevo && porId[nuevo]) ev.push({t: t, txt: '👷 Técnico: ' + esc(porId[nuevo]) + '.'});
             } else if (campo === 'u_pause_reason') {
-              if (pausaAbierta) { pausas.push({motivo: pausaAbierta.motivo, ms: t - pausaAbierta.t}); }
+              if (pausaAbierta) pausas.push({motivo: pausaAbierta.motivo, ms: sinHistorial ? null : t - pausaAbierta.t});
               if (nuevo) {
                 ultimoMotivo = lab;
                 if (/verific/i.test(lab)) ev.push({t: t, txt: '🔍 Caso enviado a verificación del cliente.'});
@@ -1137,12 +1169,8 @@
               }
             }
           });
-          // notas: los comentarios (los oficiales) y nuestras notas importantes; las de ida y vuelta solo se cuentan
-          var notas = [];
-          (wos || []).forEach(function (w) {
-            notasDelTexto(dv(w, 'comments')).forEach(function (x) { x.com = true; notas.push(x); });
-            notasDelTexto(dv(w, 'work_notes')).forEach(function (x) { x.copiada = /^nota de trabajo copiada del caso/i.test(x.txt || ''); notas.push(x); });
-          });
+          // si la pausa del historial no es la de ahora, ya terminó (sin historial no se sabe cuánto duró)
+          if (sinHistorial && pausaAbierta && normNom(pausaAbierta.motivo) !== normNom(dv(r, 'u_pause_reason'))) { pausas.push({motivo: pausaAbierta.motivo, ms: null}); pausaAbierta = null; }
           var vistos = {}, otras = {}, botellas = {}, total = 0;
           notas.forEach(function (x) {
             var txt = limpiarNota(x.txt);
@@ -1175,7 +1203,7 @@
             if (k !== dia) { out.push('', '📍 <b>' + k + '</b>', ''); dia = k; }
             out.push('<b>' + hhmm(e.t) + '</b> ' + e.txt);
           });
-          if (audits === null) out.push('', '<i>(No pude leer el historial de cambios: faltan los cambios de estado y pausas.)</i>');
+          if (sinHistorial) out.push('', '<i>(Los cambios de estado y pausas salen de las notas automáticas: puede faltar alguno.)</i>');
           var resto = Object.keys(otras).sort(function (a, b) { return otras[b] - otras[a]; });
           var nOtras = resto.reduce(function (s, k) { return s + otras[k]; }, 0);
           if (nOtras) out.push('', '<i>… y ' + nOtras + (nOtras === 1 ? ' nota más' : ' notas más') + ' (' + resto.slice(0, 4).map(function (k) { return esc(k) + ' ' + otras[k]; }).join(' · ') + ')</i>');
@@ -1185,7 +1213,7 @@
           if (abierto) out.push('⏱️ ' + (cerrado ? 'Duró ' : 'Abierto hace ') + durLarga(fin - abierto));
           if (pausaAbierta) pausas.push({motivo: pausaAbierta.motivo, ms: Date.now() - pausaAbierta.t, sigue: true});
           var pz = pausas.filter(function (p) { return !/verific|acept/i.test(p.motivo); });
-          if (pz.length) out.push('⏸️ Pausas: ' + pz.map(function (p) { return durLarga(p.ms) + ' por ' + esc(cortar(p.motivo, 40)) + (p.sigue ? ' <i>(y sigue)</i>' : ''); }).join(' · '));
+          if (pz.length) out.push('⏸️ Pausas: ' + pz.map(function (p) { return (p.ms !== null ? durLarga(p.ms) + ' por ' : '') + esc(cortar(p.motivo, 40)) + (p.sigue ? ' <i>(y sigue)</i>' : ''); }).join(' · '));
           var sor = adj.filter(function (a) { return /\.sor/i.test(dv(a, 'file_name')); }).length;
           if (adj.length) out.push('📎 ' + adj.length + (adj.length === 1 ? ' adjunto' : ' adjuntos') + (sor ? ' (' + sor + (sor === 1 ? ' medición' : ' mediciones') + ')' : ''));
           var bts = Object.keys(botellas); if (bts.length) out.push('🧩 Botellas nombradas: ' + bts.slice(0, 5).map(esc).join(' · ') + (bts.length > 5 ? ' y ' + (bts.length - 5) + ' más' : ''));
