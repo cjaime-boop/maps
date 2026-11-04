@@ -2405,12 +2405,13 @@
             out.push('', '📅 <b>TABLA DE ' + mesN.toUpperCase() + '</b>', tq.slice(0, 6).map(function (q) { return nom(q) + ' ' + tabla[q]; }).join(' · '));
             var prox = new Date(hasta.getTime()); prox.setDate(prox.getDate() + 7);
             if (prox.getMonth() !== hasta.getMonth()) out.push('🏁 ¡Campeón de ' + mesN + ': <b>' + nom(tq[0]) + '</b>!');
-            // 🏛️ medallero del año
-            var oro = {}, anio = hasta.getFullYear();
-            previas.forEach(function (h) { if (h.puesto === 1 && finSem(h.semana).getFullYear() === anio) oro[h.quien] = (oro[h.quien] || 0) + 1; });
-            oro[rank[0]] = (oro[rank[0]] || 0) + 1;
-            var oq = Object.keys(oro).sort(function (a, b) { return oro[b] - oro[a]; });
-            out.push('', '🏛️ <b>MEDALLERO ' + anio + '</b>', oq.slice(0, 6).map(function (q) { return nom(q) + ' 🥇×' + oro[q]; }).join(' · '));
+            // 🏛️ casos del año (cada semana cuenta para el año en que termina; en 2027 arranca de cero)
+            var delAnio = {}, anio = hasta.getFullYear(), totAnio = 0;
+            previas.forEach(function (h) { if (finSem(h.semana).getFullYear() === anio) delAnio[h.quien] = (delAnio[h.quien] || 0) + h.casos; });
+            rank.forEach(function (q) { delAnio[q] = (delAnio[q] || 0) + cuenta[q]; });
+            var aq = Object.keys(delAnio).sort(function (a, b) { return delAnio[b] - delAnio[a]; });
+            aq.forEach(function (q) { totAnio += delAnio[q]; });
+            out.push('', '🏛️ <b>CASOS ' + anio + '</b>', aq.slice(0, 8).map(function (q) { return nom(q) + ' ' + miles(delAnio[q]); }).join(' · '), 'Equipo: ' + miles(totAnio));
           }
         }
         if (sinDueño) out.push('', '<i>' + sinDueño + (sinDueño === 1 ? ' caso sin' : ' casos sin') + ' nota de un dispatcher antes del pase (no cuentan).</i>');
