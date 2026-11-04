@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Mobisond · Avisador
 // @namespace    mobisond
-// @version      3.61
+// @version      3.62
 // @description  Avisa los casos nuevos (celular, campana y grupo de Telegram), los Lineales sin notas hace 25 min, los SLA y los aceptados; comandos del bot (/status, /bandeja, /autoasignar…); dispenser de la semana, racha sin vencidos y mensajes en casos pausados.
 // @match        https://*.service-now.com/*
 // @grant        GM_xmlhttpRequest
@@ -2235,17 +2235,16 @@
           wos.forEach(function (w) {
             var txt = dv(w, 'comments') + '\n' + dv(w, 'work_notes'), n = porId[val(w, 'sys_id')];
             notas[val(w, 'sys_id')] = notasDelTexto(txt);
-            // 🦵 pausa por Nodo/Falla Red del Cliente: ServiceNow no deja comentario automático, así que vale la nota
-            // del dispatcher que lo avisa ("pausamos caso por Falla nodo/red del cliente")
-            notas[val(w, 'sys_id')].forEach(function (x) {
-              var t = x.txt || '', d = x.t ? new Date(x.t) : null;
-              if (!n || !d || d < desde || d > hasta || !/nodo/i.test(t) || !/red del cliente/i.test(t)) return;
-              (pausasNodo[n] = pausasNodo[n] || []).push({d: d, q: quienEs(x.quien, lista)});
-            });
             var re = /(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}|\d{2}[\/-]\d{2}[\/-]\d{4} \d{2}:\d{2}:\d{2}) - [^\n]*\n([\s\S]*?)(?=\n\s*(?:\d{4}-\d{2}-\d{2}|\d{2}[\/-]\d{2}[\/-]\d{4}) \d{2}:\d{2}:\d{2} - |$)/g, m;
             while ((m = re.exec(txt))) {
               if (/hijo/i.test(m[2])) continue;
               if (/espera la verificaci[oó]n del cliente/i.test(m[2])) pase(n, fechaEntrada(m[1]));
+              // 🦵 pausa por Nodo/Falla Red del Cliente: comentario automático "En pausa por nodo/falla red del cliente"
+              // (igual que el de verificación); el caso es de quien dejó la última nota antes
+              if (/en pausa por nodo\s*\/\s*falla (de )?red del cliente/i.test(m[2])) {
+                var fn = fechaEntrada(m[1]);
+                if (n && fn && !isNaN(fn) && fn >= desde && fn <= hasta) (pausasNodo[n] = pausasNodo[n] || []).push({d: fn, q: ''});
+              }
             }
           });
         }, function () {}) : Promise.resolve();
