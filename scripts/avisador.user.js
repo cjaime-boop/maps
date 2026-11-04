@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Mobisond · Avisador
 // @namespace    mobisond
-// @version      3.62
+// @version      3.63
 // @description  Avisa los casos nuevos (celular, campana y grupo de Telegram), los Lineales sin notas hace 25 min, los SLA y los aceptados; comandos del bot (/status, /bandeja, /autoasignar…); dispenser de la semana, racha sin vencidos y mensajes en casos pausados.
 // @match        https://*.service-now.com/*
 // @grant        GM_xmlhttpRequest
@@ -2196,7 +2196,12 @@
       var desdeQ = "javascript:gs.dateGenerate('" + iso(desde) + "','" + ('0' + desde.getHours()).slice(-2) + ':' + ('0' + desde.getMinutes()).slice(-2) + ":00')";
       var CAMPOS_D = 'sys_id,number,parent,state,sys_created_on';
       var gdD = function (x) { return "javascript:gs.dateGenerate('" + iso(x) + "','00:00:00')"; };
-      var leer = !porSemana ? api('wm_task', lin + '^sys_updated_on>=' + desdeQ, CAMPOS_D) : (function () {
+      // semana vieja (/dispenser 16-05): "modificados desde" trae casi todos los casos desde esa fecha (y se corta en 2000).
+      // Se acota a los creados hasta 90 días antes de la semana y hasta su cierre.
+      var vieja = hasta < new Date(Date.now() - 6 * 3600000);
+      var acotar = vieja ? '^sys_created_on>=' + gdD(new Date(desde.getFullYear(), desde.getMonth(), desde.getDate() - 90)) +
+                           '^sys_created_on<=' + "javascript:gs.dateGenerate('" + iso(hasta) + "','23:59:59')" : '';
+      var leer = !porSemana ? api('wm_task', lin + '^sys_updated_on>=' + desdeQ + acotar, CAMPOS_D) : (function () {
         // carga inicial: muchos meses, de a un mes por fecha de creación (ServiceNow devuelve hasta 2000 por consulta)
         var tramos = [], d = new Date(desde.getFullYear(), desde.getMonth() - 1, 1);
         while (d <= hasta) { var h = new Date(d.getFullYear(), d.getMonth() + 1, 1); tramos.push([d, h]); d = h; }
@@ -2230,7 +2235,15 @@
             if (nn && /nodo|falla red del cliente/i.test(nv) && fa >= desde && fa <= hasta) (pausasNodo[nn] = pausasNodo[nn] || []).push({d: fa, q: ''});
           });
         }, function () {});
-        var porWO = padres.length ? apiIN('wm_order', padres, function (t) { return 'sys_idIN' + t.join(','); }, 'sys_id,comments,work_notes', 40).then(function (wos) {
+        var tandasWO = [];
+        for (var iw = 0; iw < padres.length; iw += 20) tandasWO.push(padres.slice(iw, iw + 20));
+        var leerWOs = tandasWO.reduce(function (prom, t) {          // de a 20; si una tanda falla, sigue con las demás
+          return prom.then(function (acum) {
+            return api('wm_order', 'sys_idIN' + t.join(','), 'sys_id,comments,work_notes').then(function (r) { return acum.concat(r); }, function () { acum.fallas = (acum.fallas || 0) + 1; return acum; });
+          });
+        }, Promise.resolve([]));
+        var porWO = padres.length ? leerWOs.then(function (wos) {
+          if (!wos.length && wos.fallas) throw new Error('no pude leer las WO');
           leido = true;
           wos.forEach(function (w) {
             var txt = dv(w, 'comments') + '\n' + dv(w, 'work_notes'), n = porId[val(w, 'sys_id')];
