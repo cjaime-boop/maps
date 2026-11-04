@@ -2261,7 +2261,7 @@
             if (!c.wo || wosVistas[c.wo]) return; wosVistas[c.wo] = 1;
             (notas[c.wo] || []).forEach(function (x) {
               var q = x.t && x.t >= desde.getTime() && x.t <= hasta.getTime() ? quienEs(x.quien, lista) : '';
-              if (q) escritas.push({quien: q, letras: (x.txt || '').replace(/\s/g, '').length});
+              if (q) escritas.push({quien: q, letras: (x.txt || '').replace(/\s/g, '').length, wn: c.wn});
             });
           });
           return {casos: out, escritas: escritas};
@@ -2357,21 +2357,22 @@
           r.casos.forEach(function (c) {
             var v = c.quien && (r.marg[c.id] || r.marg[c.wo]); if (!v) return;
             var falta = v - c.d;
-            if (falta > 0 && (!salva || falta < salva.falta)) salva = {falta: falta, quien: c.quien};
+            if (falta > 0 && (!salva || falta < salva.falta)) salva = {falta: falta, quien: c.quien, wn: c.wn || c.n};
           });
           if (salva && salva.falta < 6 * 3600000) {
             var fm = Math.round(salva.falta / 60000);
-            premios.push('🛟 Salvavidas: <b>' + nom(salva.quien) + '</b>, lo pasó a ' + (fm >= 60 ? Math.floor(fm / 60) + ' h ' + (fm % 60) + ' min' : fm + ' min') + ' de vencer');
+            premios.push('🛟 Salvavidas: <b>' + nom(salva.quien) + '</b>, ' + esc(salva.wn) + ' a ' + (fm >= 60 ? Math.floor(fm / 60) + ' h ' + (fm % 60) + ' min' : fm + ' min') + ' de vencer');
           }
-          var nov = null, letras = {};
+          var nov = null, letras = {}, enCasos = {};
           (r.escritas || []).forEach(function (x) {
             letras[x.quien] = (letras[x.quien] || 0) + x.letras;
+            (enCasos[x.quien] = enCasos[x.quien] || {})[x.wn] = 1;
             if (!nov || x.letras > nov.letras) nov = x;
           });
           var miles = function (n) { return String(n).replace(/\B(?=(\d{3})+(?!\d))/g, '.'); };
-          if (nov && nov.letras > 0) premios.push('✍️ El novelista: <b>' + nom(nov.quien) + '</b>, una nota de ' + miles(nov.letras) + ' letras');
+          if (nov && nov.letras > 0) premios.push('✍️ El novelista: <b>' + nom(nov.quien) + '</b>, una nota de ' + miles(nov.letras) + ' letras en ' + esc(nov.wn || ''));
           var enc = Object.keys(letras).sort(function (a, b) { return letras[b] - letras[a]; })[0];
-          if (enc) premios.push('📚 Enciclopedia: <b>' + nom(enc) + '</b>, ' + miles(letras[enc]) + ' letras en notas');
+          if (enc) { var nc = Object.keys(enCasos[enc] || {}).length; premios.push('📚 Enciclopedia: <b>' + nom(enc) + '</b>, ' + miles(letras[enc]) + ' letras en ' + nc + (nc === 1 ? ' caso' : ' casos')); }
           // historial (Supabase): semanas anteriores, sin esta
           var semK = iso(desde), previas = (hist || []).filter(function (h) { return h.semana < semK; });
           if (hist) {
@@ -2389,6 +2390,9 @@
             });
             if (marca) premios.push('💪 Mejor marca: <b>' + nom(marca.q) + '</b> hizo su mejor semana, ' + marca.n + ' casos');
           }
+          var ORDEN_P = ['⚡', '📚', '✍️', '🛟', '🏎️', '🎉', '💪'];                // orden que eligió el Chino
+          var lugar = function (t) { for (var i = 0; i < ORDEN_P.length; i++) if (t.indexOf(ORDEN_P[i]) === 0) return i; return 99; };
+          premios.sort(function (x, y) { return lugar(x) - lugar(y); });
           if (premios.length) out.push('', '🏅 <b>PREMIOS DE LA SEMANA</b>'); out.push.apply(out, premios);
           if (hist) {
             // 📅 tabla del mes: semanas que terminan en el mismo mes que esta
