@@ -2227,7 +2227,7 @@
             var nv = val(a, 'newvalue') + ' ' + dv(a, 'newvalue'), fa = new Date(val(a, 'sys_created_on').replace(' ', 'T') + 'Z');
             if (/verific/i.test(nv)) pase(porId[val(a, 'documentkey')], fa);
             var nn = porId[val(a, 'documentkey')];
-            if (nn && /nodo|falla red del cliente/i.test(nv) && fa >= desde && fa <= hasta) (pausasNodo[nn] = pausasNodo[nn] || []).push(fa);
+            if (nn && /nodo|falla red del cliente/i.test(nv) && fa >= desde && fa <= hasta) (pausasNodo[nn] = pausasNodo[nn] || []).push({d: fa, q: ''});
           });
         }, function () {});
         var porWO = padres.length ? apiIN('wm_order', padres, function (t) { return 'sys_idIN' + t.join(','); }, 'sys_id,comments,work_notes', 40).then(function (wos) {
@@ -2235,14 +2235,17 @@
           wos.forEach(function (w) {
             var txt = dv(w, 'comments') + '\n' + dv(w, 'work_notes'), n = porId[val(w, 'sys_id')];
             notas[val(w, 'sys_id')] = notasDelTexto(txt);
+            // 🦵 pausa por Nodo/Falla Red del Cliente: ServiceNow no deja comentario automático, así que vale la nota
+            // del dispatcher que lo avisa ("pausamos caso por Falla nodo/red del cliente")
+            notas[val(w, 'sys_id')].forEach(function (x) {
+              var t = x.txt || '', d = x.t ? new Date(x.t) : null;
+              if (!n || !d || d < desde || d > hasta || !/nodo/i.test(t) || !/red del cliente/i.test(t)) return;
+              (pausasNodo[n] = pausasNodo[n] || []).push({d: d, q: quienEs(x.quien, lista)});
+            });
             var re = /(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}|\d{2}[\/-]\d{2}[\/-]\d{4} \d{2}:\d{2}:\d{2}) - [^\n]*\n([\s\S]*?)(?=\n\s*(?:\d{4}-\d{2}-\d{2}|\d{2}[\/-]\d{2}[\/-]\d{4}) \d{2}:\d{2}:\d{2} - |$)/g, m;
             while ((m = re.exec(txt))) {
               if (/hijo/i.test(m[2])) continue;
               if (/espera la verificaci[oó]n del cliente/i.test(m[2])) pase(n, fechaEntrada(m[1]));
-              if (/nodo\s*\/\s*falla (en )?(la )?red del cliente/i.test(m[2])) {          // 🦵 pausa por Nodo/Falla Red del Cliente (igual que el pase)
-                var fn = fechaEntrada(m[1]);
-                if (n && fn && !isNaN(fn) && fn >= desde && fn <= hasta) (pausasNodo[n] = pausasNodo[n] || []).push(fn);
-              }
             }
           });
         }, function () {}) : Promise.resolve();
@@ -2279,8 +2282,8 @@
           // 🦵 Pateador: casos pausados por Nodo/Falla Red del Cliente en el período, a nombre de quien dejó la última nota antes de la pausa
           var pateos = {};
           Object.keys(pausasNodo).forEach(function (n) {
-            var d = pausasNodo[n].sort(function (a, b) { return b - a; })[0];
-            var q = dueño(n, d); if (q) pateos[q] = (pateos[q] || 0) + 1;
+            var u = pausasNodo[n].sort(function (a, b) { return b.d - a.d; })[0];   // la última de la semana
+            var q = u.q || dueño(n, u.d); if (q) pateos[q] = (pateos[q] || 0) + 1;
           });
           return {casos: out, escritas: escritas, pateos: pateos};
         });
