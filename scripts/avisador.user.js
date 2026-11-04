@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Mobisond · Avisador
 // @namespace    mobisond
-// @version      3.57
+// @version      3.58
 // @description  Avisa los casos nuevos (celular, campana y grupo de Telegram), los Lineales sin notas hace 25 min, los SLA y los aceptados; comandos del bot (/status, /bandeja, /autoasignar…); dispenser de la semana, racha sin vencidos y mensajes en casos pausados.
 // @match        https://*.service-now.com/*
 // @grant        GM_xmlhttpRequest
@@ -1101,15 +1101,17 @@
       // período: desde el viernes 19:00 anterior. El automático de los viernes (pedido sin mensaje) cierra la semana a las 19:00
       // y guarda el ganador en Supabase (para el "bicampeón")
       var autoD = p.id < 0 && !p.msg, finD = new Date();
+      var pruebaD = !autoD && /cierre/i.test(p.texto || '');      // "/dispenser cierre": el mensaje del viernes de la última semana cerrada, sin guardar nada
       var iniD = new Date(finD.getTime()); iniD.setHours(19, 0, 0, 0);
       while (iniD.getDay() !== 5 || iniD > finD) iniD.setDate(iniD.getDate() - 1);
-      if (autoD) { finD = new Date(iniD.getTime()); iniD = new Date(finD.getTime()); iniD.setDate(iniD.getDate() - 7); }
+      if (autoD || pruebaD) { finD = new Date(iniD.getTime()); iniD = new Date(finD.getTime()); iniD.setDate(iniD.getDate() - 7); }
       var semD = finD.getFullYear() + '-' + ('0' + (finD.getMonth() + 1)).slice(-2) + '-' + ('0' + finD.getDate()).slice(-2);
       // devuelve los apodos y, en el automático, el ganador de la semana anterior (para el "bicampeón")
-      sbRpc('bot_dispenser', {p_semana: autoD ? semD : null, p_ganador: null}).then(function (antes) {
-        return RESUMEN.textoDispenser(iniD, finD, autoD, antes);
+      sbRpc('bot_dispenser', {p_semana: autoD || pruebaD ? semD : null, p_ganador: null}).then(function (antes) {
+        return RESUMEN.textoDispenser(iniD, finD, autoD || pruebaD, antes);
       }).then(function (r) {
         if (autoD && r.ganador) sbRpc('bot_dispenser', {p_semana: semD, p_ganador: r.ganador}).catch(function () {});
+        if (autoD && r.filas && r.filas.length) sbRpc('bot_disp_guardar', {p_semana: iniD.getFullYear() + '-' + ('0' + (iniD.getMonth() + 1)).slice(-2) + '-' + ('0' + iniD.getDate()).slice(-2), p_filas: r.filas}).catch(function () {});
         unaVezAlGrupo('cmd:' + p.id, r.texto, p.msg, p.chat, function (ok) { listo(ok ? 'contestado' : 'no se pudo contestar'); });
       }, function (e) { unaVezAlGrupo('cmd:' + p.id, 'No pude armar el ranking del dispenser (' + esc(e.message) + ').', p.msg, p.chat); listo('error ' + e.message); });
       return;
@@ -1431,6 +1433,7 @@
       }).join('') +
       '<div class="sec">Herramientas</div>' +
       '<div class="bs"><button id="pro">🧪 Probar todo</button><button id="rev">🔧 Revisar bot</button></div>' +
+      '<div class="bs"><button id="hdisp">🏛️ Cargar historial del dispenser</button></div>' +
       '<div class="msg" id="msg"></div></div></div>';
     var $ = function (id) { return sh.getElementById(id); };
     var cerrar = function () { host.remove(); };
@@ -1442,6 +1445,11 @@
       };
     });
     $('pro').onclick = function () { $('msg').textContent = probarTodo(); };
+    $('hdisp').onclick = function () {
+      var b = $('hdisp'); if (b.disabled) return; b.disabled = true;
+      var m = function (t) { if (host.isConnected) $('msg').textContent = t; };
+      RESUMEN.cargarHistorialDisp(m).then(m, function (e) { m('No pude cargar el historial: ' + e.message); b.disabled = false; });
+    };
     $('rev').onclick = function () {
       $('msg').textContent = 'Revisando…';
       revisarBot(function (t) { if (!host.isConnected) return; $('msg').innerHTML = '<pre>' + esc(t) + '</pre>'; });
@@ -2160,17 +2168,36 @@
       var p = a.split(' ');                                    // "Carlos Ezequiel Jaime" -> "carlos jaime"
       return p.length > 2 ? (nombres[p[0] + ' ' + p[p.length - 1]] || nombres[p[0] + ' ' + p[p.length - 2]] || '') : '';
     }
-    function dispenser(desde, hasta, nombres) {
+    // viernes 19:00 en que arranca la semana del dispenser que contiene a d
+    function inicioSemanaDisp(d) {
+      var x = new Date(d.getTime()); x.setHours(19, 0, 0, 0);
+      while (x.getDay() !== 5 || x > d) x.setDate(x.getDate() - 1);
+      return x;
+    }
+    // porSemana: devuelve {semanas: {'aaaa-mm-dd' (viernes de inicio): [{n, d, quien}]}}, con el último pase de cada semana
+    function dispenser(desde, hasta, nombres, porSemana) {
       var lista = {}; Object.keys(nombres || {}).forEach(function (k) { lista[normNom(k)] = nombres[k]; });
       if (!Object.keys(lista).length) return Promise.reject(new Error('no tengo la lista de dispatchers (Supabase)'));
       var lin = 'assignment_group.nameSTARTSWITH' + GRUPOS.lineales;
       var desdeQ = "javascript:gs.dateGenerate('" + iso(desde) + "','" + ('0' + desde.getHours()).slice(-2) + ':' + ('0' + desde.getMinutes()).slice(-2) + ":00')";
-      return api('wm_task', lin + '^sys_updated_on>=' + desdeQ, 'sys_id,number,parent,state,sys_created_on').then(function (casos) {
+      var CAMPOS_D = 'sys_id,number,parent,state,sys_created_on';
+      var gdD = function (x) { return "javascript:gs.dateGenerate('" + iso(x) + "','00:00:00')"; };
+      var leer = !porSemana ? api('wm_task', lin + '^sys_updated_on>=' + desdeQ, CAMPOS_D) : (function () {
+        // carga inicial: muchos meses, de a un mes por fecha de creación (ServiceNow devuelve hasta 2000 por consulta)
+        var tramos = [], d = new Date(desde.getFullYear(), desde.getMonth() - 1, 1);
+        while (d <= hasta) { var h = new Date(d.getFullYear(), d.getMonth() + 1, 1); tramos.push([d, h]); d = h; }
+        return tramos.reduce(function (prom, t) {
+          return prom.then(function (acum) {
+            return api('wm_task', lin + '^sys_created_on>=' + gdD(t[0]) + '^sys_created_on<' + gdD(t[1]), CAMPOS_D).then(function (r) { return acum.concat(r); });
+          });
+        }, Promise.resolve([]));
+      })();
+      return leer.then(function (casos) {
         var vistos = {};
         casos = casos.filter(function (r) { var n = dv(r, 'number'); if (vistos[n] || /cancel/i.test(dv(r, 'state'))) return false; vistos[n] = 1; return true; });
-        var porId = {}, padres = [], woDe = {}, ingreso = {};
+        var porId = {}, padres = [], woDe = {}, ingreso = {}, idDe = {};
         casos.forEach(function (c) {
-          porId[val(c, 'sys_id')] = dv(c, 'number');
+          porId[val(c, 'sys_id')] = dv(c, 'number'); idDe[dv(c, 'number')] = val(c, 'sys_id');
           var ci = val(c, 'sys_created_on'); if (ci) ingreso[dv(c, 'number')] = new Date(ci.replace(' ', 'T') + 'Z');
           var p = val(c, 'parent'); if (p) { porId[p] = dv(c, 'number'); padres.push(p); woDe[dv(c, 'number')] = p; }
         });
@@ -2196,21 +2223,83 @@
         }, function () {}) : Promise.resolve();
         return Promise.all([porAudit, porWO]).then(function () {
           if (!leido) throw new Error('no pude leer los pases a verificación');
+          var dueño = function (n, d) {                                         // quien dejó la última nota antes del pase
+            var ns = (notas[woDe[n]] || []).filter(function (x) { return x.t && x.t <= d.getTime() + 60000 && quienEs(x.quien, lista); })
+                                             .sort(function (a, b) { return b.t - a.t; });
+            return ns.length ? quienEs(ns[0].quien, lista) : '';
+          };
+          if (porSemana) {
+            var sem = {};
+            Object.keys(pases).forEach(function (n) {
+              var ult = {};                                                      // último pase de cada semana
+              pases[n].forEach(function (d) { var k = iso(inicioSemanaDisp(d)); if (!ult[k] || d > ult[k]) ult[k] = d; });
+              Object.keys(ult).forEach(function (k) { (sem[k] = sem[k] || []).push({n: n, d: ult[k], quien: dueño(n, ult[k])}); });
+            });
+            return {semanas: sem};
+          }
           var out = [];
           Object.keys(pases).forEach(function (n) {
             var d = pases[n].sort(function (a, b) { return b - a; })[0];          // el último pase del período
-            var ns = (notas[woDe[n]] || []).filter(function (x) { return x.t && x.t <= d.getTime() + 60000 && quienEs(x.quien, lista); })
-                                             .sort(function (a, b) { return b.t - a.t; });
-            var q = ns.length ? quienEs(ns[0].quien, lista) : '';
-            out.push({n: n, d: d, quien: q, ing: ingreso[n]});
+            out.push({n: n, d: d, quien: dueño(n, d), ing: ingreso[n], wo: woDe[n], id: idDe[n]});
           });
-          return {casos: out};
+          // notas de dispatchers escritas en el período, una vez por WO (para el Novelista y la Enciclopedia)
+          var escritas = [], wosVistas = {};
+          out.forEach(function (c) {
+            if (!c.wo || wosVistas[c.wo]) return; wosVistas[c.wo] = 1;
+            (notas[c.wo] || []).forEach(function (x) {
+              var q = x.t && x.t >= desde.getTime() && x.t <= hasta.getTime() ? quienEs(x.quien, lista) : '';
+              if (q) escritas.push({quien: q, letras: (x.txt || '').replace(/\s/g, '').length});
+            });
+          });
+          return {casos: out, escritas: escritas};
         });
       });
     }
     // texto del ranking. final = el del viernes 19:00 (con frases y premios); si no, "cómo va la carrera"
+    var MESES_D = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
+    var DISP_DESDE = new Date(2026, 3, 3, 19, 0, 0);     // historial desde acá (en abril cambiaron los usuarios de ServiceNow)
+    // SLA neto de cada caso pasado: lo que le faltaba para vencer en el momento del pase (para el Salvavidas)
+    function margenesSLA(casos) {
+      var ids = [];
+      casos.forEach(function (c) { if (c.id) ids.push(c.id); if (c.wo) ids.push(c.wo); });
+      if (!ids.length) return Promise.resolve({});
+      return apiIN('task_sla', ids, function (t) { return 'taskIN' + t.join(','); }, 'task,sla,stage,has_breached,planned_end_time').then(function (rs) {
+        var m = {};
+        rs.forEach(function (x) {
+          if (!/neto/i.test(dv(x, 'sla')) || /cancel/i.test(val(x, 'stage') + dv(x, 'stage')) || val(x, 'has_breached') === 'true') return;
+          var v = val(x, 'planned_end_time'); if (v) m[val(x, 'task')] = new Date(v.replace(' ', 'T') + 'Z');
+        });
+        return m;
+      }, function () { return {}; });
+    }
+    // carga inicial del historial: recalcula cada semana desde DISP_DESDE hasta la última cerrada y la guarda en Supabase
+    function cargarHistorialDisp(avance) {
+      var fin = inicioSemanaDisp(new Date());
+      return sbRpc('bot_dispenser', {p_semana: null, p_ganador: null}).then(function (e) {
+        avance('Leyendo los pases a verificación desde abril… (tarda unos minutos)');
+        return dispenser(DISP_DESDE, fin, e && e.nombres, true);
+      }).then(function (r) {
+        var ks = Object.keys(r.semanas).filter(function (k) { return new Date(k + 'T19:00:00') >= DISP_DESDE && new Date(k + 'T19:00:00') < fin; }).sort();
+        var hechas = 0;
+        return ks.reduce(function (prom, k) {
+          return prom.then(function () {
+            var cuenta = {};
+            r.semanas[k].forEach(function (c) { if (c.quien) cuenta[c.quien] = (cuenta[c.quien] || 0) + 1; });
+            var filas = Object.keys(cuenta).sort(function (a, b) { return cuenta[b] - cuenta[a]; }).map(function (q, i) { return {quien: q, casos: cuenta[q], puesto: i + 1}; });
+            return sbRpc('bot_disp_guardar', {p_semana: k, p_filas: filas}).then(function () { hechas++; avance('Guardadas ' + hechas + ' de ' + ks.length + ' semanas…'); });
+          });
+        }, Promise.resolve()).then(function () { return 'Listo: ' + hechas + ' semanas guardadas (desde el ' + dm(DISP_DESDE) + ').'; });
+      });
+    }
     function textoDispenser(desde, hasta, final, antes) {
-      return dispenser(desde, hasta, antes && antes.nombres).then(function (r) {
+      var extras = final ? Promise.all([
+        sbRpc('bot_disp_historial', {}).catch(function () { return null; }),
+        Promise.resolve()
+      ]) : Promise.resolve([null]);
+      var hist = null;
+      return extras.then(function (x) { hist = x[0]; return dispenser(desde, hasta, antes && antes.nombres); }).then(function (r) {
+        return (final ? margenesSLA(r.casos) : Promise.resolve({})).then(function (marg) { r.marg = marg; return r; });
+      }).then(function (r) {
         var cuenta = {}, porDia = {}, rayo = null, total = r.casos.length, sinDueño = 0;
         r.casos.forEach(function (c) {
           if (!c.quien) { sinDueño++; return; }
@@ -2244,23 +2333,83 @@
           var rec = null;
           Object.keys(porDia).forEach(function (k) { if (!rec || porDia[k] > rec.n) rec = {n: porDia[k], k: k}; });
           out.push('', '📊 Total: ' + total + (total === 1 ? ' caso pasado' : ' casos pasados') + ' a verificación');
+          if (antes && antes.ganador === rank[0] && antes.seguidas >= 1) {
+            var veces = antes.seguidas + 1;
+            out.push('👑 <b>' + (veces === 2 ? 'Bicampeonato' : veces === 3 ? 'Tricampeonato' : veces + ' semanas seguidas') + ' de ' + nom(rank[0]) + '</b>',
+                     '<i>' + (veces === 2 ? 'Segunda semana seguida arriba. Ya pide aumento.' : 'Esto ya es una dinastía.') + '</i>');
+          } else if (antes && antes.ganador && antes.ganador !== rank[0]) {          // 🥊 defensa del título
+            var pos = rank.indexOf(antes.ganador);
+            out.push('🥊 ' + nom(antes.ganador) + ' defendía el título y ' + (pos >= 0 ? 'quedó ' + (pos + 1) + '.º' : 'no sumó casos') + '. Lo destronó <b>' + nom(rank[0]) + '</b>');
+          }
+          // 🏅 premios de la semana
+          var premios = [];
           if (rayo) {
             var mins = Math.round(rayo.dur / 60000), hs = Math.floor(mins / 60);
-            out.push('🏎️ Rayo McQueen: <b>' + nom(rayo.quien) + '</b>, ' + esc(rayo.n) + ' en ' + (hs ? hs + ' h ' + (mins % 60) + ' min' : mins + ' min'));
+            premios.push('🏎️ Rayo McQueen: <b>' + nom(rayo.quien) + '</b>, ' + esc(rayo.n) + ' en ' + (hs ? hs + ' h ' + (mins % 60) + ' min' : mins + ' min'));
           }
           if (rec && rec.n > 1) {
             var p = rec.k.split('|'), dd = new Date(p[1] + 'T12:00:00');
-            out.push('⚡ Récord del día: <b>' + nom(p[0]) + '</b>, ' + rec.n + ' el ' + DIAS_SEM[dd.getDay()]);
+            premios.push('⚡ Récord del día: <b>' + nom(p[0]) + '</b>, ' + rec.n + ' el ' + DIAS_SEM[dd.getDay()]);
           }
-          if (antes && antes.ganador === rank[0] && antes.seguidas >= 1) {
-            var veces = antes.seguidas + 1;
-            out.push('', '👑 <b>' + (veces === 2 ? 'Bicampeonato' : veces === 3 ? 'Tricampeonato' : veces + ' semanas seguidas') + ' de ' + nom(rank[0]) + '</b>',
-                     '<i>' + (veces === 2 ? 'Segunda semana seguida arriba. Ya pide aumento.' : 'Esto ya es una dinastía.') + '</i>');
+          var salva = null;
+          r.casos.forEach(function (c) {
+            var v = c.quien && (r.marg[c.id] || r.marg[c.wo]); if (!v) return;
+            var falta = v - c.d;
+            if (falta > 0 && (!salva || falta < salva.falta)) salva = {falta: falta, quien: c.quien};
+          });
+          if (salva && salva.falta < 6 * 3600000) {
+            var fm = Math.round(salva.falta / 60000);
+            premios.push('🛟 Salvavidas: <b>' + nom(salva.quien) + '</b>, lo pasó a ' + (fm >= 60 ? Math.floor(fm / 60) + ' h ' + (fm % 60) + ' min' : fm + ' min') + ' de vencer');
+          }
+          var nov = null, letras = {};
+          (r.escritas || []).forEach(function (x) {
+            letras[x.quien] = (letras[x.quien] || 0) + x.letras;
+            if (!nov || x.letras > nov.letras) nov = x;
+          });
+          var miles = function (n) { return String(n).replace(/\B(?=(\d{3})+(?!\d))/g, '.'); };
+          if (nov && nov.letras > 0) premios.push('✍️ El novelista: <b>' + nom(nov.quien) + '</b>, una nota de ' + miles(nov.letras) + ' letras');
+          var enc = Object.keys(letras).sort(function (a, b) { return letras[b] - letras[a]; })[0];
+          if (enc) premios.push('📚 Enciclopedia: <b>' + nom(enc) + '</b>, ' + miles(letras[enc]) + ' letras en notas');
+          // historial (Supabase): semanas anteriores, sin esta
+          var semK = iso(desde), previas = (hist || []).filter(function (h) { return h.semana !== semK; });
+          if (hist) {
+            rank.forEach(function (q) {                                             // 🎉 hito: cruzó un múltiplo de 100
+              var antesN = 0; previas.forEach(function (h) { if (h.quien === q) antesN += h.casos; });
+              var ahoraN = antesN + cuenta[q];
+              if (Math.floor(ahoraN / 100) > Math.floor(antesN / 100)) premios.push('🎉 Hito: <b>' + nom(q) + '</b> llegó a sus ' + Math.floor(ahoraN / 100) * 100 + ' casos');
+            });
+            var marca = null;                                                      // 💪 mejor semana de alguien
+            rank.forEach(function (q) {
+              var suyas = previas.filter(function (h) { return h.quien === q; });
+              if (suyas.length < 4 || cuenta[q] < 5) return;
+              var max = Math.max.apply(null, suyas.map(function (h) { return h.casos; }));
+              if (cuenta[q] > max && (!marca || cuenta[q] > marca.n)) marca = {q: q, n: cuenta[q]};
+            });
+            if (marca) premios.push('💪 Mejor marca: <b>' + nom(marca.q) + '</b> hizo su mejor semana, ' + marca.n + ' casos');
+          }
+          if (premios.length) out.push('', '🏅 <b>PREMIOS DE LA SEMANA</b>'); out.push.apply(out, premios);
+          if (hist) {
+            // 📅 tabla del mes: semanas que terminan en el mismo mes que esta
+            var finSem = function (k) { var d = new Date(k + 'T12:00:00'); d.setDate(d.getDate() + 7); return d; };
+            var mesK = hasta.getFullYear() * 12 + hasta.getMonth(), tabla = {};
+            previas.forEach(function (h) { var f = finSem(h.semana); if (f.getFullYear() * 12 + f.getMonth() === mesK) tabla[h.quien] = (tabla[h.quien] || 0) + h.casos; });
+            rank.forEach(function (q) { tabla[q] = (tabla[q] || 0) + cuenta[q]; });
+            var tq = Object.keys(tabla).sort(function (a, b) { return tabla[b] - tabla[a]; });
+            var mesN = MESES_D[hasta.getMonth()];
+            out.push('', '📅 <b>TABLA DE ' + mesN.toUpperCase() + '</b>', tq.slice(0, 6).map(function (q) { return nom(q) + ' ' + tabla[q]; }).join(' · '));
+            var prox = new Date(hasta.getTime()); prox.setDate(prox.getDate() + 7);
+            if (prox.getMonth() !== hasta.getMonth()) out.push('🏁 ¡Campeón de ' + mesN + ': <b>' + nom(tq[0]) + '</b>!');
+            // 🏛️ medallero del año
+            var oro = {}, anio = hasta.getFullYear();
+            previas.forEach(function (h) { if (h.puesto === 1 && finSem(h.semana).getFullYear() === anio) oro[h.quien] = (oro[h.quien] || 0) + 1; });
+            oro[rank[0]] = (oro[rank[0]] || 0) + 1;
+            var oq = Object.keys(oro).sort(function (a, b) { return oro[b] - oro[a]; });
+            out.push('', '🏛️ <b>MEDALLERO ' + anio + '</b>', oq.slice(0, 6).map(function (q) { return nom(q) + ' 🥇×' + oro[q]; }).join(' · '));
           }
         }
         if (sinDueño) out.push('', '<i>' + sinDueño + (sinDueño === 1 ? ' caso sin' : ' casos sin') + ' nota de un dispatcher antes del pase (no cuentan).</i>');
         out.push('', '<i>Cuenta el último pase a verificación de cada caso de Lineales, a nombre de quien dejó la última nota antes del pase.</i>');
-        return {texto: out.join('\n'), ganador: rank[0]};
+        return {texto: out.join('\n'), ganador: rank[0], filas: rank.map(function (q, i) { return {quien: q, casos: cuenta[q], puesto: i + 1}; })};
       }).then(function (x) { return typeof x === 'string' ? {texto: x, ganador: ''} : x; });
     }
 
@@ -2372,7 +2521,7 @@
 
     if (window.top === window.self) montar();
     var ultimo = null;                     // datos del último /semana o /mes (para los gráficos)
-    return {armar: armar, semana: semana, mes: mes, textoDispenser: textoDispenser, textoRacha: textoRacha, ultimoGraf: function () { return ultimo; }, limpiarGraf: function () { ultimo = null; }, periodo: periodo};
+    return {armar: armar, semana: semana, mes: mes, textoDispenser: textoDispenser, cargarHistorialDisp: cargarHistorialDisp, textoRacha: textoRacha, ultimoGraf: function () { return ultimo; }, limpiarGraf: function () { ultimo = null; }, periodo: periodo};
   })();
   // ---------------------------------------------------------------- gráficos de /semana y /mes (una foto por proyecto)
   // Barras por día con los casos INGRESADOS ese día; la parte roja son los de esos que se vencieron (SLA neto, sin prioridad baja).
