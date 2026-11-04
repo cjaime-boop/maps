@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Mobisond · Avisador
 // @namespace    mobisond
-// @version      3.58
+// @version      3.59
 // @description  Avisa los casos nuevos (celular, campana y grupo de Telegram), los Lineales sin notas hace 25 min, los SLA y los aceptados; comandos del bot (/status, /bandeja, /autoasignar…); dispenser de la semana, racha sin vencidos y mensajes en casos pausados.
 // @match        https://*.service-now.com/*
 // @grant        GM_xmlhttpRequest
@@ -1101,13 +1101,31 @@
       // período: desde el viernes 19:00 anterior. El automático de los viernes (pedido sin mensaje) cierra la semana a las 19:00
       // y guarda el ganador en Supabase (para el "bicampeón")
       var autoD = p.id < 0 && !p.msg, finD = new Date();
-      var pruebaD = !autoD && /cierre/i.test(p.texto || '');      // "/dispenser cierre": el mensaje del viernes de la última semana cerrada, sin guardar nada
-      var iniD = new Date(finD.getTime()); iniD.setHours(19, 0, 0, 0);
-      while (iniD.getDay() !== 5 || iniD > finD) iniD.setDate(iniD.getDate() - 1);
-      if (autoD || pruebaD) { finD = new Date(iniD.getTime()); iniD = new Date(finD.getTime()); iniD.setDate(iniD.getDate() - 7); }
+      // "/dispenser 19-10": la semana (viernes 19:00 a viernes 19:00) que contiene ese día, como el mensaje del viernes, sin guardar nada
+      var fD = autoD ? null : fechaDeTexto((p.texto || '').trim().split(/\s+/).slice(1).join(' '));
+      var hoyD = new Date(); hoyD.setHours(0, 0, 0, 0);
+      if (fD === 'mal' || (fD && fD > hoyD) || (fD && fD < new Date(2026, 3, 4))) {
+        unaVezAlGrupo('cmd:' + p.id, fD === 'mal' ? 'No entendí la fecha. Usalo así: <code>/dispenser 19-10</code>'
+                     : fD > hoyD ? 'Esa fecha todavía no llegó 🙂' : 'Tengo el dispenser desde el 04/04/2026 (antes cambiaban los usuarios de ServiceNow).',
+                     p.msg, p.chat, function (ok) { listo(ok ? 'contestado' : 'no se pudo contestar'); });
+        return;
+      }
+      var pruebaD = false;
+      var iniD;
+      if (fD) {
+        var medio = new Date(fD.getTime()); medio.setHours(12, 0, 0, 0);
+        iniD = RESUMEN.inicioSemanaDisp(medio);
+        var finSemD = new Date(iniD.getTime()); finSemD.setDate(finSemD.getDate() + 7);
+        if (finSemD <= finD) { finD = finSemD; pruebaD = true; }          // semana cerrada: mensaje del viernes; si no, "cómo va"
+      } else {
+        iniD = new Date(finD.getTime()); iniD.setHours(19, 0, 0, 0);
+        while (iniD.getDay() !== 5 || iniD > finD) iniD.setDate(iniD.getDate() - 1);
+        if (autoD) { finD = new Date(iniD.getTime()); iniD = new Date(finD.getTime()); iniD.setDate(iniD.getDate() - 7); }
+      }
       var semD = finD.getFullYear() + '-' + ('0' + (finD.getMonth() + 1)).slice(-2) + '-' + ('0' + finD.getDate()).slice(-2);
       // devuelve los apodos y, en el automático, el ganador de la semana anterior (para el "bicampeón")
-      sbRpc('bot_dispenser', {p_semana: autoD || pruebaD ? semD : null, p_ganador: null}).then(function (antes) {
+      sbRpc('bot_dispenser', {p_semana: autoD ? semD : null, p_ganador: null}).then(function (antes) {
+        if (pruebaD && antes) { delete antes.ganador; delete antes.seguidas; }   // semana vieja: el campeón anterior sale del historial
         return RESUMEN.textoDispenser(iniD, finD, autoD || pruebaD, antes);
       }).then(function (r) {
         if (autoD && r.ganador) sbRpc('bot_dispenser', {p_semana: semD, p_ganador: r.ganador}).catch(function () {});
@@ -1336,7 +1354,7 @@
     if (!hayGrupo() || !soyLider()) return;
     reintentarAvisos();
     atenderPendientes();
-    if (GM_getValue('tg_cmds', 0) < 19) {     // menú de comandos del bot (aparece al escribir "/" en el grupo)
+    if (GM_getValue('tg_cmds', 0) < 20) {     // menú de comandos del bot (aparece al escribir "/" en el grupo)
       tg('setMyCommands', {commands: [{command: 'bandeja', description: 'Casos abiertos (o /bandeja gpon, /bandeja lineales)'},
                                       {command: 'caso', description: 'Detalle de un caso: /caso WO0096818'},
                                       {command: 'activos', description: 'Quién está activo ahora y quién entra'},
@@ -1347,8 +1365,8 @@
                                       {command: 'autoasignar', description: 'Asignación automática: ver, on u off'},
                                       {command: 'rama', description: 'Casos de una rama GPON en 90 días: /rama GMRN-R0503'},
                                       {command: 'pcs', description: 'PCs conectadas y su versión del Avisador'},
-                                      {command: 'dispenser', description: 'Ranking del dispenser de la semana'},
-                                      {command: 'racha', description: 'Racha sin vencidos de Lineales y GPON'}]}, function () { GM_setValue('tg_cmds', 19); });
+                                      {command: 'dispenser', description: 'Ranking del dispenser (o /dispenser 19-10 para otra semana)'},
+                                      {command: 'racha', description: 'Racha sin vencidos de Lineales y GPON'}]}, function () { GM_setValue('tg_cmds', 20); });
     }
     if (modoBot === null) {                    // ¿el bot está conectado a Supabase?
       modoBot = 'esperando';
@@ -1433,7 +1451,6 @@
       }).join('') +
       '<div class="sec">Herramientas</div>' +
       '<div class="bs"><button id="pro">🧪 Probar todo</button><button id="rev">🔧 Revisar bot</button></div>' +
-      '<div class="bs"><button id="hdisp">🏛️ Cargar historial del dispenser</button></div>' +
       '<div class="msg" id="msg"></div></div></div>';
     var $ = function (id) { return sh.getElementById(id); };
     var cerrar = function () { host.remove(); };
@@ -1445,11 +1462,6 @@
       };
     });
     $('pro').onclick = function () { $('msg').textContent = probarTodo(); };
-    $('hdisp').onclick = function () {
-      var b = $('hdisp'); if (b.disabled) return; b.disabled = true;
-      var m = function (t) { if (host.isConnected) $('msg').textContent = t; };
-      RESUMEN.cargarHistorialDisp(m).then(m, function (e) { m('No pude cargar el historial: ' + e.message); b.disabled = false; });
-    };
     $('rev').onclick = function () {
       $('msg').textContent = 'Revisando…';
       revisarBot(function (t) { if (!host.isConnected) return; $('msg').innerHTML = '<pre>' + esc(t) + '</pre>'; });
@@ -2195,9 +2207,10 @@
       return leer.then(function (casos) {
         var vistos = {};
         casos = casos.filter(function (r) { var n = dv(r, 'number'); if (vistos[n] || /cancel/i.test(dv(r, 'state'))) return false; vistos[n] = 1; return true; });
-        var porId = {}, padres = [], woDe = {}, ingreso = {}, idDe = {};
+        var porId = {}, padres = [], woDe = {}, ingreso = {}, idDe = {}, woNum = {};
         casos.forEach(function (c) {
           porId[val(c, 'sys_id')] = dv(c, 'number'); idDe[dv(c, 'number')] = val(c, 'sys_id');
+          woNum[dv(c, 'number')] = dv(c, 'parent') || dv(c, 'number').replace(/^WOT/i, 'WO');
           var ci = val(c, 'sys_created_on'); if (ci) ingreso[dv(c, 'number')] = new Date(ci.replace(' ', 'T') + 'Z');
           var p = val(c, 'parent'); if (p) { porId[p] = dv(c, 'number'); padres.push(p); woDe[dv(c, 'number')] = p; }
         });
@@ -2240,7 +2253,7 @@
           var out = [];
           Object.keys(pases).forEach(function (n) {
             var d = pases[n].sort(function (a, b) { return b - a; })[0];          // el último pase del período
-            out.push({n: n, d: d, quien: dueño(n, d), ing: ingreso[n], wo: woDe[n], id: idDe[n]});
+            out.push({n: n, d: d, quien: dueño(n, d), ing: ingreso[n], wo: woDe[n], id: idDe[n], wn: woNum[n]});
           });
           // notas de dispatchers escritas en el período, una vez por WO (para el Novelista y la Enciclopedia)
           var escritas = [], wosVistas = {};
@@ -2272,25 +2285,6 @@
         return m;
       }, function () { return {}; });
     }
-    // carga inicial del historial: recalcula cada semana desde DISP_DESDE hasta la última cerrada y la guarda en Supabase
-    function cargarHistorialDisp(avance) {
-      var fin = inicioSemanaDisp(new Date());
-      return sbRpc('bot_dispenser', {p_semana: null, p_ganador: null}).then(function (e) {
-        avance('Leyendo los pases a verificación desde abril… (tarda unos minutos)');
-        return dispenser(DISP_DESDE, fin, e && e.nombres, true);
-      }).then(function (r) {
-        var ks = Object.keys(r.semanas).filter(function (k) { return new Date(k + 'T19:00:00') >= DISP_DESDE && new Date(k + 'T19:00:00') < fin; }).sort();
-        var hechas = 0;
-        return ks.reduce(function (prom, k) {
-          return prom.then(function () {
-            var cuenta = {};
-            r.semanas[k].forEach(function (c) { if (c.quien) cuenta[c.quien] = (cuenta[c.quien] || 0) + 1; });
-            var filas = Object.keys(cuenta).sort(function (a, b) { return cuenta[b] - cuenta[a]; }).map(function (q, i) { return {quien: q, casos: cuenta[q], puesto: i + 1}; });
-            return sbRpc('bot_disp_guardar', {p_semana: k, p_filas: filas}).then(function () { hechas++; avance('Guardadas ' + hechas + ' de ' + ks.length + ' semanas…'); });
-          });
-        }, Promise.resolve()).then(function () { return 'Listo: ' + hechas + ' semanas guardadas (desde el ' + dm(DISP_DESDE) + ').'; });
-      });
-    }
     function textoDispenser(desde, hasta, final, antes) {
       var extras = final ? Promise.all([
         sbRpc('bot_disp_historial', {}).catch(function () { return null; }),
@@ -2306,9 +2300,11 @@
           cuenta[c.quien] = (cuenta[c.quien] || 0) + 1;
           var k = c.quien + '|' + iso(c.d); porDia[k] = (porDia[k] || 0) + 1;
           var dur = c.ing && !isNaN(c.ing) ? c.d - c.ing : NaN;                 // desde que ingresó hasta el pase (bruto)
-          if (dur > 0 && (!rayo || dur < rayo.dur)) rayo = {dur: dur, quien: c.quien, n: c.n};
+          if (dur > 0 && (!rayo || dur < rayo.dur)) rayo = {dur: dur, quien: c.quien, n: c.wn || c.n};
         });
-        var rank = Object.keys(cuenta).sort(function (a, b) { return cuenta[b] - cuenta[a]; });
+        var ultimoPase = {};                                                   // empate: gana el que llegó primero a esa cantidad
+        r.casos.forEach(function (c) { if (c.quien && (!ultimoPase[c.quien] || c.d > ultimoPase[c.quien])) ultimoPase[c.quien] = c.d; });
+        var rank = Object.keys(cuenta).sort(function (a, b) { return cuenta[b] - cuenta[a] || ultimoPase[a] - ultimoPase[b]; });
         var hh = function (d) { return ('0' + d.getHours()).slice(-2) + ':' + ('0' + d.getMinutes()).slice(-2); };
         var nom = function (x) { return esc(x); };
         var MED = ['🥇', '🥈', '🥉'];
@@ -2333,6 +2329,12 @@
           var rec = null;
           Object.keys(porDia).forEach(function (k) { if (!rec || porDia[k] > rec.n) rec = {n: porDia[k], k: k}; });
           out.push('', '📊 Total: ' + total + (total === 1 ? ' caso pasado' : ' casos pasados') + ' a verificación');
+          if (hist && hist.length) {                                              // campeón anterior y racha, desde el historial
+            var oroDe = {}, semAtras = function (n) { var d = new Date(desde.getTime()); d.setDate(d.getDate() - 7 * n); return iso(d); };
+            hist.forEach(function (h) { if (h.puesto === 1) oroDe[h.semana] = h.quien; });
+            var gAnt = oroDe[semAtras(1)];
+            if (gAnt) { var k = 1; while (oroDe[semAtras(k + 1)] === gAnt) k++; antes = Object.assign({}, antes, {ganador: gAnt, seguidas: k}); }
+          }
           if (antes && antes.ganador === rank[0] && antes.seguidas >= 1) {
             var veces = antes.seguidas + 1;
             out.push('👑 <b>' + (veces === 2 ? 'Bicampeonato' : veces === 3 ? 'Tricampeonato' : veces + ' semanas seguidas') + ' de ' + nom(rank[0]) + '</b>',
@@ -2371,7 +2373,7 @@
           var enc = Object.keys(letras).sort(function (a, b) { return letras[b] - letras[a]; })[0];
           if (enc) premios.push('📚 Enciclopedia: <b>' + nom(enc) + '</b>, ' + miles(letras[enc]) + ' letras en notas');
           // historial (Supabase): semanas anteriores, sin esta
-          var semK = iso(desde), previas = (hist || []).filter(function (h) { return h.semana !== semK; });
+          var semK = iso(desde), previas = (hist || []).filter(function (h) { return h.semana < semK; });
           if (hist) {
             rank.forEach(function (q) {                                             // 🎉 hito: cruzó un múltiplo de 100
               var antesN = 0; previas.forEach(function (h) { if (h.quien === q) antesN += h.casos; });
@@ -2521,7 +2523,7 @@
 
     if (window.top === window.self) montar();
     var ultimo = null;                     // datos del último /semana o /mes (para los gráficos)
-    return {armar: armar, semana: semana, mes: mes, textoDispenser: textoDispenser, cargarHistorialDisp: cargarHistorialDisp, textoRacha: textoRacha, ultimoGraf: function () { return ultimo; }, limpiarGraf: function () { ultimo = null; }, periodo: periodo};
+    return {armar: armar, semana: semana, mes: mes, textoDispenser: textoDispenser, inicioSemanaDisp: inicioSemanaDisp, textoRacha: textoRacha, ultimoGraf: function () { return ultimo; }, limpiarGraf: function () { ultimo = null; }, periodo: periodo};
   })();
   // ---------------------------------------------------------------- gráficos de /semana y /mes (una foto por proyecto)
   // Barras por día con los casos INGRESADOS ese día; la parte roja son los de esos que se vencieron (SLA neto, sin prioridad baja).
