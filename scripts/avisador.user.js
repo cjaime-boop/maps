@@ -2376,10 +2376,16 @@
           // historial (Supabase): semanas anteriores, sin esta
           var semK = iso(desde), previas = (hist || []).filter(function (h) { return h.semana < semK; });
           if (hist) {
-            rank.forEach(function (q) {                                             // 🎉 hito: cruzó un múltiplo de 100
-              var antesN = 0; previas.forEach(function (h) { if (h.quien === q) antesN += h.casos; });
-              var ahoraN = antesN + cuenta[q];
-              if (Math.floor(ahoraN / 100) > Math.floor(antesN / 100)) premios.push('🎉 Hito: <b>' + nom(q) + '</b> llegó a sus ' + Math.floor(ahoraN / 100) * 100 + ' casos');
+            // 🎉 hitos: del año (cada 100, se reinicia cada año) e histórico (cada 500, desde abril de 2026)
+            var anioH = hasta.getFullYear();
+            var finSemH = function (k) { var d = new Date(k + 'T12:00:00'); d.setDate(d.getDate() + 7); return d; };
+            rank.forEach(function (q) {
+              var antesA = 0, antesT = 0;
+              previas.forEach(function (h) { if (h.quien !== q) return; antesT += h.casos; if (finSemH(h.semana).getFullYear() === anioH) antesA += h.casos; });
+              var ahoraA = antesA + cuenta[q], ahoraT = antesT + cuenta[q];
+              if (Math.floor(ahoraA / 100) > Math.floor(antesA / 100)) premios.push('🎉 Hito: <b>' + nom(q) + '</b> llegó a sus ' + Math.floor(ahoraA / 100) * 100 + ' casos en ' + anioH);
+              // el histórico solo cuando ya hay años anteriores (en 2026 es igual al del año)
+              if (ahoraT > ahoraA && Math.floor(ahoraT / 500) > Math.floor(antesT / 500)) premios.push('🎉 Hito histórico: <b>' + nom(q) + '</b> llegó a ' + Math.floor(ahoraT / 500) * 500 + ' casos en total');
             });
             var marca = null;                                                      // 💪 mejor semana de alguien
             rank.forEach(function (q) {
@@ -2411,7 +2417,7 @@
             rank.forEach(function (q) { delAnio[q] = (delAnio[q] || 0) + cuenta[q]; });
             var aq = Object.keys(delAnio).sort(function (a, b) { return delAnio[b] - delAnio[a]; });
             aq.forEach(function (q) { totAnio += delAnio[q]; });
-            out.push('', '🏛️ <b>CASOS ' + anio + '</b>', aq.slice(0, 8).map(function (q) { return nom(q) + ' ' + miles(delAnio[q]); }).join(' · '), 'Equipo: ' + miles(totAnio));
+            out.push('', '🏛️ <b>CASOS ' + anio + '</b>', aq.slice(0, 8).map(function (q) { return nom(q) + ' ' + miles(delAnio[q]); }).join(' · '), 'Total: ' + miles(totAnio));
           }
         }
         if (sinDueño) out.push('', '<i>' + sinDueño + (sinDueño === 1 ? ' caso sin' : ' casos sin') + ' nota de un dispatcher antes del pase (no cuentan).</i>');
