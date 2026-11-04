@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Mobisond · Avisador
 // @namespace    mobisond
-// @version      3.60
+// @version      3.61
 // @description  Avisa los casos nuevos (celular, campana y grupo de Telegram), los Lineales sin notas hace 25 min, los SLA y los aceptados; comandos del bot (/status, /bandeja, /autoasignar…); dispenser de la semana, racha sin vencidos y mensajes en casos pausados.
 // @match        https://*.service-now.com/*
 // @grant        GM_xmlhttpRequest
@@ -2236,7 +2236,14 @@
             var txt = dv(w, 'comments') + '\n' + dv(w, 'work_notes'), n = porId[val(w, 'sys_id')];
             notas[val(w, 'sys_id')] = notasDelTexto(txt);
             var re = /(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}|\d{2}[\/-]\d{2}[\/-]\d{4} \d{2}:\d{2}:\d{2}) - [^\n]*\n([\s\S]*?)(?=\n\s*(?:\d{4}-\d{2}-\d{2}|\d{2}[\/-]\d{2}[\/-]\d{4}) \d{2}:\d{2}:\d{2} - |$)/g, m;
-            while ((m = re.exec(txt))) if (/espera la verificaci[oó]n del cliente/i.test(m[2]) && !/hijo/i.test(m[2])) pase(n, fechaEntrada(m[1]));
+            while ((m = re.exec(txt))) {
+              if (/hijo/i.test(m[2])) continue;
+              if (/espera la verificaci[oó]n del cliente/i.test(m[2])) pase(n, fechaEntrada(m[1]));
+              if (/nodo\s*\/\s*falla (en )?(la )?red del cliente/i.test(m[2])) {          // 🦵 pausa por Nodo/Falla Red del Cliente (igual que el pase)
+                var fn = fechaEntrada(m[1]);
+                if (n && fn && !isNaN(fn) && fn >= desde && fn <= hasta) (pausasNodo[n] = pausasNodo[n] || []).push(fn);
+              }
+            }
           });
         }, function () {}) : Promise.resolve();
         return Promise.all([porAudit, porWO]).then(function () {
