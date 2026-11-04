@@ -1102,7 +1102,8 @@
       // y guarda el ganador en Supabase (para el "bicampeón")
       var autoD = p.id < 0 && !p.msg, finD = new Date();
       // "/dispenser 19-10": la semana (viernes 19:00 a viernes 19:00) que contiene ese día, como el mensaje del viernes, sin guardar nada
-      var fD = autoD ? null : fechaDeTexto((p.texto || '').trim().split(/\s+/).slice(1).join(' '));
+      var cierreD = !autoD && /cierre/i.test(p.texto || '');      // "/dispenser cierre": la última semana cerrada, como el viernes, sin guardar (para probar)
+      var fD = autoD || cierreD ? null : fechaDeTexto((p.texto || '').trim().split(/\s+/).slice(1).join(' '));
       var hoyD = new Date(); hoyD.setHours(0, 0, 0, 0);
       if (fD === 'mal' || (fD && fD > hoyD) || (fD && fD < new Date(2026, 3, 4))) {
         unaVezAlGrupo('cmd:' + p.id, fD === 'mal' ? 'No entendí la fecha. Usalo así: <code>/dispenser 19-10</code>'
@@ -1120,7 +1121,8 @@
       } else {
         iniD = new Date(finD.getTime()); iniD.setHours(19, 0, 0, 0);
         while (iniD.getDay() !== 5 || iniD > finD) iniD.setDate(iniD.getDate() - 1);
-        if (autoD) { finD = new Date(iniD.getTime()); iniD = new Date(finD.getTime()); iniD.setDate(iniD.getDate() - 7); }
+        if (autoD || cierreD) { finD = new Date(iniD.getTime()); iniD = new Date(finD.getTime()); iniD.setDate(iniD.getDate() - 7); }
+        pruebaD = cierreD;
       }
       var semD = finD.getFullYear() + '-' + ('0' + (finD.getMonth() + 1)).slice(-2) + '-' + ('0' + finD.getDate()).slice(-2);
       // devuelve los apodos y, en el automático, el ganador de la semana anterior (para el "bicampeón")
