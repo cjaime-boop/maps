@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Mobisond · Avisador
 // @namespace    mobisond
-// @version      3.59
+// @version      3.60
 // @description  Avisa los casos nuevos (celular, campana y grupo de Telegram), los Lineales sin notas hace 25 min, los SLA y los aceptados; comandos del bot (/status, /bandeja, /autoasignar…); dispenser de la semana, racha sin vencidos y mensajes en casos pausados.
 // @match        https://*.service-now.com/*
 // @grant        GM_xmlhttpRequest
@@ -2218,13 +2218,16 @@
         });
         var ids = Object.keys(porId);
         if (!ids.length) return {casos: []};
-        var pases = {}, notas = {}, leido = false;     // número -> [fechas de pase]; sys_id WO -> [{t, quien}]
+        var pases = {}, notas = {}, leido = false, pausasNodo = {};   // pausasNodo: número -> [fechas] (para el Pateador)     // número -> [fechas de pase]; sys_id WO -> [{t, quien}]
         var pase = function (n, d) { if (n && d && !isNaN(d) && d >= desde && d <= hasta) (pases[n] = pases[n] || []).push(d); };
         var porAudit = apiIN('sys_audit', ids, function (t) { return 'fieldname=u_pause_reason^documentkeyIN' + t.join(','); },
                              'documentkey,newvalue,sys_created_on').then(function (as) {
           leido = true;
           as.forEach(function (a) {
-            if (/verific/i.test(val(a, 'newvalue') + ' ' + dv(a, 'newvalue'))) pase(porId[val(a, 'documentkey')], new Date(val(a, 'sys_created_on').replace(' ', 'T') + 'Z'));
+            var nv = val(a, 'newvalue') + ' ' + dv(a, 'newvalue'), fa = new Date(val(a, 'sys_created_on').replace(' ', 'T') + 'Z');
+            if (/verific/i.test(nv)) pase(porId[val(a, 'documentkey')], fa);
+            var nn = porId[val(a, 'documentkey')];
+            if (nn && /nodo|falla red del cliente/i.test(nv) && fa >= desde && fa <= hasta) (pausasNodo[nn] = pausasNodo[nn] || []).push(fa);
           });
         }, function () {});
         var porWO = padres.length ? apiIN('wm_order', padres, function (t) { return 'sys_idIN' + t.join(','); }, 'sys_id,comments,work_notes', 40).then(function (wos) {
@@ -2266,7 +2269,13 @@
               if (q) escritas.push({quien: q, letras: (x.txt || '').replace(/\s/g, '').length, wn: c.wn});
             });
           });
-          return {casos: out, escritas: escritas};
+          // 🦵 Pateador: casos pausados por Nodo/Falla Red del Cliente en el período, a nombre de quien dejó la última nota antes de la pausa
+          var pateos = {};
+          Object.keys(pausasNodo).forEach(function (n) {
+            var d = pausasNodo[n].sort(function (a, b) { return b - a; })[0];
+            var q = dueño(n, d); if (q) pateos[q] = (pateos[q] || 0) + 1;
+          });
+          return {casos: out, escritas: escritas, pateos: pateos};
         });
       });
     }
@@ -2398,7 +2407,9 @@
             });
             if (marca) premios.push('💪 Mejor marca: <b>' + nom(marca.q) + '</b> hizo su mejor semana, ' + marca.n + ' casos');
           }
-          var ORDEN_P = ['⚡', '📚', '✍️', '🛟', '🏎️', '🎉', '💪'];                // orden que eligió el Chino
+          var pat = Object.keys(r.pateos || {}).sort(function (a, b) { return r.pateos[b] - r.pateos[a]; })[0];
+          if (pat) premios.push('🦵 El Pateador: <b>' + nom(pat) + '</b>, pausó ' + r.pateos[pat] + (r.pateos[pat] === 1 ? ' caso' : ' casos') + ' por Nodo/Falla Red del Cliente');
+          var ORDEN_P = ['⚡', '📚', '✍️', '🛟', '🏎️', '🦵', '🎉', '💪'];                // orden que eligió el Chino
           var lugar = function (t) { for (var i = 0; i < ORDEN_P.length; i++) if (t.indexOf(ORDEN_P[i]) === 0) return i; return 99; };
           premios.sort(function (x, y) { return lugar(x) - lugar(y); });
           if (premios.length) out.push('', '🏅 <b>PREMIOS DE LA SEMANA</b>'); out.push.apply(out, premios);
