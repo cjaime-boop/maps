@@ -132,6 +132,18 @@ h1 { margin: 0; font-size: 16px; line-height: 1.25; overflow-wrap: anywhere; }
 .regla .dist { font-size: 16px; font-weight: 700; font-variant-numeric: tabular-nums; line-height: 1.25; }
 .regla .ayuda { font-size: 12.5px; color: var(--muted); }
 .seg { display: inline-flex; border: 1px solid var(--line); border-radius: 9px; overflow: hidden; }
+/* ---- PC: mapa a la izquierda y lista de botellas a la derecha (sin la hoja que se arrastra) ---- */
+@media (min-width: 900px) {
+  .app { max-width: none; }
+  .mapawrap { --h: 0px !important; }
+  #mapa { right: 400px; }
+  .hoja { top: 0; left: auto; right: 0; width: 400px; height: auto !important; border-radius: 0;
+    box-shadow: -2px 0 10px rgba(0,0,0,.12); border-left: 1px solid var(--line); }
+  .asa { cursor: default; }
+  .asa::before { display: none; }
+  .regla { right: 408px; }
+  .bot:hover { background: var(--accent-soft); }
+}
 .seg button { font: inherit; font-size: 12.5px; font-weight: 600; border: 0; padding: 6px 10px; background: var(--surface); color: var(--muted); cursor: pointer; }
 .seg button.on { background: var(--accent-soft); color: var(--accent); }
 .mini { font: inherit; font-size: 12.5px; font-weight: 600; border: 1px solid var(--line); background: var(--surface); color: var(--ink);
@@ -269,7 +281,7 @@ h1 { margin: 0; font-size: 16px; line-height: 1.25; overflow-wrap: anywhere; }
       wrap.style.setProperty('--h', px + 'px');
     }
     asa.addEventListener('pointerdown', function (e) {
-      if (e.target.closest('a, .busca')) return;
+      if (e.target.closest('a, .busca') || matchMedia('(min-width: 900px)').matches) return;   // en PC la lista es fija
       activo = true; mov = false; y0 = e.clientY; h0 = hoja.offsetHeight;
       hoja.classList.add('arrastrando'); asa.setPointerCapture(e.pointerId);
     });
@@ -351,6 +363,9 @@ h1 { margin: 0; font-size: 16px; line-height: 1.25; overflow-wrap: anywhere; }
     var colRuta = css.getPropertyValue('--route').trim() || '#1d5bd8';
     var mapa = L.map('mapa', {zoomControl: true, attributionControl: true});
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      // OpenStreetMap bloquea los pedidos sin "Referer" (el cartel "Access blocked"): a los mosaicos se les manda solo
+      // el dominio (cjaime-boop.github.io), nunca la dirección completa del mapa
+      referrerPolicy: 'strict-origin-when-cross-origin',
       maxZoom: 19, attribution: '&copy; OpenStreetMap'
     }).addTo(mapa);
     var grupo = L.featureGroup().addTo(mapa);

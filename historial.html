@@ -298,7 +298,7 @@ details.dia > summary span { color: var(--muted); text-align: right; }
           'o unas coordenadas (ej. -34.58648, -58.84600).</div></div></div></div>';
     marcarChips();
     mapa = L.map('mapa', {zoomControl: false, attributionControl: true}).setView([-34.60, -58.45], 11);
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {maxZoom: 19, attribution: '© OpenStreetMap'}).addTo(mapa);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {maxZoom: 19, attribution: '© OpenStreetMap', referrerPolicy: 'strict-origin-when-cross-origin'}).addTo(mapa);
     capa = L.featureGroup().addTo(mapa);
     mapa.on('click', function (e) { consultarPunto(e.latlng.lat, e.latlng.lng, 'Punto tocado'); });
     document.getElementById('fb').onsubmit = function (ev) { ev.preventDefault(); buscar(document.getElementById('q').value); document.getElementById('q').blur(); };
