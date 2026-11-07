@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Mobisond · Avisador
 // @namespace    mobisond
-// @version      3.63
+// @version      3.64
 // @description  Avisa los casos nuevos (celular, campana y grupo de Telegram), los Lineales sin notas hace 25 min, los SLA y los aceptados; comandos del bot (/status, /bandeja, /autoasignar…); dispenser de la semana, racha sin vencidos y mensajes en casos pausados.
 // @match        https://*.service-now.com/*
 // @grant        GM_xmlhttpRequest
@@ -2288,6 +2288,8 @@
             if (!c.wo || wosVistas[c.wo]) return; wosVistas[c.wo] = 1;
             (notas[c.wo] || []).forEach(function (x) {
               var q = x.t && x.t >= desde.getTime() && x.t <= hasta.getTime() ? quienEs(x.quien, lista) : '';
+              // la nota de cierre (planilla con TIPO DE CUADRILLA, ID de CIERRE, …) no cuenta: es un formulario, no algo escrito
+              if (q && /TIPO DE CUADRILLA\s*:/i.test(x.txt || '') && /ID DE CIERRE\s*:/i.test(x.txt || '')) q = '';
               if (q) escritas.push({quien: q, letras: (x.txt || '').replace(/\s/g, '').length, wn: c.wn});
             });
           });
