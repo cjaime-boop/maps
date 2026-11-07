@@ -103,6 +103,11 @@ h1 { margin: 0; font-size: 16px; line-height: 1.25; overflow-wrap: anywhere; }
 .flot .fb > * { flex: 1; text-align: center; font: 700 13px/1 var(--sans); border: 0; border-radius: 9px; padding: 9px 0; cursor: pointer; text-decoration: none; }
 .flot .fpdf { background: #fef2f2; color: #b91c1c; }
 .flot .fir { background: #eef2ff; color: #1d4ed8 !important; }
+.flot .fqg, .ir.qg { background: #ecfdf5; color: #047857; border: 0; font-family: inherit; cursor: pointer; }
+.soloPC { display: none !important; }
+.toast { position: absolute; left: 50%; bottom: 16px; transform: translateX(-50%); z-index: 1002; background: #111827; color: #fff;
+  border-radius: 10px; padding: 9px 14px; font-size: 13px; max-width: 90%; box-shadow: 0 4px 14px rgba(0,0,0,.25); }
+.toast.mal { background: #7c2d12; }
 .bot.destello { animation: destello 1.2s ease-out; }
 @keyframes destello { 0%, 30% { background: #fde68a; } 100% { background: transparent; } }
 .bot .acc { display: flex; gap: 6px; align-items: center; }
@@ -143,6 +148,8 @@ h1 { margin: 0; font-size: 16px; line-height: 1.25; overflow-wrap: anywhere; }
   .asa::before { display: none; }
   .regla { right: 408px; }
   .bot:hover { background: var(--accent-soft); }
+  .soloPC { display: revert !important; }
+  .flot .fb > .soloPC { display: block !important; }
 }
 .seg button { font: inherit; font-size: 12.5px; font-weight: 600; border: 0; padding: 6px 10px; background: var(--surface); color: var(--muted); cursor: pointer; }
 .seg button.on { background: var(--accent-soft); color: var(--accent); }
@@ -350,7 +357,8 @@ h1 { margin: 0; font-size: 16px; line-height: 1.25; overflow-wrap: anywhere; }
            '<span class="t" data-i="' + i + '"><b>' + esc(b.nombre) + '</b>' + (b.sub ? '<small>' + esc(b.sub) + '</small>' : '') + '</span>' +
            '<span class="acc">' + ((b.h || (b.f && b.f.length)) ? '<button type="button" class="ir pdf" data-fus="' + i +
              '" title="Fusiones de la botella">PDF</button>' : '') +
-           '<a class="ir" href="' + ruta(b.lat, b.lon) + '" target="_blank" rel="noopener">Ir ↗</a></span></div>';
+           '<a class="ir" href="' + ruta(b.lat, b.lon) + '" target="_blank" rel="noopener">Ir ↗</a>' +
+           '<button type="button" class="ir qg soloPC" data-qgis="' + i + '" title="Centrar QGIS en esta botella">🗺️ QGIS</button></span></div>';
     });
     h += '<div class="sinres" id="sinRes" hidden>Ninguna botella coincide</div>';
     if (!bots.length) h += '<div class="bot"><span></span><span class="t"><small>Este recorrido no tiene botellas.</small></span><span></span></div>';
@@ -1007,11 +1015,14 @@ h1 { margin: 0; font-size: 16px; line-height: 1.25; overflow-wrap: anywhere; }
         h += '</div><div class="fcab">' + Object.keys(cables).map(esc).join('<br>') + '</div>';
       } else if (filas) h += '<div class="fl">Sin información</div>';
       h += '<div class="fb">' + ((b.h || (b.f && b.f.length)) ? '<button type="button" class="fpdf">PDF</button>' : '') +
-           '<a class="fir" href="' + ruta(b.lat, b.lon) + '" target="_blank" rel="noopener">Ir ↗</a></div></div>';
+           '<a class="fir" href="' + ruta(b.lat, b.lon) + '" target="_blank" rel="noopener">Ir ↗</a>' +
+           '<button type="button" class="fqg soloPC">🗺️ QGIS</button></div></div>';
       popBot = L.popup({maxWidth: 320, autoPanPaddingTopLeft: [10, 70], autoPanPaddingBottomRight: [10, 20]})
         .setLatLng([b.lat, b.lon]).setContent(h).openOn(mapa);
       var bt = popBot.getElement().querySelector('.fpdf');
       if (bt) bt.addEventListener('click', function () { abrirPDF(i, bt); });
+      var bq = popBot.getElement().querySelector('.fqg');
+      if (bq) bq.addEventListener('click', function () { verEnQgis(i); });
     }
 
     // el iPhone solo deja abrir/compartir un archivo si se hace en el mismo toque: por eso jsPDF se carga
@@ -1056,8 +1067,37 @@ h1 { margin: 0; font-size: 16px; line-height: 1.25; overflow-wrap: anywhere; }
     }
     document.querySelector('.lista').addEventListener('click', function (e) {
       var bt = e.target.closest && e.target.closest('[data-fus]');
-      if (bt) { e.stopPropagation(); abrirPDF(+bt.getAttribute('data-fus'), bt); }
+      if (bt) { e.stopPropagation(); abrirPDF(+bt.getAttribute('data-fus'), bt); return; }
+      var bq = e.target.closest && e.target.closest('[data-qgis]');
+      if (bq) { e.stopPropagation(); verEnQgis(+bq.getAttribute('data-qgis')); }
     });
+
+    // ---- 🗺️ Ver en QGIS (solo PC): le avisa al plugin Historial de casos de esta misma PC; si no contesta,
+    // copia las coordenadas para pegarlas en QGIS con Ctrl+K ----
+    var PUERTOS_QGIS = [8797, 8798, 8799];
+    function toast(t, mal) {
+      var v = document.querySelector('.toast'); if (v) v.remove();
+      var d = document.createElement('div'); d.className = 'toast' + (mal ? ' mal' : ''); d.textContent = t;
+      document.querySelector('.mapawrap').appendChild(d);
+      setTimeout(function () { d.remove(); }, mal ? 7000 : 3500);
+    }
+    function verEnQgis(i) {
+      var b = bots[i], coords = (+b.lat).toFixed(7) + ', ' + (+b.lon).toFixed(7);
+      var q = '/ir?lat=' + b.lat + '&lon=' + b.lon + '&n=' + encodeURIComponent((i + 1) + ' · ' + b.nombre);
+      function probar(k) {
+        if (k >= PUERTOS_QGIS.length) {
+          var listo = function () { toast('QGIS no respondió: copié las coordenadas. En QGIS apretá Ctrl+K, pegalas y Enter.', true); };
+          if (navigator.clipboard) navigator.clipboard.writeText(coords).then(listo, listo); else listo();
+          return;
+        }
+        var ctl = window.AbortController ? new AbortController() : null;
+        var t = setTimeout(function () { if (ctl) ctl.abort(); }, 1500);
+        fetch('http://127.0.0.1:' + PUERTOS_QGIS[k] + q, {signal: ctl ? ctl.signal : undefined, cache: 'no-store'})
+          .then(function (r) { clearTimeout(t); if (!r.ok) throw 0; toast('✅ QGIS fue a la botella ' + (i + 1) + ' · ' + b.nombre); })
+          .catch(function () { clearTimeout(t); probar(k + 1); });
+      }
+      probar(0);
+    }
 
     function mm(m) { return Math.round(m).toLocaleString('es-AR') + ' m'; }
     // ---- regla: por el cable (varios puntos), en linea recta, y punto de corte ----
