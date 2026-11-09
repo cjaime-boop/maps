@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Mobisond · Aviso de casos por Alexa
 // @namespace    mobisond
-// @version      1.6
+// @version      1.7
 // @description  Cuando entra un caso nuevo en la lista que vigilás de ServiceNow, Alexa lo anuncia (Voice Monkey). Activalo solo donde tengas el Echo.
 // @match        https://*.service-now.com/*
 // @grant        GM_xmlhttpRequest
@@ -67,7 +67,7 @@
     }
     if (n === 'numero') return f.numero || '';
     if (n === 'zona') {
-      var z = /TSO_C_TL_[A-Z0-9]+_([A-Z0-9]+)_/i.exec(columna(f, /service_offering/i) || todo);
+      var z = /TSO_C_\w*?_([A-Z0-9]+)_BA\b/i.exec(columna(f, /service_offering/i) || todo);   // la parte antes de "_BA" (Lineales y GPON)
       return z ? (ZONAS[z[1].toUpperCase()] || z[1]) : '';
     }
     if (n === 'wo' || n === 'padre') return (columna(f, /(^|\.)parent$/i) || '').replace(/^WOT/i, 'WO');
@@ -80,7 +80,7 @@
     var d = f.datos || {}, todo = Object.keys(d).map(function (k) { return d[k]; }).join(' ').toUpperCase();
     var grupo = function (t) { return /C-TL-MOBISOND/.test(t) ? 'lineales' : /C-GZ1-MOBI/.test(t) ? 'gpon' : ''; };
     return grupo(todo) ||                                                   // el grupo, si está como columna
-           (/TSO_C_TL_/.test(todo) ? 'lineales' : '') ||                     // el service offering de Lineales
+           (/TSO_C_TL_/.test(todo) ? 'lineales' : /TSO_C_G\d+_/.test(todo) ? 'gpon' : '') ||   // el service offering
            (/(^|\s)GPON-|(^|\s)G[A-Z]{3}-[RC]\d/.test(columna(f, /cmdb_ci/i).toUpperCase()) ? 'gpon' : '') ||
            grupo((claveLista() || '').toUpperCase()) || 'lineales';        // el filtro de la lista
   }
@@ -243,7 +243,8 @@
     var ejemplo = {
       lineales: {numero: 'WO0097001', datos: {cmdb_ci: 'WICAP_IPRAN_LMT_CF136_CF05440', priority: '2 - Urgente', u_falla: 'ATENUACIÓN FO',
         service_offering: 'TSO_C_TL_CL_LAMA_BA'}, titulos: {iddefalla: 'u_falla'}},
-      gpon: {numero: 'WO0097002', datos: {cmdb_ci: 'GPON-GFLR-C9190-901', priority: '3 - Moderada', assignment_group: 'C-GZ1-MOBI'}, titulos: {}}};
+      gpon: {numero: 'WO0099688', datos: {cmdb_ci: 'GTFR-R5268-271', priority: '3 - Moderada', u_falla: 'PASIVAS', parent: 'WO0097761',
+        service_offering: 'TSO_C_G10_TEFE_BA', assignment_group: 'C-GZ1-MOBI'}, titulos: {iddefalla: 'u_falla'}}};
     var ultimo = 'fra_lineales';
     var previa = function () {
       ['lineales', 'gpon'].forEach(function (pr) {
