@@ -1009,13 +1009,13 @@
       var ids = Object.keys(porId);
       var slas = ids.length ? api('task_sla', 'active=true^taskIN' + ids.join(','), 'task,sla,stage,has_breached,planned_end_time,original_breach_time')
         .catch(function () { return []; }) : Promise.resolve([]);
-      // "últ. mov." también cuenta las notas que se escriben en la WO (el padre): su última actualización
+      // "últ. mov." = última actualización de la WO (el padre), que incluye sus notas
       var padres = casos.map(function (r) { return vl(r, 'parent'); }).filter(Boolean);
       var movPadre = padres.length ? api('wm_order', 'sys_idIN' + padres.join(','), 'sys_id,sys_updated_on').catch(function () { return []; }) : Promise.resolve([]);
       return Promise.all([slas, movPadre]).then(function (res) {
         var ss = res[0], mp = {};
         res[1].forEach(function (w) { mp[vl(w, 'sys_id')] = utc(vl(w, 'sys_updated_on')); });
-        casos.forEach(function (r) { r._mov = Math.max(utc(vl(r, 'sys_updated_on')), mp[vl(r, 'parent')] || 0); });
+        casos.forEach(function (r) { r._mov = mp[vl(r, 'parent')] || utc(vl(r, 'sys_updated_on')); });   // siempre la WO
         var sla = {};                                // sys_id del caso -> {t, vencido}
         ss.forEach(function (s) {
           if (!/neto/i.test(dv(s, 'sla')) || /paus|cancel/i.test(vl(s, 'stage') + dv(s, 'stage'))) return;
