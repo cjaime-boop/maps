@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Mobisond · Avisador
 // @namespace    mobisond
-// @version      3.64
+// @version      3.65
 // @description  Avisa los casos nuevos (celular, campana y grupo de Telegram), los Lineales sin notas hace 25 min, los SLA y los aceptados; comandos del bot (/status, /bandeja, /autoasignar…); dispenser de la semana, racha sin vencidos y mensajes en casos pausados.
 // @match        https://*.service-now.com/*
 // @grant        GM_xmlhttpRequest
@@ -2058,7 +2058,10 @@
                 if (vencAlguna[n]) r.cerrVenc++;
               }
             });
-            r.pct = r.cerr ? Math.round((r.cerr - r.cerrVenc) * 100 / r.cerr) : null;
+            // en término = ingresados del período que no se vencieron (igual que el gráfico). Cada vencido cuenta
+            // en la semana en que se venció, así no se cuenta dos veces ni se pierde
+            r.enTerm = Math.max(r.ing - r.venc.length, 0);
+            r.pct = r.ing ? Math.round(r.enTerm * 100 / r.ing) : null;
             return r;
           };
           var cis = contar(casos.filter(function (c) { return dentro(deUtc(val(c, 'opened_at'))) && dv(c, 'cmdb_ci'); })
@@ -2072,9 +2075,8 @@
     function vencTxtP(r) { return r.venc.length ? r.venc.length + ' / ' + r.venc.join(' / ') : '0'; }
     function vencBajaTxt(r) { return r.vencBaja.length ? ['Vencidos (prioridad baja): ' + esc(r.vencBaja.length + ' / ' + r.vencBaja.join(' / '))] : []; }
     function cumplTxt(r) {
-      if (r.pct === null) return 'En término: — (sin cerrados)';
-      return 'En término: ' + r.pct + '% (' + (r.cerr - r.cerrVenc) + ' de ' + r.cerr + (r.cerr === 1 ? ' cerrado' : ' cerrados') +
-             (r.cerr !== r.cerrTodos ? ', sin prioridad baja)' : ')');
+      if (r.pct === null) return 'En término: — (sin ingresados)';
+      return 'En término: ' + r.pct + '% (' + r.enTerm + ' de ' + r.ing + (r.ing === 1 ? ' ingresado)' : ' ingresados)');
     }
     function diaCargado(r) {
       var top = Object.keys(r.porDia).sort(function (a, b) { return r.porDia[b] - r.porDia[a]; })[0];
