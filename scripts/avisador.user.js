@@ -769,7 +769,7 @@
 
   // ---- 📌 BANDEJA FIJADA: un mensaje fijado arriba del grupo con Lineales y GPON (total y sin atender) y el detalle por
   // estado. El bot lo edita en silencio cuando cambian los números (y cada 10 min para la hora). Si no hay mensaje fijado
-  // del bot, lo crea y lo fija. Para fijar, el bot tiene que ser administrador del grupo.
+  // del bot, lo crea y lo fija. Todos los días a las 7 lo manda de nuevo y borra el viejo. Para fijar, el bot tiene que ser administrador del grupo.
   function textoFijado(todos, prox) {
     var res = [], det = [];
     ['Lineales', 'GPON'].forEach(function (pr) {
@@ -818,18 +818,31 @@
         var f = textoFijado(todos, prox);
         var listo = function () { actualizarFijado.ocupado = false; GM_setValue('fijado_clave', f.clave); GM_setValue('fijado_t', Date.now()); };
         var fallo = function (e) { actualizarFijado.ocupado = false; botLog('mensaje fijado: ' + e); };
-        var crear = function () {
+        var crear = function (viejo) {          // viejo: el fijado anterior, que se saca y se borra después de fijar el nuevo
           tg('sendMessage', {chat_id: chat, text: f.html, parse_mode: 'HTML', disable_notification: true, disable_web_page_preview: true}, function (m) {
-            tg('pinChatMessage', {chat_id: chat, message_id: m.message_id, disable_notification: true}, listo,
-               function (e) { fallo('no lo pude fijar (' + e + '): ¿el bot es administrador?'); });
+            tg('pinChatMessage', {chat_id: chat, message_id: m.message_id, disable_notification: true}, function () {
+              listo();
+              if (viejo) tg('unpinChatMessage', {chat_id: chat, message_id: viejo}, function () {
+                tg('deleteMessage', {chat_id: chat, message_id: viejo}, function () {}, function (e) { botLog('fijado viejo: no lo pude borrar (' + e + ')'); });
+              }, function (e) { botLog('fijado viejo: no lo pude desfijar (' + e + ')'); });
+            }, function (e) { fallo('no lo pude fijar (' + e + '): ¿el bot es administrador?'); });
           }, fallo);
         };
         tg('getChat', {chat_id: chat}, function (c) {
           var pm = c.pinned_message;
-          if (pm && pm.from && pm.from.is_bot && /^🔵 Lineales/.test(pm.text || '')) {
+          var siete = new Date(); siete.setHours(7, 0, 0, 0);
+          if (pm && pm.from && pm.from.is_bot && /^🔵 Lineales/.test(pm.text || '') &&
+              ahora >= siete.getTime() && pm.date * 1000 < siete.getTime()) {
+            // 📌 todos los días a las 7 se manda un fijado nuevo (abajo de todo) y se borra el anterior: así, al tocar el
+            // fijado, no te lleva a un mensaje de hace días. Una sola PC lo hace.
+            sbRpc('bot_reclamar', {p_aviso: 'fijado:' + siete.getFullYear() + '-' + (siete.getMonth() + 1) + '-' + siete.getDate(), p_pc: pcId()}).then(function (gano) {
+              if (gano === false) { actualizarFijado.ocupado = false; return; }   // lo está renovando otra PC
+              crear(pm.message_id);
+            }, function () { crear(pm.message_id); });
+          } else if (pm && pm.from && pm.from.is_bot && /^🔵 Lineales/.test(pm.text || '')) {
             tg('editMessageText', {chat_id: chat, message_id: pm.message_id, text: f.html, parse_mode: 'HTML', disable_web_page_preview: true}, listo,
                function (e) { if (/not modified/i.test(e)) listo(); else if (/not found|can't be edited|message to edit/i.test(e)) crear(); else fallo(e); });
-          } else crear();
+          } else crear(null);
         }, fallo);
       });
   }
