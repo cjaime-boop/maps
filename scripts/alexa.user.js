@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Mobisond · Aviso de casos por Alexa
 // @namespace    mobisond
-// @version      1.8
+// @version      1.9
 // @description  Cuando entra un caso nuevo en la lista que vigilás de ServiceNow, Alexa lo anuncia (Voice Monkey). Activalo solo donde tengas el Echo.
 // @match        https://*.service-now.com/*
 // @grant        GM_xmlhttpRequest
@@ -212,6 +212,7 @@
       'textarea{width:100%;border:1px solid #d1d5db;border-radius:6px;padding:6px 8px;font-size:13px;resize:vertical;min-height:52px}' +
       '.vs{display:flex;flex-wrap:wrap;gap:5px}.v{border:1px solid #bfdbfe;background:#eff6ff;color:#1e40af;border-radius:12px;padding:2px 8px;font-size:12px;cursor:pointer}' +
       '.v:hover{background:#dbeafe}.oye{background:#f8fafc;border:1px dashed #cbd5e1;border-radius:6px;padding:6px 8px;font-size:12.5px;color:#334155}' +
+      '.oye button{float:right;margin:0 0 4px 8px;padding:3px 9px;font-size:12px;background:#eff6ff;border-color:#bfdbfe;color:#1e40af}' +
       '.lnk{color:#2563eb;cursor:pointer;font-size:12px;margin-left:auto}' +
       '</style><div class="fondo"></div><div class="p">' +
       '<div class="h">🔊 Alexa · Mobisond<small>v' + esc(typeof GM_info !== 'undefined' && GM_info.script ? GM_info.script.version : '') + '</small><span class="x" title="Cerrar">✕</span></div>' +
@@ -228,7 +229,7 @@
                '<textarea id="fra_' + pr + '">' + esc(plantillaDe(pr)) + '</textarea><div class="oye" id="oye_' + pr + '"></div>';
       }).join('') +
       '<div class="vs">' + VARIABLES.map(function (v) { return '<span class="v" title="' + esc(v[1]) + '">&lt;' + v[0] + '&gt;</span>'; }).join('') + '</div>' +
-      '<div class="bs"><button id="pro">🔈 Probar</button><button id="sim">🧪 Simular caso nuevo</button>' + (k ? '<button id="dej">🚫 Dejar de vigilar</button>' : '') + '<button id="gua" class="g">Guardar</button></div>' +
+      '<div class="bs"><button id="pro">🔈 Probar</button>' + (k ? '<button id="dej">🚫 Dejar de vigilar</button>' : '') + '<button id="gua" class="g">Guardar</button></div>' +
       '<div class="msg" id="msg"></div></div></div>';
     var $ = function (id) { return sh.getElementById(id); }, msg = function (t) { $('msg').textContent = t; };
     var cerrar = function () { host.remove(); };
@@ -248,10 +249,12 @@
       gpon: {numero: 'WO0099688', datos: {cmdb_ci: 'GTFR-R5268-271', priority: '3 - Moderada', u_falla: 'PASIVAS', parent: 'WO0097761',
         service_offering: 'TSO_C_G10_TEFE_BA', assignment_group: 'C-GZ1-MOBI'}, titulos: {iddefalla: 'u_falla'}}};
     var ultimo = 'fra_lineales';
+    var suena = {};
     var previa = function () {
       ['lineales', 'gpon'].forEach(function (pr) {
         var f = (vigilada() && (filas() || []).filter(function (x) { return proyectoDe(x) === pr; })[0]) || ejemplo[pr];
-        $('oye_' + pr).innerHTML = '🔈 <b>Así suena:</b> ' + esc(fraseAlexa(f, $('fra_' + pr).value.trim() || FRASES[pr].def));
+        suena[pr] = fraseAlexa(f, $('fra_' + pr).value.trim() || FRASES[pr].def);
+        $('oye_' + pr).innerHTML = '<button data-sim="' + pr + '" title="Alexa dice esta frase">▶ Simular</button>🔈 <b>Así suena:</b> ' + esc(suena[pr]);
       });
     };
     var apagar = function (pr) {                 // proyecto apagado: su frase queda en gris
@@ -283,11 +286,12 @@
     $('act').onchange = function () { GM_setValue('vm_activo', $('act').checked); marcarTitulo(); msg($('act').checked ? 'Alexa va a anunciar los casos nuevos.' : 'Alexa ya no anuncia los casos.'); };
     $('gua').onclick = function () { guardar(); msg('Guardado. Probando…'); alexa('Hola, soy el aviso de casos de Mobisond.', function (m) { msg(m); }); };
     $('pro').onclick = function () { guardar(); msg('Probando…'); alexa('Prueba de Mobisond. Si me escuchás, los avisos por Alexa funcionan.', function (m) { msg(m); }); };
-    $('sim').onclick = function () {
-      guardar(); var f = (filas() || [])[0];
-      if (!f) return msg('No veo casos en esta pestaña para simular: abrí la lista de Pending Dispatch.');
-      msg('Simulando con ' + f.numero + '…'); alexa(fraseAlexa(f), function (m) { msg(m); });
-    };
+    // ▶ Simular: Alexa dice exactamente lo que muestra "Así suena" (aunque no haya casos en la lista)
+    sh.addEventListener('click', function (e) {
+      var b = e.target.closest && e.target.closest('[data-sim]'); if (!b) return;
+      var pr = b.getAttribute('data-sim');
+      guardar(); msg('Simulando ' + (pr === 'gpon' ? 'GPON' : 'Lineales') + '…'); alexa(suena[pr], function (m) { msg(m); });
+    });
     if ($('dej')) $('dej').onclick = function () { GM_setValue('lista', ''); marcarTitulo(); msg('Ya no vigilo ninguna lista.'); $('dej').remove(); };
     document.body.appendChild(host);
   }
