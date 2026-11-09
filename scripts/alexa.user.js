@@ -33,11 +33,14 @@
   }
   // ---------------------------------------------------------------- qué dice Alexa
   // La frase se arma con una plantilla que se edita en la configuración. Las <variables> se reemplazan con los datos del
-  // caso (de las columnas de la lista). También vale el nombre de cualquier columna de la lista, ej. <Descripción breve>.
-  var FRASE_DEF = 'Entró un caso nuevo de <proyecto>. <ci>. Prioridad <prioridad>.';
+  // caso (de las columnas de la lista). También vale el nombre de cualquier columna de la lista, ej. <Subestado>.
+  // Hay una frase para Lineales y otra para GPON.
+  var FRASES = {
+    lineales: {clave: 'vm_frase_lineales', def: 'Entró un caso nuevo de Lineales. <ci>. <falla>. Prioridad <prioridad>.'},
+    gpon: {clave: 'vm_frase_gpon', def: 'Entró un caso nuevo de GPON. <ci>. Prioridad <prioridad>.'}};
   var VARIABLES = [
-    ['proyecto', 'Lineales o GPON'], ['ci', 'CI afectado'], ['prioridad', 'ej. 2 Alta'], ['cliente', 'Claro, Edenor…'],
-    ['numero', 'WO del caso'], ['descripcion', 'descripción breve']];
+    ['ci', 'CI afectado'], ['falla', 'ID de falla, ej. Atenuación FO'], ['prioridad', 'ej. 2 Urgente'], ['cliente', 'Claro, Edenor…'],
+    ['numero', 'WO del caso'], ['proyecto', 'Lineales o GPON']];
   var CLIENTES = {CL: 'Claro', CLR: 'Claro', EDNR: 'Edenor', EDN: 'Edenor', MUNI: 'Municipalidad', TP: 'Telecom', MVS: 'Movistar', MV: 'Movistar'};
   function sinTildes(t) { return String(t).toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9]+/g, ''); }
   function columna(f, re) {                          // valor de la primera columna cuyo nombre técnico coincide
@@ -48,29 +51,39 @@
     var n = sinTildes(nombre), d = f.datos || {}, todo = Object.keys(d).map(function (k) { return d[k]; }).join(' ');
     if (n === 'ci') return columna(f, /(^|\.)cmdb_ci$/i) || columna(f, /(^|[._])ci([._]|$)|configuration_item/i);
     if (n === 'prioridad') return (columna(f, /(^|\.)priority$/i) || columna(f, /prior/i)).replace(/\s*-\s*/g, ' ').trim();   // "2 - Alta" -> "2 Alta"
-    if (n === 'proyecto') {
-      var g = (columna(f, /assignment_group/i) || todo).toUpperCase();
-      return /C-TL-MOBISOND/.test(g) ? 'Lineales' : /C-GZ1-MOBI/.test(g) ? 'GPON' : '';
+    if (n === 'proyecto') return proyectoDe(f) === 'gpon' ? 'GPON' : proyectoDe(f) === 'lineales' ? 'Lineales' : '';
+    if (n === 'falla' || n === 'iddefalla') {
+      var tf = Object.keys(f.titulos || {}).filter(function (x) { return /falla/.test(x); })[0];
+      return tf ? d[f.titulos[tf]] || '' : columna(f, /falla|fault/i);
     }
     if (n === 'cliente') {
       var m = /TSO_C_TL_([A-Z0-9]+)_/i.exec(columna(f, /service_offering/i) || todo);
       return m ? (CLIENTES[m[1].toUpperCase()] || m[1]) : '';
     }
     if (n === 'numero' || n === 'wo') return f.numero || '';
-    if (n === 'descripcion') return columna(f, /short_description/i);
     // cualquier otra: por el título de la columna o su nombre técnico
     var col = (f.titulos || {})[n] || Object.keys(d).filter(function (k) { return sinTildes(k) === n || sinTildes(k.split('.').pop()) === n; })[0];
     return col ? d[col] || '' : null;              // null = no existe esa variable (queda escrita tal cual)
   }
+  // de qué proyecto es el caso: por el grupo (columna o filtro de la lista), el service offering o el CI
+  function proyectoDe(f) {
+    var d = f.datos || {}, todo = Object.keys(d).map(function (k) { return d[k]; }).join(' ').toUpperCase();
+    var grupo = function (t) { return /C-TL-MOBISOND/.test(t) ? 'lineales' : /C-GZ1-MOBI/.test(t) ? 'gpon' : ''; };
+    return grupo(todo) ||                                                   // el grupo, si está como columna
+           (/TSO_C_TL_/.test(todo) ? 'lineales' : '') ||                     // el service offering de Lineales
+           (/(^|\s)GPON-|(^|\s)G[A-Z]{3}-[RC]\d/.test(columna(f, /cmdb_ci/i).toUpperCase()) ? 'gpon' : '') ||
+           grupo((claveLista() || '').toUpperCase()) || 'lineales';        // el filtro de la lista
+  }
+  function plantillaDe(pr) { return GM_getValue(FRASES[pr].clave, '') || FRASES[pr].def; }
   function fraseAlexa(f, plantilla) {
-    var t = (plantilla || GM_getValue('vm_frase', '') || FRASE_DEF).replace(/<([^<>]{1,40})>/g, function (todo, nombre) {
+    var t = (plantilla || plantillaDe(proyectoDe(f))).replace(/<([^<>]{1,40})>/g, function (todo, nombre) {
       var v = variable(f, nombre.trim());
       return v === null ? todo : String(v).replace(/[_|]+/g, ' ').slice(0, 120);
     });
     // prolijo si alguna variable vino vacía: sin espacios dobles ni ". ." ni "de ."
     return t.replace(/\s+/g, ' ').replace(/\s+([.,;:])/g, '$1')
             .replace(/\b(de|del|en|la|el|Prioridad)([.,;:])/gi, '$2').replace(/\s+([.,;:])/g, '$1')
-            .replace(/([.,;:])(\s*[.,;:])+/g, '$1').replace(/^[\s.,;:]+/, '').trim();
+            .replace(/([.,;:])(\s*[.,;:])+/g, '$1').replace(/^[\s.,;:]+/, '').replace(/[\s,;:]+$/, '').trim();
   }
 
   // ---------------------------------------------------------------- qué lista se vigila
@@ -161,7 +174,7 @@
     host.style.cssText = 'position:fixed;inset:0;z-index:2147483646;';
     var sh = host.attachShadow({mode: 'open'});
     var k = GM_getValue('lista', ''), tit = GM_getValue('lista_titulo', ''), activo = GM_getValue('vm_activo', true);
-    var tok = GM_getValue('vm_token', ''), frase = GM_getValue('vm_frase', '') || FRASE_DEF;
+    var tok = GM_getValue('vm_token', '');
     var est = !GM_getValue('vm_token', '') ? ['#fff7ed', '#7c2d12', '⚠️ <b>Falta configurar</b> el token y el dispositivo de Voice Monkey'] :
               !k ? ['#fff7ed', '#7c2d12', '⚠️ <b>No vigila ninguna lista</b> · abrí Pending Dispatch y elegí "🔊 Alexa: vigilar esta lista"'] :
               [activo ? '#e5f4e4' : '#f1f5f9', activo ? '#14532d' : '#475569',
@@ -170,7 +183,7 @@
     sh.innerHTML = '<style>' +
       '*{box-sizing:border-box;font-family:"Segoe UI",Roboto,Arial,sans-serif}' +
       '.fondo{position:absolute;inset:0;background:rgba(15,23,42,.35)}' +
-      '.p{position:absolute;top:70px;right:40px;width:410px;background:#fff;border-radius:12px;box-shadow:0 12px 32px rgba(0,0,0,.25);overflow:hidden;font-size:13.5px;color:#111827}' +
+      '.p{position:absolute;top:70px;right:40px;width:410px;max-height:calc(100vh - 90px);overflow:auto;background:#fff;border-radius:12px;box-shadow:0 12px 32px rgba(0,0,0,.25);overflow:hidden;font-size:13.5px;color:#111827}' +
       '.h{background:#1e3a5f;color:#fff;padding:12px 16px;display:flex;align-items:center;gap:8px;font-weight:700;font-size:15px}' +
       '.h small{margin-left:auto;font-weight:400;opacity:.8}.x{cursor:pointer;margin-left:10px;font-size:18px;opacity:.85}' +
       '.b{padding:12px 16px;display:flex;flex-direction:column;gap:10px}' +
@@ -196,10 +209,13 @@
       '<div class="f"><span class="k">Anunciar casos</span><label class="ll"><input id="act" type="checkbox"' + (activo ? ' checked' : '') + '><span></span></label></div>' +
       '<div class="f"><span class="k">Token Voice Monkey</span><input id="tok" type="password" placeholder="voicemonkey.io → API" value="' + esc(tok) + '"></div>' +
       '<div class="f"><span class="k">Dispositivo</span><input id="dis" type="text" placeholder="ej. eco-oficina" value="' + esc(GM_getValue('vm_device', '')) + '"></div>' +
-      '<div class="f"><span class="k">Qué dice</span><span class="gr">tocá una variable para agregarla</span><span class="lnk" id="res">↺ original</span></div>' +
-      '<textarea id="fra">' + esc(frase) + '</textarea>' +
+      '<div class="f"><span class="k">Qué dice</span><span class="gr">tocá una variable para agregarla donde está el cursor</span></div>' +
+      ['lineales', 'gpon'].map(function (pr) {
+        return '<div class="f"><b style="font-size:12.5px">' + (pr === 'gpon' ? '🟣 GPON' : '🔵 Lineales') + '</b>' +
+               '<span class="lnk" data-res="' + pr + '">↺ original</span></div>' +
+               '<textarea id="fra_' + pr + '">' + esc(plantillaDe(pr)) + '</textarea><div class="oye" id="oye_' + pr + '"></div>';
+      }).join('') +
       '<div class="vs">' + VARIABLES.map(function (v) { return '<span class="v" title="' + esc(v[1]) + '">&lt;' + v[0] + '&gt;</span>'; }).join('') + '</div>' +
-      '<div class="oye" id="oye"></div>' +
       '<div class="bs"><button id="pro">🔈 Probar</button><button id="sim">🧪 Simular caso nuevo</button>' + (k ? '<button id="dej">🚫 Dejar de vigilar</button>' : '') + '<button id="gua" class="g">Guardar</button></div>' +
       '<div class="msg" id="msg"></div></div></div>';
     var $ = function (id) { return sh.getElementById(id); }, msg = function (t) { $('msg').textContent = t; };
@@ -208,25 +224,38 @@
     var guardar = function () {
       GM_setValue('vm_token', $('tok').value.trim()); GM_setValue('vm_device', $('dis').value.trim());
       GM_setValue('vm_activo', $('act').checked);
-      var fr = $('fra').value.trim(); GM_setValue('vm_frase', fr && fr !== FRASE_DEF ? fr : '');
+      ['lineales', 'gpon'].forEach(function (pr) {
+        var fr = $('fra_' + pr).value.trim(); GM_setValue(FRASES[pr].clave, fr && fr !== FRASES[pr].def ? fr : '');
+      });
       marcarTitulo();
     };
-    // vista previa: cómo sonaría con el primer caso de la lista (o con uno de ejemplo)
-    var ejemplo = {numero: 'WO0097001', datos: {assignment_group: 'C-TL-MOBISOND', cmdb_ci: 'ANILLO IPRAN_CF162_004', priority: '2 - Alta',
-      service_offering: 'TSO_C_TL_CL_NORTE_BA', short_description: 'Corte de fibra'}, titulos: {}};
+    // vista previa: cómo sonaría con el primer caso de ese proyecto en la lista (o con uno de ejemplo)
+    var ejemplo = {
+      lineales: {numero: 'WO0097001', datos: {cmdb_ci: 'WICAP_IPRAN_LMT_CF136_CF05440', priority: '2 - Urgente', u_falla: 'ATENUACIÓN FO',
+        service_offering: 'TSO_C_TL_CL_LAMA_BA'}, titulos: {iddefalla: 'u_falla'}},
+      gpon: {numero: 'WO0097002', datos: {cmdb_ci: 'GPON-GFLR-C9190-901', priority: '3 - Moderada', assignment_group: 'C-GZ1-MOBI'}, titulos: {}}};
+    var ultimo = 'fra_lineales';
     var previa = function () {
-      var f = (vigilada() && (filas() || [])[0]) || ejemplo;
-      $('oye').innerHTML = '🔈 <b>Así suena:</b> ' + esc(fraseAlexa(f, $('fra').value.trim() || FRASE_DEF));
+      ['lineales', 'gpon'].forEach(function (pr) {
+        var f = (vigilada() && (filas() || []).filter(function (x) { return proyectoDe(x) === pr; })[0]) || ejemplo[pr];
+        $('oye_' + pr).innerHTML = '🔈 <b>Así suena:</b> ' + esc(fraseAlexa(f, $('fra_' + pr).value.trim() || FRASES[pr].def));
+      });
     };
-    $('fra').oninput = previa;
+    ['lineales', 'gpon'].forEach(function (pr) {
+      $('fra_' + pr).oninput = previa;
+      $('fra_' + pr).onfocus = function () { ultimo = 'fra_' + pr; };
+    });
     sh.querySelectorAll('.v').forEach(function (b) {
+      b.onmousedown = function (e) { e.preventDefault(); };          // que no le saque el foco al cuadro de texto
       b.onclick = function () {
-        var ta = $('fra'), ini = ta.selectionStart, fin = ta.selectionEnd, txt = b.textContent;
+        var ta = $(ultimo), ini = ta.selectionStart, fin = ta.selectionEnd, txt = b.textContent;
         ta.value = ta.value.slice(0, ini) + txt + ta.value.slice(fin);
         ta.focus(); ta.selectionStart = ta.selectionEnd = ini + txt.length; previa();
       };
     });
-    $('res').onclick = function () { $('fra').value = FRASE_DEF; previa(); };
+    sh.querySelectorAll('[data-res]').forEach(function (l) {
+      l.onclick = function () { var pr = l.getAttribute('data-res'); $('fra_' + pr).value = FRASES[pr].def; previa(); };
+    });
     previa();
     $('act').onchange = function () { GM_setValue('vm_activo', $('act').checked); marcarTitulo(); msg($('act').checked ? 'Alexa va a anunciar los casos nuevos.' : 'Alexa ya no anuncia los casos.'); };
     $('gua').onclick = function () { guardar(); msg('Guardado. Probando…'); alexa('Hola, soy el aviso de casos de Mobisond.', function (m) { msg(m); }); };
