@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Mobisond · Aviso de casos por Alexa
 // @namespace    mobisond
-// @version      1.4
+// @version      1.5
 // @description  Cuando entra un caso nuevo en la lista que vigilás de ServiceNow, Alexa lo anuncia (Voice Monkey). Activalo solo donde tengas el Echo.
 // @match        https://*.service-now.com/*
 // @grant        GM_xmlhttpRequest
@@ -20,8 +20,6 @@
   function alexa(frase, alTerminar) {
     var token = GM_getValue('vm_token', ''), disp = GM_getValue('vm_device', '');
     if (!token || !disp || !GM_getValue('vm_activo', true)) { if (alTerminar) alTerminar('Alexa no está configurada.'); return; }
-    var h = new Date().getHours(), d = GM_getValue('vm_silencio_desde', -1), a = GM_getValue('vm_silencio_hasta', -1);
-    if (!alTerminar && d >= 0 && a >= 0 && (d < a ? (h >= d && h < a) : (h >= d || h < a))) return;   // horario silencioso
     GM_xmlhttpRequest({method: 'POST', url: 'https://api-v3.voicemonkey.io/announce',
       headers: {'Content-Type': 'application/json'},
       data: JSON.stringify({token: token, device: disp, speech: frase.slice(0, 300)}),
@@ -33,24 +31,46 @@
       },
       onerror: function () { if (alTerminar) alTerminar('No pude conectar con Voice Monkey.'); }});
   }
-  // Alexa dice el CI afectado y la prioridad (columnas de la lista: cmdb_ci y priority, o parecidas)
-  function ciDe(f) {
-    var d = f.datos || {}, k = Object.keys(d);
-    var col = k.filter(function (x) { return /(^|\.)cmdb_ci$/i.test(x); })[0] ||
-              k.filter(function (x) { return /(^|[._])ci([._]|$)|configuration_item|cmdb_ci/i.test(x); })[0];
-    return col ? d[col] : '';
+  // ---------------------------------------------------------------- qué dice Alexa
+  // La frase se arma con una plantilla que se edita en la configuración. Las <variables> se reemplazan con los datos del
+  // caso (de las columnas de la lista). También vale el nombre de cualquier columna de la lista, ej. <Descripción breve>.
+  var FRASE_DEF = 'Entró un caso nuevo de <proyecto>. <ci>. Prioridad <prioridad>.';
+  var VARIABLES = [
+    ['proyecto', 'Lineales o GPON'], ['ci', 'CI afectado'], ['prioridad', 'ej. 2 Alta'], ['cliente', 'Claro, Edenor…'],
+    ['numero', 'WO del caso'], ['descripcion', 'descripción breve']];
+  var CLIENTES = {CL: 'Claro', CLR: 'Claro', EDNR: 'Edenor', EDN: 'Edenor', MUNI: 'Municipalidad', TP: 'Telecom', MVS: 'Movistar', MV: 'Movistar'};
+  function sinTildes(t) { return String(t).toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9]+/g, ''); }
+  function columna(f, re) {                          // valor de la primera columna cuyo nombre técnico coincide
+    var d = f.datos || {}, k = Object.keys(d).filter(function (x) { return re.test(x); })[0];
+    return k ? d[k] : '';
   }
-  function prioridadDe(f) {
-    var d = f.datos || {};
-    var col = Object.keys(d).filter(function (x) { return /(^|\.)priority$/i.test(x); })[0] ||
-              Object.keys(d).filter(function (x) { return /prior/i.test(x); })[0];
-    return col ? d[col].replace(/\s*-\s*/g, ' ').trim() : '';          // "2 - Alta" -> "2 Alta"
+  function variable(f, nombre) {
+    var n = sinTildes(nombre), d = f.datos || {}, todo = Object.keys(d).map(function (k) { return d[k]; }).join(' ');
+    if (n === 'ci') return columna(f, /(^|\.)cmdb_ci$/i) || columna(f, /(^|[._])ci([._]|$)|configuration_item/i);
+    if (n === 'prioridad') return (columna(f, /(^|\.)priority$/i) || columna(f, /prior/i)).replace(/\s*-\s*/g, ' ').trim();   // "2 - Alta" -> "2 Alta"
+    if (n === 'proyecto') {
+      var g = (columna(f, /assignment_group/i) || todo).toUpperCase();
+      return /C-TL-MOBISOND/.test(g) ? 'Lineales' : /C-GZ1-MOBI/.test(g) ? 'GPON' : '';
+    }
+    if (n === 'cliente') {
+      var m = /TSO_C_TL_([A-Z0-9]+)_/i.exec(columna(f, /service_offering/i) || todo);
+      return m ? (CLIENTES[m[1].toUpperCase()] || m[1]) : '';
+    }
+    if (n === 'numero' || n === 'wo') return f.numero || '';
+    if (n === 'descripcion') return columna(f, /short_description/i);
+    // cualquier otra: por el título de la columna o su nombre técnico
+    var col = (f.titulos || {})[n] || Object.keys(d).filter(function (k) { return sinTildes(k) === n || sinTildes(k.split('.').pop()) === n; })[0];
+    return col ? d[col] || '' : null;              // null = no existe esa variable (queda escrita tal cual)
   }
-  // "Entró un caso nuevo. <CI afectado>. Prioridad <prioridad>."
-  function fraseAlexa(f) {
-    var ci = ciDe(f), pr = prioridadDe(f);
-    return 'Entró un caso nuevo.' + (ci ? ' ' + ci.replace(/[_|]+/g, ' ').slice(0, 120) + '.' : '') +
-           (pr ? ' Prioridad ' + pr + '.' : '');
+  function fraseAlexa(f, plantilla) {
+    var t = (plantilla || GM_getValue('vm_frase', '') || FRASE_DEF).replace(/<([^<>]{1,40})>/g, function (todo, nombre) {
+      var v = variable(f, nombre.trim());
+      return v === null ? todo : String(v).replace(/[_|]+/g, ' ').slice(0, 120);
+    });
+    // prolijo si alguna variable vino vacía: sin espacios dobles ni ". ." ni "de ."
+    return t.replace(/\s+/g, ' ').replace(/\s+([.,;:])/g, '$1')
+            .replace(/\b(de|del|en|la|el|Prioridad)([.,;:])/gi, '$2').replace(/\s+([.,;:])/g, '$1')
+            .replace(/([.,;:])(\s*[.,;:])+/g, '$1').replace(/^[\s.,;:]+/, '').trim();
   }
 
   // ---------------------------------------------------------------- qué lista se vigila
@@ -69,7 +89,12 @@
     if (!t) return null;
     var tabla = t.getAttribute('glide_table') || (claveLista() || '').split('|')[0];
     var cols = [];
-    t.querySelectorAll('thead th').forEach(function (th) { cols.push(th.getAttribute('name') || ''); });
+    var titulos = {};
+    t.querySelectorAll('thead th').forEach(function (th) {
+      var n = th.getAttribute('name') || ''; cols.push(n);
+      var tt = (th.innerText || th.textContent || '').replace(/\s+/g, ' ').trim();
+      if (n && tt) titulos[sinTildes(tt)] = n;
+    });
     var out = [];
     t.querySelectorAll('tbody tr[sys_id], tbody tr.list_row').forEach(function (tr) {
       var id = tr.getAttribute('sys_id');
@@ -83,7 +108,7 @@
       });
       var a = tr.querySelector('a.formlink, a.linked');
       var numero = (datos.number || (a && a.textContent.trim()) || id.slice(0, 8)).replace(/^WOT/i, 'WO');
-      out.push({id: id, numero: numero, datos: datos,
+      out.push({id: id, numero: numero, datos: datos, titulos: titulos,
         link: location.origin + '/' + tabla + '.do?sys_id=' + id});
     });
     return out;
@@ -130,17 +155,13 @@
   }
 
   // ---------------------------------------------------------------- cuadro de configuración
-  function horas() {
-    var d = GM_getValue('vm_silencio_desde', -1), a = GM_getValue('vm_silencio_hasta', -1);
-    return d >= 0 && a >= 0 ? [d, a] : ['', ''];
-  }
   function abrirConfig() {
     var viejo = document.getElementById('mobisond-alexa'); if (viejo) viejo.remove();
     var host = document.createElement('div'); host.id = 'mobisond-alexa';
     host.style.cssText = 'position:fixed;inset:0;z-index:2147483646;';
     var sh = host.attachShadow({mode: 'open'});
     var k = GM_getValue('lista', ''), tit = GM_getValue('lista_titulo', ''), activo = GM_getValue('vm_activo', true);
-    var tok = GM_getValue('vm_token', ''), h = horas();
+    var tok = GM_getValue('vm_token', ''), frase = GM_getValue('vm_frase', '') || FRASE_DEF;
     var est = !GM_getValue('vm_token', '') ? ['#fff7ed', '#7c2d12', '⚠️ <b>Falta configurar</b> el token y el dispositivo de Voice Monkey'] :
               !k ? ['#fff7ed', '#7c2d12', '⚠️ <b>No vigila ninguna lista</b> · abrí Pending Dispatch y elegí "🔊 Alexa: vigilar esta lista"'] :
               [activo ? '#e5f4e4' : '#f1f5f9', activo ? '#14532d' : '#475569',
@@ -165,13 +186,20 @@
       'button{border:1px solid #d1d5db;border-radius:7px;padding:6px 10px;background:#f9fafb;font-size:13px;cursor:pointer}' +
       'button:hover{border-color:#2563eb}.g{background:#2563eb;color:#fff;border-color:#2563eb;margin-left:auto}' +
       '.msg{color:#374151;font-size:12.5px;min-height:16px}.gr{color:#6b7280;font-size:12px}' +
+      'textarea{width:100%;border:1px solid #d1d5db;border-radius:6px;padding:6px 8px;font-size:13px;resize:vertical;min-height:52px}' +
+      '.vs{display:flex;flex-wrap:wrap;gap:5px}.v{border:1px solid #bfdbfe;background:#eff6ff;color:#1e40af;border-radius:12px;padding:2px 8px;font-size:12px;cursor:pointer}' +
+      '.v:hover{background:#dbeafe}.oye{background:#f8fafc;border:1px dashed #cbd5e1;border-radius:6px;padding:6px 8px;font-size:12.5px;color:#334155}' +
+      '.lnk{color:#2563eb;cursor:pointer;font-size:12px;margin-left:auto}' +
       '</style><div class="fondo"></div><div class="p">' +
       '<div class="h">🔊 Alexa · Mobisond<small>v' + esc(typeof GM_info !== 'undefined' && GM_info.script ? GM_info.script.version : '') + '</small><span class="x" title="Cerrar">✕</span></div>' +
       '<div class="b"><div class="e" style="background:' + est[0] + ';color:' + est[1] + '">' + est[2] + '</div>' +
       '<div class="f"><span class="k">Anunciar casos</span><label class="ll"><input id="act" type="checkbox"' + (activo ? ' checked' : '') + '><span></span></label></div>' +
       '<div class="f"><span class="k">Token Voice Monkey</span><input id="tok" type="password" placeholder="voicemonkey.io → API" value="' + esc(tok) + '"></div>' +
       '<div class="f"><span class="k">Dispositivo</span><input id="dis" type="text" placeholder="ej. eco-oficina" value="' + esc(GM_getValue('vm_device', '')) + '"></div>' +
-      '<div class="f"><span class="k">No hablar de</span><input id="d" type="number" min="0" max="23" value="' + h[0] + '"> a <input id="a" type="number" min="0" max="23" value="' + h[1] + '"> h <span class="gr">(vacío = siempre)</span></div>' +
+      '<div class="f"><span class="k">Qué dice</span><span class="gr">tocá una variable para agregarla</span><span class="lnk" id="res">↺ original</span></div>' +
+      '<textarea id="fra">' + esc(frase) + '</textarea>' +
+      '<div class="vs">' + VARIABLES.map(function (v) { return '<span class="v" title="' + esc(v[1]) + '">&lt;' + v[0] + '&gt;</span>'; }).join('') + '</div>' +
+      '<div class="oye" id="oye"></div>' +
       '<div class="bs"><button id="pro">🔈 Probar</button><button id="sim">🧪 Simular caso nuevo</button>' + (k ? '<button id="dej">🚫 Dejar de vigilar</button>' : '') + '<button id="gua" class="g">Guardar</button></div>' +
       '<div class="msg" id="msg"></div></div></div>';
     var $ = function (id) { return sh.getElementById(id); }, msg = function (t) { $('msg').textContent = t; };
@@ -180,11 +208,26 @@
     var guardar = function () {
       GM_setValue('vm_token', $('tok').value.trim()); GM_setValue('vm_device', $('dis').value.trim());
       GM_setValue('vm_activo', $('act').checked);
-      var d = $('d').value.trim(), a = $('a').value.trim();
-      var ok = d !== '' && a !== '' && +d >= 0 && +d <= 23 && +a >= 0 && +a <= 23;
-      GM_setValue('vm_silencio_desde', ok ? +d : -1); GM_setValue('vm_silencio_hasta', ok ? +a : -1);
+      var fr = $('fra').value.trim(); GM_setValue('vm_frase', fr && fr !== FRASE_DEF ? fr : '');
       marcarTitulo();
     };
+    // vista previa: cómo sonaría con el primer caso de la lista (o con uno de ejemplo)
+    var ejemplo = {numero: 'WO0097001', datos: {assignment_group: 'C-TL-MOBISOND', cmdb_ci: 'ANILLO IPRAN_CF162_004', priority: '2 - Alta',
+      service_offering: 'TSO_C_TL_CL_NORTE_BA', short_description: 'Corte de fibra'}, titulos: {}};
+    var previa = function () {
+      var f = (vigilada() && (filas() || [])[0]) || ejemplo;
+      $('oye').innerHTML = '🔈 <b>Así suena:</b> ' + esc(fraseAlexa(f, $('fra').value.trim() || FRASE_DEF));
+    };
+    $('fra').oninput = previa;
+    sh.querySelectorAll('.v').forEach(function (b) {
+      b.onclick = function () {
+        var ta = $('fra'), ini = ta.selectionStart, fin = ta.selectionEnd, txt = b.textContent;
+        ta.value = ta.value.slice(0, ini) + txt + ta.value.slice(fin);
+        ta.focus(); ta.selectionStart = ta.selectionEnd = ini + txt.length; previa();
+      };
+    });
+    $('res').onclick = function () { $('fra').value = FRASE_DEF; previa(); };
+    previa();
     $('act').onchange = function () { GM_setValue('vm_activo', $('act').checked); marcarTitulo(); msg($('act').checked ? 'Alexa va a anunciar los casos nuevos.' : 'Alexa ya no anuncia los casos.'); };
     $('gua').onclick = function () { guardar(); msg('Guardado. Probando…'); alexa('Hola, soy el aviso de casos de Mobisond.', function (m) { msg(m); }); };
     $('pro').onclick = function () { guardar(); msg('Probando…'); alexa('Prueba de Mobisond. Si me escuchás, los avisos por Alexa funcionan.', function (m) { msg(m); }); };
