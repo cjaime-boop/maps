@@ -40,7 +40,7 @@
     gpon: {clave: 'vm_frase_gpon', def: 'Entró un caso nuevo de GPON. <ci>. Prioridad <prioridad>.'}};
   var VARIABLES = [
     ['ci', 'CI afectado'], ['falla', 'ID de falla, ej. Atenuación FO'], ['prioridad', 'ej. 2 Urgente'], ['cliente', 'Claro, Edenor…'],
-    ['zona', 'partido, ej. La Matanza'], ['numero', 'WO del caso'], ['padre', 'caso padre']];
+    ['zona', 'partido, ej. La Matanza'], ['wo', 'la WO (el padre del caso)']];
   // zona del service offering (TSO_C_TL_<cliente>_<zona>_BA). Las que no estén acá se dicen tal cual.
   var ZONAS = {LAMA: 'La Matanza', TEFE: 'Tres de Febrero', VILO: 'Vicente López', MORO: 'Morón'};
   var CLIENTES = {CL: 'Claro', CLR: 'Claro', EDNR: 'Edenor', EDN: 'Edenor', MUNI: 'Municipalidad', TP: 'Telecom', MVS: 'Movistar', MV: 'Movistar'};
@@ -62,12 +62,12 @@
       var m = /TSO_C_TL_([A-Z0-9]+)_/i.exec(columna(f, /service_offering/i) || todo);
       return m ? (CLIENTES[m[1].toUpperCase()] || m[1]) : '';
     }
-    if (n === 'numero' || n === 'wo') return f.numero || '';
+    if (n === 'numero') return f.numero || '';
     if (n === 'zona') {
       var z = /TSO_C_TL_[A-Z0-9]+_([A-Z0-9]+)_/i.exec(columna(f, /service_offering/i) || todo);
       return z ? (ZONAS[z[1].toUpperCase()] || z[1]) : '';
     }
-    if (n === 'padre') return (columna(f, /(^|\.)parent$/i) || '').replace(/^WOT/i, 'WO');
+    if (n === 'wo' || n === 'padre') return (columna(f, /(^|\.)parent$/i) || '').replace(/^WOT/i, 'WO');
     // cualquier otra: por el título de la columna o su nombre técnico
     var col = (f.titulos || {})[n] || Object.keys(d).filter(function (k) { return sinTildes(k) === n || sinTildes(k.split('.').pop()) === n; })[0];
     return col ? d[col] || '' : null;              // null = no existe esa variable (queda escrita tal cual)
