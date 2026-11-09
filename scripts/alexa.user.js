@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Mobisond · Aviso de casos por Alexa
 // @namespace    mobisond
-// @version      1.5
+// @version      1.6
 // @description  Cuando entra un caso nuevo en la lista que vigilás de ServiceNow, Alexa lo anuncia (Voice Monkey). Activalo solo donde tengas el Echo.
 // @match        https://*.service-now.com/*
 // @grant        GM_xmlhttpRequest
@@ -42,7 +42,10 @@
     ['ci', 'CI afectado'], ['falla', 'ID de falla, ej. Atenuación FO'], ['prioridad', 'ej. 2 Urgente'], ['cliente', 'Claro, Edenor…'],
     ['zona', 'partido, ej. La Matanza'], ['wo', 'la WO (el padre del caso)']];
   // zona del service offering (TSO_C_TL_<cliente>_<zona>_BA). Las que no estén acá se dicen tal cual.
-  var ZONAS = {LAMA: 'La Matanza', TEFE: 'Tres de Febrero', VILO: 'Vicente López', MORO: 'Morón'};
+  var ZONAS = {BRAG: 'Bragado', CAPA: 'Campana', CHIV: 'Chivilcoy', ESCO: 'Escobar', HURG: 'Hurlingham', ITUZ: 'Ituzaingó',
+    JOCP: 'José C. Paz', JUNI: 'Junín', LAMA: 'La Matanza', LINC: 'Lincoln', LOBO: 'Lobos', MAAR: 'Malvinas Argentinas',
+    MERL: 'Merlo', MORE: 'Moreno', MORO: 'Morón', PILR: 'Pilar', PROV: 'Provincia', SFER: 'San Fernando', SISI: 'San Isidro',
+    SMAR: 'San Martín', SMIG: 'San Miguel', TEFE: 'Tres de Febrero', TIGE: 'Tigre', VILO: 'Vicente López'};   // = planilla de casos (AE:AF)
   var CLIENTES = {CL: 'Claro', CLR: 'Claro', EDNR: 'Edenor', EDN: 'Edenor', MUNI: 'Municipalidad', TP: 'Telecom', MVS: 'Movistar', MV: 'Movistar'};
   function sinTildes(t) { return String(t).toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9]+/g, ''); }
   function columna(f, re) {                          // valor de la primera columna cuyo nombre técnico coincide
