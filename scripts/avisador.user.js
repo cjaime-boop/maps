@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Mobisond · Avisador
 // @namespace    mobisond
-// @version      3.65
+// @version      3.66
 // @description  Avisa los casos nuevos (celular, campana y grupo de Telegram), los Lineales sin notas hace 25 min, los SLA y los aceptados; comandos del bot (/status, /bandeja, /autoasignar…); dispenser de la semana, racha sin vencidos y mensajes en casos pausados.
 // @match        https://*.service-now.com/*
 // @grant        GM_xmlhttpRequest
@@ -978,47 +978,103 @@
     var a = String(texto || '').toLowerCase().split(/\s+/).slice(1).join(' ');
     return /gpon/.test(a) ? 'GPON' : /lin|^tl\b|\btl\b/.test(a) ? 'Lineales' : '';
   }
+  // cliente y zona de Lineales (y zona de GPON): salen del Service offering (TSO_C_TL_<cliente>_<zona>_BA / TSO_C_G10_<zona>_BA)
+  var CLI_NOMBRE = {CL: 'Claro', CLR: 'Claro', EDNR: 'Edenor', EDN: 'Edenor', MUNI: 'Municipal', TP: 'Telecom', MVS: 'Movistar', MV: 'Movistar'};
+  var ZONAS = {BRAG: 'Bragado', CAPA: 'Campana', CHIV: 'Chivilcoy', ESCO: 'Escobar', HURG: 'Hurlingham', ITUZ: 'Ituzaingó',
+    JOCP: 'José C. Paz', JUNI: 'Junín', LAMA: 'La Matanza', LINC: 'Lincoln', LOBO: 'Lobos', MAAR: 'Malvinas Argentinas',
+    MERL: 'Merlo', MORE: 'Moreno', MORO: 'Morón', PILR: 'Pilar', PROV: 'Provincia', SFER: 'San Fernando', SISI: 'San Isidro',
+    SMAR: 'San Martín', SMIG: 'San Miguel', TEFE: 'Tres de Febrero', TIGE: 'Tigre', VILO: 'Vicente López'};   // = planilla de casos (AE:AF)
+  function cliZona(r) {
+    var so = dv(r, 'service_offering').trim().toUpperCase(), out = [];
+    var c = /^TSO_C_TL_([A-Z0-9]+)_/.exec(so), z = /_([A-Z0-9]+)_BA\b/.exec(so);
+    if (c) out.push(CLI_NOMBRE[c[1]] || c[1]);
+    if (z) out.push(ZONAS[z[1]] || z[1]);
+    return out.join(' · ');
+  }
+  function haceCorto(ms) {
+    var m = Math.max(0, Math.round(ms / 60000));
+    return m < 60 ? m + ' min' : m < 1440 ? Math.round(m / 60) + ' h' : Math.round(m / 1440) + (Math.round(m / 1440) === 1 ? ' día' : ' días');
+  }
+  function enTxt(ms) {                               // 25 min · 3 h 40 min
+    var m = Math.round(Math.abs(ms) / 60000), h = Math.floor(m / 60);
+    return h ? h + ' h' + (m % 60 ? ' ' + (m % 60) + ' min' : '') : m + ' min';
+  }
   function textoBandeja(solo) {
     var q = 'active=true^assignment_group.nameSTARTSWITH' + GRUPOS.lineales + '^ORassignment_group.nameSTARTSWITH' + GRUPOS.gpon;
-    return api('wm_task', q, 'sys_id,number,parent,state,substate,u_pause_reason,assignment_group,assigned_to,cmdb_ci,priority').then(function (casos) {
-      var out = ['📋 <b>Bandeja' + (solo ? ' ' + solo : '') + '</b> · ' + hhmm(Date.now())];
-      (solo ? [solo] : ['Lineales', 'GPON']).forEach(function (pr) {
-        var cs = casos.filter(function (r) { return proyecto(r) === pr; });
-        var curso = [], verif = [], pausa = [], sin = [], acep = [], camino = [];
-        cs.forEach(function (r) {
-          var motivo = dv(r, 'u_pause_reason').trim();
-          if (enCamino(r)) camino.push(r);
-          else if (!enCurso(r)) sin.push(r);
-          else if (aceptado(r)) acep.push(r);
-          else if (pausado(r) && /verificaci/i.test(motivo)) verif.push(r);
-          else if (pausado(r)) pausa.push(r);
-          else curso.push(r);
+    var campos = 'sys_id,number,parent,state,substate,u_pause_reason,assignment_group,assigned_to,cmdb_ci,priority,service_offering,sys_updated_on';
+    return api('wm_task', q, campos).then(function (casos) {
+      // SLA neto de cada caso (una sola consulta): cuándo vence o cuándo venció
+      var porId = {};
+      casos.forEach(function (r) { porId[vl(r, 'sys_id')] = r; if (vl(r, 'parent')) porId[vl(r, 'parent')] = r; });
+      var ids = Object.keys(porId);
+      var slas = ids.length ? api('task_sla', 'active=true^taskIN' + ids.join(','), 'task,sla,stage,has_breached,planned_end_time,original_breach_time')
+        .catch(function () { return []; }) : Promise.resolve([]);
+      return slas.then(function (ss) {
+        var sla = {};                                // sys_id del caso -> {t, vencido}
+        ss.forEach(function (s) {
+          if (!/neto/i.test(dv(s, 'sla')) || /paus|cancel/i.test(vl(s, 'stage') + dv(s, 'stage'))) return;
+          var r = porId[vl(s, 'task')]; if (!r) return;
+          var v = vl(s, 'has_breached') === 'true', t = utc(v ? (vl(s, 'original_breach_time') || vl(s, 'planned_end_time')) : vl(s, 'planned_end_time'));
+          if (t) sla[vl(r, 'sys_id')] = {t: t, vencido: v};
         });
-        var fila = function (r, abajo, alLado) {      // punto de prioridad + WO en negrita; abajo con sangría el CI y (en cursiva) el detalle
-          var t = colorPrio(dv(r, 'priority') || vl(r, 'priority')) + ' <b>' + esc(woDe(r)) + '</b>\n   ' + esc(dv(r, 'cmdb_ci') || 'sin CI') + (alLado ? ' · <i>' + esc(alLado) + '</i>' : '');
-          if (abajo) t += '\n   <i>' + esc(abajo) + '</i>';
-          return t;
-        };
-        var grupo = function (titulo, lista, abajo, alLado) {
-          if (!lista.length) return;
-          out.push('', '<b>' + titulo + ' (' + lista.length + ')</b>');
-          var pn = function (r) { return parseInt(vl(r, 'priority') || dv(r, 'priority'), 10) || 9; };   // los más urgentes arriba
-          lista.slice().sort(function (a, b) { return pn(a) - pn(b); }).forEach(function (r) { out.push(fila(r, abajo && abajo(r), alLado && alLado(r))); });
-        };
-        if (pr === 'GPON' && !solo) out.push('', '━━━━━━━━━━━━━━━━━━━━');      // separador entre Lineales y GPON
-        out.push('', (pr === 'Lineales' ? '🔧' : '📡') + ' <b>' + pr + '</b>', '', cs.length + (cs.length === 1 ? ' abierto' : ' abiertos'));
-        if (!cs.length) return;
-        grupo('▶️ En curso', curso, function (r) { return dv(r, 'assigned_to'); });
-        grupo('🚗 Aceptados / En camino', camino, function (r) { return dv(r, 'state') + ' · ' + (dv(r, 'assigned_to') || 'sin asignar'); });
-        grupo('⏸️ Pausados', pausa, function (r) { return dv(r, 'u_pause_reason'); });
-        grupo('🔍 Verificación del cliente', verif);
-        grupo('✅ Aceptados por el cliente', acep);
-        if (sin.length) grupo('⏳ Sin atender', sin, null, function (r) { return dv(r, 'state'); });
-        else out.push('', '⏳ Sin atender: 0');
+        return armarBandeja(casos, sla, solo);
       });
-      out.push('', '🔴 P1 · 🟡 P2 · 🟢 P3 · ⚪ P4/P5');
-      return out.join('\n');
     });
+  }
+  function armarBandeja(casos, sla, solo) {
+    var ahora = Date.now();
+    var out = ['📋 <b>Bandeja' + (solo ? ' ' + solo : '') + '</b> · ' + hhmm(ahora)];
+    (solo ? [solo] : ['Lineales', 'GPON']).forEach(function (pr) {
+      var cs = casos.filter(function (r) { return proyecto(r) === pr; });
+      var curso = [], verif = [], pausa = [], sin = [], acep = [], camino = [];
+      cs.forEach(function (r) {
+        var motivo = dv(r, 'u_pause_reason').trim();
+        if (enCamino(r)) camino.push(r);
+        else if (!enCurso(r)) sin.push(r);
+        else if (aceptado(r)) acep.push(r);
+        else if (pausado(r) && /verificaci/i.test(motivo)) verif.push(r);
+        else if (pausado(r)) pausa.push(r);
+        else curso.push(r);
+      });
+      // cada caso: WO (y técnico) · último movimiento / CI / cliente · zona / vencimiento o motivo
+      var fila = function (r, conTecnico, conSla, motivo) {
+        var mov = utc(vl(r, 'sys_updated_on'));
+        var t = colorPrio(dv(r, 'priority') || vl(r, 'priority')) + ' <b>' + esc(woDe(r)) + '</b>' +
+                (conTecnico ? ' · ' + esc(dv(r, 'assigned_to') || 'sin asignar') : '') +
+                (mov ? ' · últ. mov. hace ' + haceCorto(ahora - mov) : '');
+        t += '\n      ' + esc(dv(r, 'cmdb_ci') || 'sin CI');
+        var cz = cliZona(r); if (cz) t += '\n      ' + esc(cz);
+        var s = conSla && sla[vl(r, 'sys_id')];
+        if (s) {
+          var falta = s.t - ahora;
+          if (s.vencido || falta <= 0) t += '\n      🔴 <b>venció ' + hhmm(s.t) + ' (hace ' + enTxt(falta) + ')</b>';
+          else if (falta <= 30 * 60000) t += '\n      ⚠️ <b>vence ' + hhmm(s.t) + ' (en ' + enTxt(falta) + ')</b>';
+          else t += '\n      ⏱ vence ' + hhmm(s.t) + ' (en ' + enTxt(falta) + ')';
+        }
+        if (motivo && dv(r, 'u_pause_reason')) t += '\n      <i>' + esc(dv(r, 'u_pause_reason')) + '</i>';
+        return t;
+      };
+      var pn = function (r) { return parseInt(vl(r, 'priority') || dv(r, 'priority'), 10) || 9; };   // los más urgentes arriba
+      var grupo = function (titulo, lista, conTecnico, conSla, motivo) {
+        if (!lista.length) return;
+        out.push('', '', '<b>' + titulo + ' (' + lista.length + ')</b>');
+        lista.slice().sort(function (a, b) { return pn(a) - pn(b); }).forEach(function (r) { out.push('', fila(r, conTecnico, conSla, motivo)); });
+      };
+      if (pr === 'GPON' && !solo) out.push('', '━━━━━━━━━━━━━━━━━━━━');      // separador entre Lineales y GPON
+      var ico = pr === 'Lineales' ? '🔧' : '📡';
+      out.push('', ico + ' <b>' + pr + ' · ' + cs.length + (cs.length === 1 ? ' abierto' : ' abiertos') + '</b>' + (cs.length ? '' : ' 😴'));
+      if (!cs.length) return;
+      var cont = ['⏳ ' + sin.length + (sin.length ? '' : ' ✅')];
+      [['▶️', curso], ['🚗', camino], ['⏸️', pausa], ['🔍', verif], ['✅', acep]].forEach(function (x) { if (x[1].length) cont.push(x[0] + ' ' + x[1].length); });
+      out.push(cont.join('   '));
+      grupo('⏳ Sin atender', sin, false, true, false);                 // lo que hay que resolver ya, arriba
+      grupo('▶️ En curso', curso, true, true, false);
+      grupo('🚗 Aceptados / En camino', camino, true, true, false);
+      grupo('⏸️ Pausados', pausa, false, false, true);
+      grupo('🔍 Verificación del cliente', verif, false, false, false);
+      grupo('✅ Aceptados por el cliente', acep, false, false, false);
+    });
+    return out.join('\n');
   }
   // registro corto de lo que hace el bot (se ve en "🔧 Revisar bot")
   function botLog(t) {
