@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Mobisond · Aviso de casos por Alexa
 // @namespace    mobisond
-// @version      1.7
+// @version      1.8
 // @description  Cuando entra un caso nuevo en la lista que vigilás de ServiceNow, Alexa lo anuncia (Voice Monkey). Activalo solo donde tengas el Echo.
 // @match        https://*.service-now.com/*
 // @grant        GM_xmlhttpRequest
@@ -149,7 +149,7 @@
     // si la pestaña estuvo cerrada o la PC dormida un rato, se toma lo que hay como punto de partida (sin avisar)
     var base = GM_getValue('base', false) && ahora - GM_getValue('ultima', 0) < OLVIDO_MS;
     Object.keys(vistos).forEach(function (id) { if (ahora - vistos[id] > OLVIDO_MS) delete vistos[id]; });
-    var nuevos = fs.filter(function (f) { return !vistos[f.id]; });
+    var nuevos = fs.filter(function (f) { return !vistos[f.id] && GM_getValue('vm_on_' + proyectoDe(f), true); });   // solo los proyectos prendidos
     if (base && nuevos.length) {
       alexa(nuevos.length === 1 ? fraseAlexa(nuevos[0]) : 'Entraron ' + nuevos.length + ' casos nuevos.');
     }
@@ -221,7 +221,9 @@
       '<div class="f"><span class="k">Dispositivo</span><input id="dis" type="text" placeholder="ej. eco-oficina" value="' + esc(GM_getValue('vm_device', '')) + '"></div>' +
       '<div class="f"><span class="k">Qué dice</span><span class="gr">tocá una variable para agregarla donde está el cursor</span></div>' +
       ['lineales', 'gpon'].map(function (pr) {
-        return '<div class="f"><b style="font-size:12.5px">' + (pr === 'gpon' ? '🟣 GPON' : '🔵 Lineales') + '</b>' +
+        return '<div class="f"><b style="font-size:12.5px;width:82px">' + (pr === 'gpon' ? '🟣 GPON' : '🔵 Lineales') + '</b>' +
+               '<label class="ll" title="Avisar los casos de ' + (pr === 'gpon' ? 'GPON' : 'Lineales') + '"><input id="on_' + pr + '" type="checkbox"' +
+               (GM_getValue('vm_on_' + pr, true) ? ' checked' : '') + '><span></span></label>' +
                '<span class="lnk" data-res="' + pr + '">↺ original</span></div>' +
                '<textarea id="fra_' + pr + '">' + esc(plantillaDe(pr)) + '</textarea><div class="oye" id="oye_' + pr + '"></div>';
       }).join('') +
@@ -252,7 +254,17 @@
         $('oye_' + pr).innerHTML = '🔈 <b>Así suena:</b> ' + esc(fraseAlexa(f, $('fra_' + pr).value.trim() || FRASES[pr].def));
       });
     };
+    var apagar = function (pr) {                 // proyecto apagado: su frase queda en gris
+      var on = $('on_' + pr).checked;
+      $('fra_' + pr).style.opacity = $('oye_' + pr).style.opacity = on ? '1' : '.45';
+    };
     ['lineales', 'gpon'].forEach(function (pr) {
+      apagar(pr);
+      $('on_' + pr).onchange = function () {
+        var on = $('on_' + pr).checked, nom = pr === 'gpon' ? 'GPON' : 'Lineales';
+        GM_setValue('vm_on_' + pr, on); apagar(pr);
+        msg(on ? 'Alexa avisa los casos de ' + nom + '.' : 'Alexa ya no avisa los casos de ' + nom + '.');
+      };
       $('fra_' + pr).oninput = previa;
       $('fra_' + pr).onfocus = function () { ultimo = 'fra_' + pr; };
     });
