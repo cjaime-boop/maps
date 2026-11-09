@@ -1,14 +1,16 @@
 // ==UserScript==
 // @name         Mobisond · Móviles Ituran → QGIS
 // @namespace    mobisond
-// @version      2.3
-// @description  Pasa las posiciones de los móviles de Ituran al plugin "Móviles Ituran" de QGIS de esta misma PC (127.0.0.1). No sale nada de la computadora.
+// @version      2.4
+// @description  Pasa las posiciones de los móviles de Ituran al plugin "Móviles Ituran" de QGIS (127.0.0.1) y al mapa de recorridos abierto en este mismo navegador. No sale nada de la computadora.
 // @match        https://web2.ituran.com.ar/*
 // @match        http://web2.ituran.com.ar/*
+// @match        https://cjaime-boop.github.io/maps/*
 // @grant        GM_xmlhttpRequest
 // @grant        GM_getValue
 // @grant        GM_setValue
 // @grant        GM_registerMenuCommand
+// @grant        GM_addValueChangeListener
 // @grant        unsafeWindow
 // @connect      127.0.0.1
 // @updateURL    https://cjaime-boop.github.io/maps/scripts/ituran.user.js
@@ -18,6 +20,19 @@
 (function () {
   'use strict';
   var W = (typeof unsafeWindow !== 'undefined') ? unsafeWindow : window;
+
+  // ---------------------------------------------------------------- 0) en el mapa de recorridos: le pasa los móviles
+  // La pestaña de Ituran guarda las últimas posiciones en Tampermonkey (en esta PC) y acá se le entregan al mapa.
+  if (/github\.io$/i.test(location.hostname)) {
+    var pasar = function () {
+      var d = GM_getValue('moviles_mapa', '');
+      if (d) W.postMessage({tipo: 'mobisond-moviles', datos: d}, location.origin);
+    };
+    if (typeof GM_addValueChangeListener === 'function') GM_addValueChangeListener('moviles_mapa', function () { pasar(); });
+    W.addEventListener('message', function (e) { if (e.data && e.data.tipo === 'mobisond-moviles-pedir') pasar(); });
+    setInterval(pasar, 20000);
+    return;
+  }
   var PUERTOS = [8787, 8788, 8789, 8790];
   var PATENTE = /\b([A-Z]{2}\s?\d{3}\s?[A-Z]{2}|[A-Z]{3}\s?\d{3})\b/;
   var PATENTE_SOLA = /^([A-Z]{2}\s?\d{3}\s?[A-Z]{2}|[A-Z]{3}\s?\d{3})$/;
@@ -186,7 +201,7 @@
     if (j && leerArbol(j.d || j)) return;
     if (j) recorrer(j, salida, 0);
     if (!salida.length) return;
-    salida.forEach(function (v) { moviles[v.patente] = v; });
+    salida.forEach(function (v) { v.vista = Date.now(); moviles[v.patente] = v; });
     ultimaPos = Date.now();
     if (pedido && pedido.url) ultimoPedido = pedido;        // este pedido trae posiciones: es el que se repite
     programar();
@@ -213,6 +228,11 @@
       if (v.grupo) recordarGrupo(v.patente, v.grupo);
       return v;
     });
+    if (lista.length) {                                          // para el mapa de recorridos (queda en esta PC)
+      GM_setValue('moviles_mapa', JSON.stringify({t: Date.now(), lista: lista.map(function (v) {
+        return {patente: v.patente, nombre: v.nombre, grupo: v.grupo, lat: v.lat, lon: v.lon, velocidad: v.velocidad, direccion: v.direccion, vista: v.vista};
+      })}));
+    }
     if (!lista.length || enviando) return;
     enviando = true;
     mandar('/posiciones', {moviles: lista, estado: estado()}, function () { enviando = false; }, function (e) {

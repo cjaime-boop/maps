@@ -131,6 +131,16 @@ h1 { margin: 0; font-size: 16px; line-height: 1.25; overflow-wrap: anywhere; }
   box-shadow: 0 2px 8px rgba(0,0,0,.28); -webkit-tap-highlight-color: transparent; }
 .medir:active { transform: scale(.97); }
 .medir.on { background: #9a5a00; }
+.medir.mov { background: #fff; color: #1d4ed8 !important; border: 2px solid #1d4ed8; height: 36px; font-size: 14px; }
+.medir.mov.on { background: #1d4ed8; color: #fff !important; }
+.movicon { width: 0 !important; height: 0 !important; }
+.movicon .mv { position: absolute; left: -15px; top: -15px; width: 30px; height: 30px; border-radius: 50%; background: #1d4ed8;
+  border: 2px solid #fff; box-shadow: 0 1px 4px rgba(0,0,0,.45); display: flex; align-items: center; justify-content: center; font-size: 16px; }
+.movicon.quieto .mv { background: #64748b; }
+.movicon.viejo .mv { background: #cbd5e1; }
+.movicon b { position: absolute; left: 18px; top: -9px; white-space: nowrap; font: 700 11px/1 var(--sans); color: #1e3a8a;
+  background: rgba(255,255,255,.92); padding: 3px 5px; border-radius: 5px; box-shadow: 0 1px 2px rgba(0,0,0,.2); }
+.flot .fv { color: #15803d; font-weight: 800; }
 .regla { position: absolute; left: 8px; right: 8px; bottom: calc(var(--h) + 8px); z-index: 1000; background: var(--surface); color: var(--ink);
   border: 1px solid var(--line); border-radius: 12px; padding: 8px 10px; display: grid; gap: 6px; box-shadow: 0 4px 16px rgba(0,0,0,.18); }
 .regla .fila { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
@@ -1294,6 +1304,62 @@ h1 { margin: 0; font-size: 16px; line-height: 1.25; overflow-wrap: anywhere; }
       return cont;
     }});
     mapa.addControl(new Herr());
+
+    // 🚐 MÓVILES DE ITURAN (solo en la PC): los pasa el script de Ituran de Tampermonkey cuando la pestaña de Ituran está
+    // abierta en este mismo navegador. Las posiciones no salen de la computadora. Sin ese script el botón no aparece.
+    var capaMov = L.layerGroup(), movMarc = {}, movDatos = null, movOn = false;
+    try { movOn = localStorage.getItem('moviles') === '1'; } catch (e) {}
+    function haceTxt(ms) {
+      var s = Math.max(0, Math.round(ms / 1000));
+      return s < 60 ? 'hace ' + s + ' s' : s < 3600 ? 'hace ' + Math.round(s / 60) + ' min' : 'hace ' + Math.round(s / 3600) + ' h';
+    }
+    function pintarMoviles() {
+      if (!movDatos || !movOn) return;
+      var vistos = {}, ahora = Date.now();
+      (movDatos.lista || []).forEach(function (m) {
+        if (!m || !m.patente || !isFinite(m.lat) || !isFinite(m.lon)) return;
+        vistos[m.patente] = 1;
+        var vel = Number(m.velocidad) || 0, edad = ahora - (m.vista || movDatos.t || ahora);
+        var cls = 'movicon' + (edad > 15 * 60000 ? ' viejo' : vel < 3 ? ' quieto' : '');
+        var nom = String(m.nombre || m.patente).split(/\s*\/\s*/)[0];
+        var html = '<span class="mv">🚐</span><b>' + esc(nom) + '</b>';
+        var pop = '<div class="flot"><b class="fn">' + esc(m.nombre || m.patente) + '</b>' +
+                  '<div class="fcab">' + esc(m.patente) + (m.grupo ? ' · ' + esc(m.grupo) : '') + '</div>' +
+                  '<div class="fcab">' + (vel >= 3 ? '<span class="fv">' + Math.round(vel) + ' km/h</span>' : 'Detenido') +
+                  ' · ' + haceTxt(edad) + '</div>' + (m.direccion ? '<div class="fcab">📍 ' + esc(m.direccion) + '</div>' : '') + '</div>';
+        var mk = movMarc[m.patente];
+        if (!mk) {
+          mk = movMarc[m.patente] = L.marker([m.lat, m.lon], {icon: L.divIcon({className: cls, html: html, iconSize: [0, 0]}), zIndexOffset: 2500})
+            .bindPopup(pop).addTo(capaMov);
+          mk._clase = cls; mk._html = html;
+        } else {
+          mk.setLatLng([m.lat, m.lon]);
+          if (mk._clase !== cls || mk._html !== html) { mk.setIcon(L.divIcon({className: cls, html: html, iconSize: [0, 0]})); mk._clase = cls; mk._html = html; }
+          mk.setPopupContent(pop);
+        }
+      });
+      Object.keys(movMarc).forEach(function (k) { if (!vistos[k]) { capaMov.removeLayer(movMarc[k]); delete movMarc[k]; } });
+    }
+    function moviles_(on) {
+      movOn = on;
+      try { localStorage.setItem('moviles', on ? '1' : '0'); } catch (e) {}
+      if (btnMov) btnMov.classList.toggle('on', on);
+      if (on) { capaMov.addTo(mapa); pintarMoviles(); } else mapa.removeLayer(capaMov);
+    }
+    var btnMov = L.DomUtil.create('a', 'medir mov', document.querySelector('.herr'));
+    btnMov.href = '#'; btnMov.title = 'Móviles de Ituran (con la pestaña de Ituran abierta en esta PC)'; btnMov.setAttribute('role', 'button');
+    btnMov.innerHTML = '<span aria-hidden="true">🚐</span> Móviles';
+    btnMov.style.display = 'none';                              // aparece cuando llegan datos de Ituran
+    document.querySelector('.herr').insertBefore(btnMov, document.querySelector('.herr .leaflet-bar'));
+    L.DomEvent.on(btnMov, 'click', function (e) { L.DomEvent.preventDefault(e); moviles_(!movOn); });
+    window.addEventListener('message', function (e) {
+      if (e.origin !== location.origin || !e.data || e.data.tipo !== 'mobisond-moviles') return;
+      try { movDatos = typeof e.data.datos === 'string' ? JSON.parse(e.data.datos) : e.data.datos; } catch (x) { return; }
+      if (btnMov.style.display === 'none') { btnMov.style.display = ''; if (movOn) moviles_(true); }
+      pintarMoviles();
+    });
+    setInterval(pintarMoviles, 30000);                          // para que el "hace X" se mantenga al día
+    window.postMessage({tipo: 'mobisond-moviles-pedir'}, location.origin);
     L.DomEvent.disableClickPropagation(regla);
 
     var yo = null;
