@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Mobisond · Aviso de casos por Alexa
 // @namespace    mobisond
-// @version      1.6
+// @version      1.7
 // @description  Cuando entra un caso nuevo en la lista que vigilás de ServiceNow, Alexa lo anuncia (Voice Monkey). Activalo solo donde tengas el Echo.
 // @match        https://*.service-now.com/*
 // @grant        GM_xmlhttpRequest
@@ -241,9 +241,9 @@
     };
     // vista previa: cómo sonaría con el primer caso de ese proyecto en la lista (o con uno de ejemplo)
     var ejemplo = {
-      lineales: {numero: 'WO0097001', datos: {cmdb_ci: 'WICAP_IPRAN_LMT_CF136_CF05440', priority: '2 - Urgente', u_falla: 'ATENUACIÓN FO',
-        service_offering: 'TSO_C_TL_CL_LAMA_BA'}, titulos: {iddefalla: 'u_falla'}},
-      gpon: {numero: 'WO0097002', datos: {cmdb_ci: 'GPON-GFLR-C9190-901', priority: '3 - Moderada', assignment_group: 'C-GZ1-MOBI'}, titulos: {}}};
+      lineales: {numero: 'WO0000001', datos: {cmdb_ci: 'ANILLO_DE_EJEMPLO_001', priority: '2 - Urgente', u_falla: 'CORTE FO',
+        service_offering: 'TSO_C_TL_CL_LAMA_BA', parent: 'WO0000000'}, titulos: {iddefalla: 'u_falla'}},
+      gpon: {numero: 'WO0000002', datos: {cmdb_ci: 'GPON-EJEMPLO-001', priority: '3 - Moderada', assignment_group: 'C-GZ1-MOBI'}, titulos: {}}};
     var ultimo = 'fra_lineales';
     var previa = function () {
       ['lineales', 'gpon'].forEach(function (pr) {
