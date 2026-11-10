@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Mobisond · Vigía de CTO (SGT)
 // @namespace    mobisond
-// @version      1.2
+// @version      1.3
 // @description  Con SGT abierto y la sesión iniciada, revisa cada 30 segundos las CTO que se vigilan desde QGIS (plugin 📡 Vigía de CTO) y sube cómo están. El login lo hacés vos; la sesión de SGT no sale del navegador.
 // @match        https://sgtmobile.claro.com.ar/*
 // @grant        GM_xmlhttpRequest
@@ -68,6 +68,21 @@
 
   // ---------------------------------------------------------------- una CTO
   // Mismas reglas que el vuelco: puertos con flecha = Up/Down; caída = todos en Down.
+  // "2026-11-10 01:03:00" (hora de acá), ISO, dd/mm/aaaa o milisegundos -> Date (o null si es "--")
+  function aFecha(v) {
+    if (v === null || v === undefined) return null;
+    if (typeof v === 'number') return new Date(v < 1e12 ? v * 1000 : v);
+    var s = String(v).trim(), m;
+    if (!s || s === '--') return null;
+    if (/^\d{10,13}$/.test(s)) return new Date(s.length === 10 ? +s * 1000 : +s);
+    m = s.match(/^(\d{4})-(\d\d)-(\d\d)[ T](\d\d):(\d\d)(?::(\d\d))?/);
+    if (m && !/(Z|[+-]\d\d:?\d\d)$/i.test(s)) return new Date(+m[1], m[2] - 1, +m[3], +m[4], +m[5], +(m[6] || 0));
+    m = s.match(/^(\d\d)\/(\d\d)\/(\d{4})[ T](\d\d):(\d\d)(?::(\d\d))?/);
+    if (m) return new Date(+m[3], m[2] - 1, +m[1], +m[4], +m[5], +(m[6] || 0));
+    var d = new Date(s);
+    return isNaN(d) ? null : d;
+  }
+
   function estadoDe(data) {
     var con = data.filter(function (p) { return p.estadoONT === 'Up' || p.estadoONT === 'Down'; });
     var down = con.filter(function (p) { return p.estadoONT === 'Down'; }).length;
@@ -79,7 +94,16 @@
       var up = data.filter(function (p) { return p.estadoONT === 'Up' && lectura(p) !== null; })[0];
       pot = up ? lectura(up) : null;
     }
-    return {estado: e, caidos: down, total: con.length, potencia: pot === null ? null : String(pot)};
+    // caída: desde el "Último Apagado" más reciente de los clientes en Down (cuando se cayó el último)
+    var apagado = null;
+    if (e === 'caida') {
+      con.forEach(function (p) {
+        var f = aFecha(p.lastDownTime);
+        if (f && (!apagado || f > apagado)) apagado = f;
+      });
+    }
+    return {estado: e, caidos: down, total: con.length, potencia: pot === null ? null : String(pot),
+            apagado: apagado ? apagado.toISOString() : null};
   }
   function consultar(id, token) {
     return fetch(API + encodeURIComponent(id), {headers: {'Authorization': token}}).then(function (r) {
