@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Mobisond · Vigía de CTO (SGT)
 // @namespace    mobisond
-// @version      1.1
+// @version      1.2
 // @description  Con SGT abierto y la sesión iniciada, revisa cada 30 segundos las CTO que se vigilan desde QGIS (plugin 📡 Vigía de CTO) y sube cómo están. El login lo hacés vos; la sesión de SGT no sale del navegador.
 // @match        https://sgtmobile.claro.com.ar/*
 // @grant        GM_xmlhttpRequest
@@ -21,7 +21,8 @@
   var API = '/SgtMobileBackend/filter/getVecindarioSplitter/';
   var CADA_MS = 30 * 1000;              // una vuelta cada 30 segundos (si una vuelta tarda más, la siguiente arranca enseguida)
   var ENTRE_MS = 200;                   // pausa entre CTO, para no cargar a SGT
-  var YO = pcId() + '-' + Math.random().toString(36).slice(2, 6);   // esta pestaña (una sola revisa a la vez)
+  var YO = pcId();                                                   // esta PC (en Supabase: una sola PC revisa a la vez)
+  var PESTANA = Math.random().toString(36).slice(2, 8);              // esta pestaña (en la PC: una sola pestaña revisa)
 
   function pcId() {
     var id = GM_getValue('pc_id', '');
@@ -105,10 +106,16 @@
       if (!avisoSesion) { avisoSesion = true; rpc('vigia_sesion', {p_pc: YO, p_sesion: 'vencida'}).catch(function () {}); }
       return proxima(60000);
     }
+    var otra = GM_getValue('vigia_pestana', null);
+    if (otra && otra.id !== PESTANA && Date.now() - otra.t < 45000) {
+      mostrar('Vigía: lo está revisando otra pestaña de SGT', 'gris');
+      return proxima(CADA_MS);
+    }
+    GM_setValue('vigia_pestana', {id: PESTANA, t: Date.now()});
     corriendo = true; inicio = Date.now();
     rpc('vigia_lista', {p_pc: YO}).then(function (r) {
       if (!r.turno) {
-        mostrar('Vigía: lo está revisando otra pestaña', 'gris', 'Otra pestaña de SGT (en esta u otra PC) ya está revisando las CTO.');
+        mostrar('Vigía: lo está revisando otra PC', 'gris', 'SGT está abierto en otra PC y ya está revisando las CTO. Si la cerraron, esta toma el control en un minuto y medio.');
         return;
       }
       var ctos = r.ctos || [];
@@ -118,6 +125,7 @@
         if (i >= ctos.length) return Promise.resolve();
         var c = ctos[i++];
         mostrar('Vigía: revisando ' + i + '/' + ctos.length, 'gris');
+        GM_setValue('vigia_pestana', {id: PESTANA, t: Date.now()});
         return consultar(c.sgt, token).then(function (e) {
           e.cto = c.cto; res.push(e);
           if (e.estado === 'caida') caidas++;
@@ -148,10 +156,15 @@
       return 'reintentar';
     }).then(function (x) {
       corriendo = false;
+      GM_setValue('vigia_pestana', {id: PESTANA, t: Date.now()});
       proxima(x === 'reintentar' ? 60000 : Math.max(2000, CADA_MS - (Date.now() - inicio)));
     });
   }
 
+  window.addEventListener('beforeunload', function () {
+    var o = GM_getValue('vigia_pestana', null);
+    if (o && o.id === PESTANA) GM_setValue('vigia_pestana', null);
+  });
   mostrar('Vigía: arrancando…', 'gris');
   setTimeout(ciclo, 8000);
 })();
