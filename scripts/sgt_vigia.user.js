@@ -71,7 +71,14 @@
     var con = data.filter(function (p) { return p.estadoONT === 'Up' || p.estadoONT === 'Down'; });
     var down = con.filter(function (p) { return p.estadoONT === 'Down'; }).length;
     var e = !con.length ? 'sin' : down === con.length ? 'caida' : down ? 'parcial' : 'ok';
-    return {estado: e, caidos: down, total: con.length};
+    // potencia: la de la primera casilla; si no tiene lectura, la del primer cliente andando que tenga
+    function lectura(p) { var v = parseFloat(String(p && p.rxPower).replace(',', '.')); return isNaN(v) ? null : v; }
+    var pot = lectura(data[0]);
+    if (pot === null) {
+      var up = data.filter(function (p) { return p.estadoONT === 'Up' && lectura(p) !== null; })[0];
+      pot = up ? lectura(up) : null;
+    }
+    return {estado: e, caidos: down, total: con.length, potencia: pot === null ? null : String(pot)};
   }
   function consultar(id, token) {
     return fetch(API + encodeURIComponent(id), {headers: {'Authorization': token}}).then(function (r) {
@@ -126,7 +133,7 @@
         avisoSesion = false;
         var det = res.map(function (e) {
           return ({caida: '🔴', parcial: '🟡', ok: '🟢', sin: '⚪', error: '⚠️'}[e.estado] || '·') + ' ' + e.cto +
-            (e.total ? '  ' + e.caidos + '/' + e.total : e.estado === 'error' ? '  (no la encontré en SGT)' : '');
+            (e.total ? '  ' + (e.total - e.caidos) + '/' + e.total + ' operativos' + (e.potencia ? ' · ' + e.potencia + ' dBm' : '') : e.estado === 'error' ? '  (no la encontré en SGT)' : '');
         }).join('\n');
         mostrar('Vigía: ' + ctos.length + ' CTO · ' + caidas + ' caída' + (caidas === 1 ? '' : 's') + ' · ' + hhmm(), caidas ? 'mal' : 'ok', det);
       });
