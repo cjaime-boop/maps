@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Mobisond · Vigía de CTO (SGT)
 // @namespace    mobisond
-// @version      1.0
-// @description  Con SGT abierto y la sesión iniciada, revisa cada 5 minutos las CTO que se vigilan desde QGIS (plugin 📡 Vigía de CTO) y sube cómo están. El login lo hacés vos; la sesión de SGT no sale del navegador.
+// @version      1.1
+// @description  Con SGT abierto y la sesión iniciada, revisa cada 30 segundos las CTO que se vigilan desde QGIS (plugin 📡 Vigía de CTO) y sube cómo están. El login lo hacés vos; la sesión de SGT no sale del navegador.
 // @match        https://sgtmobile.claro.com.ar/*
 // @grant        GM_xmlhttpRequest
 // @grant        GM_getValue
@@ -19,7 +19,7 @@
 
   var SB_URL = 'https://gnqvhlpknxtdnzuxfybc.supabase.co', SB_PUBLICA = 'sb_publishable_dUhjyCfRfNtLVLfOYnJ1WA_hfPD3kk9';
   var API = '/SgtMobileBackend/filter/getVecindarioSplitter/';
-  var CADA_MS = 5 * 60 * 1000;          // una vuelta completa cada 5 minutos
+  var CADA_MS = 30 * 1000;              // una vuelta cada 30 segundos (si una vuelta tarda más, la siguiente arranca enseguida)
   var ENTRE_MS = 200;                   // pausa entre CTO, para no cargar a SGT
   var YO = pcId() + '-' + Math.random().toString(36).slice(2, 6);   // esta pestaña (una sola revisa a la vez)
 
@@ -86,6 +86,7 @@
 
   // ---------------------------------------------------------------- la vuelta
   var corriendo = false, timer = null, avisoSesion = false;
+  var inicio = 0;
   function proxima(ms) { clearTimeout(timer); timer = setTimeout(ciclo, ms); }
 
   function ciclo(forzar) {
@@ -97,7 +98,7 @@
       if (!avisoSesion) { avisoSesion = true; rpc('vigia_sesion', {p_pc: YO, p_sesion: 'vencida'}).catch(function () {}); }
       return proxima(60000);
     }
-    corriendo = true;
+    corriendo = true; inicio = Date.now();
     rpc('vigia_lista', {p_pc: YO}).then(function (r) {
       if (!r.turno) {
         mostrar('Vigía: lo está revisando otra pestaña', 'gris', 'Otra pestaña de SGT (en esta u otra PC) ya está revisando las CTO.');
@@ -140,7 +141,7 @@
       return 'reintentar';
     }).then(function (x) {
       corriendo = false;
-      proxima(x === 'reintentar' ? 60000 : CADA_MS);
+      proxima(x === 'reintentar' ? 60000 : Math.max(2000, CADA_MS - (Date.now() - inicio)));
     });
   }
 
