@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Mobisond · Avisador
 // @namespace    mobisond
-// @version      3.67
+// @version      3.68
 // @description  Avisa los casos nuevos (celular, campana y grupo de Telegram), los Lineales sin notas hace 25 min, los SLA y los aceptados; comandos del bot (/status, /bandeja, /autoasignar…); dispenser de la semana, racha sin vencidos y mensajes en casos pausados.
 // @match        https://*.service-now.com/*
 // @grant        GM_xmlhttpRequest
@@ -1082,6 +1082,91 @@
     });
     return out.join('\n');
   }
+  // ---------------------------------------------------------------- /seguir: notas de afuera de Mobisond en una WO
+  // "/seguir WO0097674" prende o apaga el seguimiento; "/seguir" solo muestra los seguidos. La lista vive en Supabase
+  // (bot_seguidos), así sigue aunque cambie la PC que atiende. La PC que atiende el bot mira las WO cada 2 min y manda
+  // cada nota nueva escrita por alguien que no es de Mobisond (ni comentario automático). Si la WO se cierra, deja de seguirla.
+  var AUTOMATICA = /^(en pausa por|se espera la verificaci|reanudad|estado cambiado|state changed|caso (pausado|reanudado))/i;
+  function ciDeWo(woId) {                            // CI, cliente y zona (de la WOT de esa WO)
+    return api('wm_task', 'parent=' + woId, 'cmdb_ci,service_offering').then(function (ts) {
+      var t = ts[0]; if (!t) return '';
+      var cz = cliZona(t);
+      return '\n      ' + esc(dv(t, 'cmdb_ci') || 'sin CI') + (cz ? '\n      ' + esc(cz) : '');
+    }).catch(function () { return ''; });
+  }
+  function seguirCmd(p, listo) {
+    var contestar = function (t) { unaVezAlGrupo('cmd:' + p.id, t, p.msg, p.chat, function (ok) { listo(ok ? 'contestado' : 'no se pudo contestar'); }); };
+    var m = /\bWO\s*0*(\d{5,})/i.exec(p.texto || '');
+    if (!m) {                                        // /seguir solo: la lista
+      sbRpc('bot_seguidos', {}).then(function (fs) {
+        fs = fs || [];
+        if (!fs.length) return contestar('👀 <b>No estoy siguiendo ninguna WO</b>\n\nPara seguir una: /seguir WO0097674');
+        var out = ['👀 <b>Seguidos (' + fs.length + ')</b>'];
+        fs.forEach(function (f) {
+          var d = new Date(f.desde), hoy = new Date();
+          var desde = d.toDateString() === hoy.toDateString() ? hhmm(+d)
+            : d.toDateString() === new Date(hoy - 864e5).toDateString() ? 'ayer ' + hhmm(+d) : ('0' + d.getDate()).slice(-2) + '/' + ('0' + (d.getMonth() + 1)).slice(-2) + ' ' + hhmm(+d);
+          out.push('', '<b>' + esc(f.wo) + '</b> · desde ' + desde,
+                   '      ' + (f.ult_externa ? 'últ. nota externa hace ' + haceCorto(Date.now() - new Date(f.ult_externa)) : 'sin notas nuevas'));
+        });
+        out.push('', 'Para dejar de seguir uno: /seguir WO…');
+        contestar(out.join('\n'));
+      }, function (e) { contestar('No pude leer los seguidos (' + esc(e.message) + ').'); });
+      return;
+    }
+    var wo = 'WO' + ('0000000' + m[1]).slice(-7);
+    api('wm_order', 'number=' + wo, 'sys_id,number,active').then(function (ws) {
+      var w = ws[0];
+      if (!w) return contestar('No encontré la ' + esc(wo) + ' en ServiceNow.');
+      return sbRpc('bot_seguir', {p_wo: wo, p_wo_id: vl(w, 'sys_id'), p_chat: String(p.chat || GM_getValue('tg_chat'))}).then(function (est) {
+        if (est === 'off') return contestar('🙈 Dejé de seguir <b>' + esc(wo) + '</b>');
+        return ciDeWo(vl(w, 'sys_id')).then(function (ci) {
+          contestar('👀 <b>Siguiendo ' + esc(wo) + '</b>\n' + ci + '\n\nTe aviso acá cuando alguien que no es de Mobisond escriba una nota.\n\n' +
+                    'Para dejar de seguirlo: /seguir ' + esc(wo));
+        });
+      });
+    }).catch(function (e) { contestar('No pude seguir la ' + esc(wo) + ' (' + esc(e.message) + ').'); });
+  }
+  var ultSeguir = 0;
+  function seguimiento() {
+    if (Date.now() - ultSeguir < 2 * 60000) return;
+    ultSeguir = Date.now();
+    sbRpc('bot_seguidos', {}).then(function (fs) {
+      fs = fs || [];
+      if (!fs.length) return;
+      var porId = {}; fs.forEach(function (f) { porId[f.wo_id] = f; });
+      return api('wm_order', 'sys_idIN' + Object.keys(porId).join(','), 'sys_id,number,active,state,work_notes,comments').then(function (ws) {
+        ws.forEach(function (w) {
+          var f = porId[vl(w, 'sys_id')]; if (!f) return;
+          if (vl(w, 'active') === 'false') {             // se cerró: deja de seguirla
+            sbRpc('bot_seguido_listo', {p_wo: f.wo}).then(function () {
+              unaVezAlGrupo('seg-fin:' + f.wo, '✅ <b>' + esc(f.wo) + ' se cerró</b>\n\nDejé de seguirla.', null, f.chat);
+            }).catch(function () {});
+            return;
+          }
+          var visto = new Date(f.visto).getTime(), max = visto, ultExt = f.ult_externa ? new Date(f.ult_externa).getTime() : 0, vistas = {};
+          var nuevas = notasDelTexto(dv(w, 'work_notes') + '\n' + dv(w, 'comments')).filter(function (n) {
+            if (!n.t || n.t <= visto) return false;
+            if (n.t > max) max = n.t;
+            var k = n.t + '|' + n.quien; if (vistas[k]) return false; vistas[k] = 1;
+            return !esNuestro(n.quien) && !/^(system|sistema|admin)/i.test(n.quien) && !AUTOMATICA.test(n.txt || '');
+          }).sort(function (a, b) { return a.t - b.t; });
+          if (max === visto) return;
+          var mandar = nuevas.length ? ciDeWo(f.wo_id) : Promise.resolve('');
+          mandar.then(function (ci) {
+            nuevas.forEach(function (n) {
+              var txt = (n.txt || '').length > 400 ? n.txt.slice(0, 400) + '…' : (n.txt || '');
+              unaVezAlGrupo('seg:' + f.wo + ':' + n.t + ':' + n.quien.slice(0, 20),
+                '👀 <b>' + esc(f.wo) + ' · nota nueva</b>\n\n✍️ ' + esc(n.quien) + ' · ' + hhmm(n.t) +
+                '\n<blockquote>' + esc(txt) + '</blockquote>\n' + ci, null, f.chat);
+              ultExt = Math.max(ultExt, n.t);
+            });
+            sbRpc('bot_seguido_visto', {p_wo: f.wo, p_visto: new Date(max).toISOString(), p_ult_externa: ultExt ? new Date(ultExt).toISOString() : null}).catch(function () {});
+          });
+        });
+      });
+    }).catch(function (e) { botLog('seguir: ' + e.message); });
+  }
   // registro corto de lo que hace el bot (se ve en "🔧 Revisar bot")
   function botLog(t) {
     var l = GM_getValue('tg_log', []); l.push(hhmm(Date.now()) + ' ' + t); GM_setValue('tg_log', l.slice(-8));
@@ -1228,6 +1313,7 @@
       }, function (e) { unaVezAlGrupo('cmd:' + p.id, 'No pude armar el resumen (' + esc(e.message) + ').', p.msg, p.chat); listo('error ServiceNow ' + e.message); });
       return;
     }
+    if (p.cmd === '/seguir') { seguirCmd(p, listo); return; }
     if (p.cmd === '/bandeja') {
       textoBandeja(filtroBandeja(p.texto)).then(function (t) {
         unaVezAlGrupo('cmd:' + p.id, t, p.msg, p.chat, function (ok) { listo(ok ? 'contestado' + (p.chat && String(p.chat) !== String(GM_getValue('tg_chat')) ? ' por privado' : '') : 'no se pudo contestar'); });
@@ -1431,9 +1517,11 @@
     if (!hayGrupo() || !soyLider()) return;
     reintentarAvisos();
     atenderPendientes();
-    if (GM_getValue('tg_cmds', 0) < 20) {     // menú de comandos del bot (aparece al escribir "/" en el grupo)
+    seguimiento();
+    if (GM_getValue('tg_cmds', 0) < 21) {     // menú de comandos del bot (aparece al escribir "/" en el grupo)
       tg('setMyCommands', {commands: [{command: 'bandeja', description: 'Casos abiertos (o /bandeja gpon, /bandeja lineales)'},
                                       {command: 'caso', description: 'Detalle de un caso: /caso WO0096818'},
+                                      {command: 'seguir', description: 'Avisar notas de afuera de Mobisond en una WO: /seguir WO0097674'},
                                       {command: 'activos', description: 'Quién está activo ahora y quién entra'},
                                       {command: 'status', description: 'Resumen del día (o /status gpon, /status lineales)'},
                                       {command: 'semana', description: 'Resumen de esta semana (o /semana 13-10-2026)'},
@@ -1443,7 +1531,7 @@
                                       {command: 'rama', description: 'Casos de una rama GPON en 90 días: /rama GMRN-R0503'},
                                       {command: 'pcs', description: 'PCs conectadas y su versión del Avisador'},
                                       {command: 'dispenser', description: 'Ranking del dispenser (o /dispenser 19-10 para otra semana)'},
-                                      {command: 'racha', description: 'Racha sin vencidos de Lineales y GPON'}]}, function () { GM_setValue('tg_cmds', 20); });
+                                      {command: 'racha', description: 'Racha sin vencidos de Lineales y GPON'}]}, function () { GM_setValue('tg_cmds', 21); });
     }
     if (modoBot === null) {                    // ¿el bot está conectado a Supabase?
       modoBot = 'esperando';
