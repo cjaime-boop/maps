@@ -2,7 +2,7 @@
 // @name         Mobisond · Vigía de CTO (SGT)
 // @namespace    mobisond
 // @version      1.0
-// @description  Con SGT abierto y la sesión iniciada, revisa cada 5 minutos las CTO que se vigilan desde QGIS (Enlaces por Botella → 📡 Vigía) y sube cómo están. El login lo hacés vos; la sesión de SGT no sale del navegador.
+// @description  Con SGT abierto y la sesión iniciada, revisa cada 5 minutos las CTO que se vigilan desde QGIS (plugin 📡 Vigía de CTO) y sube cómo están. El login lo hacés vos; la sesión de SGT no sale del navegador.
 // @match        https://sgtmobile.claro.com.ar/*
 // @grant        GM_xmlhttpRequest
 // @grant        GM_getValue
