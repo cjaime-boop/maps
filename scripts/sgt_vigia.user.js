@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Mobisond · Vigía de CTO (SGT)
 // @namespace    mobisond
-// @version      1.3
+// @version      1.4
 // @description  Con SGT abierto y la sesión iniciada, revisa cada 30 segundos las CTO que se vigilan desde QGIS (plugin 📡 Vigía de CTO) y sube cómo están. El login lo hacés vos; la sesión de SGT no sale del navegador.
 // @match        https://sgtmobile.claro.com.ar/*
 // @grant        GM_xmlhttpRequest
@@ -87,13 +87,13 @@
     var con = data.filter(function (p) { return p.estadoONT === 'Up' || p.estadoONT === 'Down'; });
     var down = con.filter(function (p) { return p.estadoONT === 'Down'; }).length;
     var e = !con.length ? 'sin' : down === con.length ? 'caida' : down ? 'parcial' : 'ok';
-    // potencia: la de la primera casilla; si no tiene lectura, la del primer cliente andando que tenga
+    // potencia: la mejor (la más alta) de los clientes andando
     function lectura(p) { var v = parseFloat(String(p && p.rxPower).replace(',', '.')); return isNaN(v) ? null : v; }
-    var pot = lectura(data[0]);
-    if (pot === null) {
-      var up = data.filter(function (p) { return p.estadoONT === 'Up' && lectura(p) !== null; })[0];
-      pot = up ? lectura(up) : null;
-    }
+    var pot = null;
+    data.forEach(function (p) {
+      var v = p.estadoONT === 'Up' ? lectura(p) : null;
+      if (v !== null && (pot === null || v > pot)) pot = v;
+    });
     // caída: desde el "Último Apagado" más reciente de los clientes en Down (cuando se cayó el último)
     var apagado = null;
     if (e === 'caida') {
