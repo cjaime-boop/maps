@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Mobisond · Avisador
 // @namespace    mobisond
-// @version      3.68
+// @version      3.69
 // @description  Avisa los casos nuevos (celular, campana y grupo de Telegram), los Lineales sin notas hace 25 min, los SLA y los aceptados; comandos del bot (/status, /bandeja, /autoasignar…); dispenser de la semana, racha sin vencidos y mensajes en casos pausados.
 // @match        https://*.service-now.com/*
 // @grant        GM_xmlhttpRequest
@@ -1245,6 +1245,23 @@
       }, function (e) { unaVezAlGrupo('cmd:' + p.id, 'No pude armar el resumen semanal (' + esc(e.message) + ').', p.msg, p.chat); listo('error ServiceNow ' + e.message); });
       return;
     }
+    if (p.cmd === '/rango') {
+      // "/rango 01-11 10-11" (sin año = este año) o "/rango 25-10-2026 al 05-11-2026": resumen entre esas dos fechas
+      var ms = ((p.texto || '').split(/\s+/).slice(1).join(' ').match(/\d{1,2}[\/.-]\d{1,2}(?:[\/.-]\d{2,4})?/g)) || [];
+      var hoyR = new Date(); hoyR.setHours(0, 0, 0, 0);
+      var r1 = ms[0] ? fechaDeTexto(ms[0]) : null, r2 = ms[1] ? fechaDeTexto(ms[1]) : null;
+      var usoR = 'Usalo así: <code>/rango 01-11 10-11</code> (o con año: <code>/rango 25-10-2026 05-11-2026</code>)';
+      var errR = !r1 || !r2 ? 'Faltan las dos fechas. ' + usoR : (r1 === 'mal' || r2 === 'mal') ? 'No entendí la fecha. ' + usoR : null;
+      if (!errR && r1 > r2 && !/[\/.-]\d{2,4}$/.test(ms[0])) r1.setFullYear(r1.getFullYear() - 1);   // "25-12 05-01": del año pasado
+      if (!errR && r1 > r2) { var tr = r1; r1 = r2; r2 = tr; }
+      if (!errR && r1 > hoyR) errR = 'Esa fecha todavía no llegó 🙂';
+      if (!errR && (r2 - r1) / 864e5 > 92) errR = 'El rango puede ser de hasta 3 meses.';
+      var rangoTxt = errR ? Promise.resolve(errR) : (RESUMEN.limpiarGraf(), RESUMEN.rango(r1, r2 > hoyR ? hoyR : r2));
+      rangoTxt.then(function (t) {
+        conGraficos(p, t, function (ok) { listo(ok ? 'contestado' : 'no se pudo contestar'); });
+      }, function (e) { unaVezAlGrupo('cmd:' + p.id, 'No pude armar el resumen (' + esc(e.message) + ').', p.msg, p.chat); listo('error ServiceNow ' + e.message); });
+      return;
+    }
     if (p.cmd === '/mes') {
       // "/mes" = mes en curso; "/mes 09-2026" o "/mes 9/2026" = ese mes; el automático del 1° (pedido sin mensaje) = mes pasado
       var am = /(\d{1,2})[\/.-](\d{4})/.exec((p.texto || '').split(/\s+/).slice(1).join(' ')), autoMes = p.id < 0 && !p.msg;
@@ -1518,7 +1535,7 @@
     reintentarAvisos();
     atenderPendientes();
     seguimiento();
-    if (GM_getValue('tg_cmds', 0) < 21) {     // menú de comandos del bot (aparece al escribir "/" en el grupo)
+    if (GM_getValue('tg_cmds', 0) < 22) {     // menú de comandos del bot (aparece al escribir "/" en el grupo)
       tg('setMyCommands', {commands: [{command: 'bandeja', description: 'Casos abiertos (o /bandeja gpon, /bandeja lineales)'},
                                       {command: 'caso', description: 'Detalle de un caso: /caso WO0096818'},
                                       {command: 'seguir', description: 'Avisar notas de afuera de Mobisond en una WO: /seguir WO0097674'},
@@ -1526,12 +1543,13 @@
                                       {command: 'status', description: 'Resumen del día (o /status gpon, /status lineales)'},
                                       {command: 'semana', description: 'Resumen de esta semana (o /semana 13-10-2026)'},
                                       {command: 'mes', description: 'Resumen de este mes (o /mes 09-2026)'},
+                                      {command: 'rango', description: 'Resumen entre dos fechas: /rango 01-11 10-11'},
                                       {command: 'historial', description: 'Qué pasó cerca de una botella, coordenadas o link'},
                                       {command: 'autoasignar', description: 'Asignación automática: ver, on u off'},
                                       {command: 'rama', description: 'Casos de una rama GPON en 90 días: /rama GMRN-R0503'},
                                       {command: 'pcs', description: 'PCs conectadas y su versión del Avisador'},
                                       {command: 'dispenser', description: 'Ranking del dispenser (o /dispenser 19-10 para otra semana)'},
-                                      {command: 'racha', description: 'Racha sin vencidos de Lineales y GPON'}]}, function () { GM_setValue('tg_cmds', 21); });
+                                      {command: 'racha', description: 'Racha sin vencidos de Lineales y GPON'}]}, function () { GM_setValue('tg_cmds', 22); });
     }
     if (modoBot === null) {                    // ¿el bot está conectado a Supabase?
       modoBot = 'esperando';
@@ -2293,6 +2311,25 @@
       });
     }
 
+    // /rango: entre dos fechas cualquiera (hasta 3 meses). Mismo formato que /semana; gráficos si son hasta 31 días.
+    function rango(desde, hasta) {
+      return periodo(desde, hasta).then(function (d) {
+        var L = d.L, G = d.G, dias = Math.round((hasta - desde) / 864e5) + 1;
+        ultimo = dias <= 31 ? {tipo: dias <= 10 ? 'semana' : 'mes', desde: desde, hasta: hasta, L: L, G: G,
+                               cuando: 'Del ' + dm(desde) + ' al ' + dm(hasta), pieTxt: 'el período'} : null;
+        var extra = function (r) { var o = []; if (dias > 13 && semanaCargada(r)) o.push(semanaCargada(r)); if (diaCargado(r)) o.push(diaCargado(r)); return o; };
+        var out = ['📆 <b>Resumen</b> · ' + dm(desde) + (desde.getFullYear() !== hasta.getFullYear() ? '/' + desde.getFullYear() : '') + ' al ' + dm(hasta) +
+                   ' <i>(' + dias + (dias === 1 ? ' día)' : ' días)') + '</i>', '', '🔧 <b>Lineales</b>', '',
+                   'Ingresados: ' + L.ing, 'Cerrados: ' + L.cerrTodos, 'Vencidos: ' + esc(vencTxtP(L))].concat(vencCliTxt(L), vencBajaTxt(L), [cumplTxt(L)]);
+        if (porCliente(L)) out.push(porCliente(L));
+        out = out.concat(extra(L), SEP, ['📡 <b>GPON</b>', '', 'Ingresados: ' + G.ing, 'Cerrados: ' + G.cerrTodos, 'Vencidos: ' + esc(vencTxtP(G))], vencBajaTxt(G),
+                         [cumplTxt(G), 'Emergencias (P1/P2): ' + G.emerg], extra(G));
+        var cis = d.cis.slice(0, 5);
+        if (cis.length) { out = out.concat(SEP, ['🔁 <b>CIs que más se repitieron</b>']); cis.forEach(function (p) { out.push('• ' + esc(p[0]) + ' · ' + p[1] + ' casos'); }); }
+        return out.concat(avisosDatos(d)).join('\n');
+      });
+    }
+
     // Mes calendario. Sin fecha: el mes pasado (el automático del 1°). Con fecha: ese mes (/mes a mano = mes en curso).
     // Compara con el mes anterior.
     function mes(fechaRef) {
@@ -2736,7 +2773,7 @@
 
     if (window.top === window.self) montar();
     var ultimo = null;                     // datos del último /semana o /mes (para los gráficos)
-    return {armar: armar, semana: semana, mes: mes, textoDispenser: textoDispenser, inicioSemanaDisp: inicioSemanaDisp, textoRacha: textoRacha, ultimoGraf: function () { return ultimo; }, limpiarGraf: function () { ultimo = null; }, periodo: periodo};
+    return {armar: armar, semana: semana, mes: mes, rango: rango, textoDispenser: textoDispenser, inicioSemanaDisp: inicioSemanaDisp, textoRacha: textoRacha, ultimoGraf: function () { return ultimo; }, limpiarGraf: function () { ultimo = null; }, periodo: periodo};
   })();
   // ---------------------------------------------------------------- gráficos de /semana y /mes (una foto por proyecto)
   // Barras por día con los casos INGRESADOS ese día; la parte roja son los de esos que se vencieron (SLA neto, sin prioridad baja).
@@ -2806,7 +2843,7 @@
       texto(x, 'Casos ingresados por día: la parte roja son los que se vencieron', 24, 58, 13, MU);
       leyenda(x, dt.color, false);
       barras(x, dt, 50, 110, 620, 350, false);
-      pie(x, dt, 425, 'la semana');
+      pie(x, dt, 425, dt.pieTxt || 'la semana');
       return L.c;
     }
     function fotoMes(dt) {
@@ -2824,7 +2861,7 @@
       texto(x, 'Casos ingresados por día: la parte roja son los que se vencieron', 24, 58, 13, MU);
       leyenda(x, dt.color, true);
       barras(x, dt, 50, 100, 620, 330, true);
-      pie(x, dt, 368, 'el mes');
+      pie(x, dt, 368, dt.pieTxt || 'el mes');
       x.fillStyle = GR; x.fillRect(24, 388, 592, 1);
       texto(x, 'Fines de semana', 24, 414, 15, TX, '700');
       [[hab, 'Días hábiles (prom. por día)', 24], [fin, 'Fines de semana (prom. por día)', 326]].forEach(function (t) {
@@ -2875,10 +2912,10 @@
       var hastaDib = g.tipo === 'semana' && g.hastaTitulo ? g.hastaTitulo : g.hasta;     // semana en curso: los 7 días igual (los que faltan, vacíos)
       for (var d = new Date(g.desde.getTime()); d <= hastaDib; d = new Date(d.getFullYear(), d.getMonth(), d.getDate() + 1)) dias.push(d);
       var MES = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
-      var cuando = g.tipo === 'mes' ? MES[g.desde.getMonth()].replace(/^./, function (c) { return c.toUpperCase(); }) + ' ' + g.desde.getFullYear()
+      var cuando = g.cuando ? g.cuando : g.tipo === 'mes' ? MES[g.desde.getMonth()].replace(/^./, function (c) { return c.toUpperCase(); }) + ' ' + g.desde.getFullYear()
                                     : 'Semana ' + ddmm(g.desde) + ' al ' + (g.hastaTitulo && g.hastaTitulo > g.hasta ? ddmm(g.hasta) + ' (en curso)' : ddmm(g.hastaTitulo || g.hasta));
       var fotos = [['Lineales', '#2563eb', g.L], ['GPON', '#8b5cf6', g.G]].map(function (p) {
-        var dt = {proy: p[0], color: p[1], dias: dias, titulo: p[0] + ' · ' + cuando, falta: dias.map(function (d) { return d > g.hasta; }),
+        var dt = {proy: p[0], color: p[1], dias: dias, titulo: p[0] + ' · ' + cuando, pieTxt: g.pieTxt, falta: dias.map(function (d) { return d > g.hasta; }),
                   ing: dias.map(function (d) { return p[2].porDia[isoD(d)] || 0; }), ven: dias.map(function (d) { return p[2].vDia[isoD(d)] || 0; })};
         return {nombre: p[0], canvas: g.tipo === 'mes' ? fotoMes(dt) : fotoSemana(dt), cuando: cuando};
       });
