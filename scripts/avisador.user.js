@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Mobisond · Avisador
 // @namespace    mobisond
-// @version      3.69
+// @version      3.70
 // @description  Avisa los casos nuevos (celular, campana y grupo de Telegram), los Lineales sin notas hace 25 min, los SLA y los aceptados; comandos del bot (/status, /bandeja, /autoasignar…); dispenser de la semana, racha sin vencidos y mensajes en casos pausados.
 // @match        https://*.service-now.com/*
 // @grant        GM_xmlhttpRequest
@@ -230,6 +230,11 @@
     });
   }
   // Manda al grupo una sola vez por "clave", aunque varias PCs lo detecten (Supabase decide quién lo manda).
+  // el primero que reclama "resp:<clave>" contesta; cada intento usa una marca nueva, así ni la misma PC repite
+  function unaSolaRespuesta(clave) {
+    return sbRpc('bot_reclamar', {p_aviso: 'resp:' + clave, p_pc: pcId() + '-' + Math.random().toString(36).slice(2, 8)})
+      .then(function (gano) { return gano !== false; }, function () { return true; });
+  }
   function unaVezAlGrupo(clave, html, responderA, chatId, alTerminar, reintento, primero) {   // chatId: para contestar por privado (si no, al grupo)
     if (!hayGrupo()) return;
     var gane = false;
@@ -255,8 +260,12 @@
         fin(false);
       });
     };
-    // los comandos los lee una sola PC (Supabase o Telegram se los da a una): se contestan directo
-    if (/^cmd:/.test(clave)) { mandar(); return; }
+    // comandos: una sola respuesta por pedido, aunque se procese dos veces (recarga en el medio, Supabase que lo
+    // vuelve a dar antes de enterarse de que ya se contestó). Si Supabase no responde, se contesta igual.
+    if (/^cmd:/.test(clave)) {
+      unaSolaRespuesta(clave).then(function (ok) { if (ok) mandar(); else { botLog('ya contestado ' + clave.slice(0, 30)); fin(true); } });
+      return;
+    }
     // casos y alertas: Supabase hace de árbitro, solo la primera PC que lo pide lo manda.
     // Si Supabase no responde, se manda igual (mejor repetido que perdido).
     sbRpc('bot_reclamar', {p_aviso: clave, p_pc: pcId()}).then(function (gano) {
@@ -2942,7 +2951,7 @@
   // primero los gráficos (si se pudieron armar), después el texto de siempre. Si los gráficos fallan, el texto sale igual.
   function conGraficos(p, texto, alTerminar) {
     var g = RESUMEN.ultimoGraf(), chat = p.chat || GM_getValue('tg_chat');
-    var fotos = g ? GRAF.armar(g).then(function (fs) {
+    var fotos = g ? unaSolaRespuesta('graf:' + p.id).then(function (ok) { return ok ? GRAF.armar(g) : []; }).then(function (fs) {
       return fs.reduce(function (cad, f) {
         return cad.then(function () { return tgFoto(chat, f.blob, '📊 <b>' + f.nombre + '</b> · ' + esc(f.cuando.replace(/^Semana/, 'semana')), p.msg); });
       }, Promise.resolve());
