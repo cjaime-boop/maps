@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Mobisond · Vigía de CTO (SGT)
 // @namespace    mobisond
-// @version      1.7
+// @version      1.8
 // @description  Con SGT abierto y la sesión iniciada, revisa cada 30 segundos las CTO que se vigilan desde QGIS (plugin 📡 Vigía de CTO) y sube cómo están. Si alguien aprieta "Actualizar ahora" en el panel, revisa enseguida. El login lo hacés vos; la sesión de SGT no sale del navegador.
 // @match        https://sgtmobile.claro.com.ar/*
 // @grant        GM_xmlhttpRequest
@@ -116,16 +116,35 @@
         if (f && (!apagado || f > apagado)) apagado = f;
       });
     }
+    // cada cliente para el desplegable del panel: puerto, Up/Down, potencia, último apagado
+    var clientes = con.map(function (p, n) {
+      var c = {p: puerto(p, n), e: p.estadoONT};
+      var v = lectura(p);
+      if (v !== null) c.rx = String(v);
+      var f = p.estadoONT === 'Down' ? aFecha(p.lastDownTime) : null;
+      if (f) c.ap = f.toISOString();
+      if (!n) c.k = Object.keys(p).join(',').slice(0, 400);     // nombres de los campos (para ajustar el puerto)
+      return c;
+    });
     return {estado: e, caidos: down, total: con.length, potencia: pot === null ? null : String(pot),
-            apagado: apagado ? apagado.toISOString() : null};
+            apagado: apagado ? apagado.toISOString() : null, clientes: clientes};
+  }
+  var CAMPOS_PUERTO = ['puerto', 'nroPuerto', 'numeroPuerto', 'puertoSplitter', 'nroPuertoSplitter', 'port',
+                       'portNumber', 'splitterPort', 'numPuerto', 'puertoCto', 'puertoNap'];
+  function puerto(p, n) {
+    for (var i = 0; i < CAMPOS_PUERTO.length; i++) {
+      var v = p[CAMPOS_PUERTO[i]];
+      if (v !== undefined && v !== null && String(v).trim() !== '') return String(v).trim();
+    }
+    return '';
   }
   function consultar(id, token) {
     return fetch(API + encodeURIComponent(id), {headers: {'Authorization': token}}).then(function (r) {
       if (r.status === 401 || r.status === 403) throw new Error('sesion');
-      if (!r.ok) return {estado: 'error', caidos: null, total: null};
+      if (!r.ok) return {estado: 'error', caidos: null, total: null, clientes: []};
       return r.json().then(function (j) {
         var d = (j && j.data) || [];
-        return d.length ? estadoDe(d) : {estado: 'error', caidos: null, total: null};   // no está en SGT
+        return d.length ? estadoDe(d) : {estado: 'error', caidos: null, total: null, clientes: []};   // no está en SGT
       });
     });
   }
