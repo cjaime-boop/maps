@@ -22,6 +22,7 @@
   var CADA_MS = 30 * 1000;              // una vuelta cada 30 segundos (si una vuelta tarda más, la siguiente arranca enseguida)
   var ENTRE_MS = 200;                   // pausa entre CTO, para no cargar a SGT
   var PARALELO = 4;                     // CTO que se consultan a la vez (SGT tarda unos 3-4 segundos por cada una)
+  var ESPERA_MS = 10 * 1000;            // la PC sin turno pregunta cada 10 segundos si puede tomarlo
   var PEDIDO_MS = 5 * 1000;             // cada 5 segundos mira si alguien apretó "Actualizar ahora" en QGIS
   var YO = pcId();                                                   // esta PC (en Supabase: una sola PC revisa a la vez)
   var PESTANA = Math.random().toString(36).slice(2, 8);              // esta pestaña (en la PC: una sola pestaña revisa)
@@ -185,9 +186,9 @@
         otraPC = (r.latido && r.latido.nombre) || '?';
         mostrar('Vigía: lo está revisando ' + (otraPC === '?' ? 'otra PC' : 'la PC de ' + otraPC), 'gris',
           'SGT está abierto en ' + (otraPC === '?' ? 'otra PC' : 'la PC de ' + otraPC) + ' y ya está revisando las CTO. ' +
-          'Si la cierran, esta toma el control en un minuto y medio.\n\nClic: revisar desde esta PC.');
+          'Si la cierran, esta toma el control enseguida.\n\nClic: revisar desde esta PC.');
         cartel.title = cartel.title.replace('\n\n(clic: revisar ahora)', '');
-        return;
+        return 'espera';
       }
       otraPC = '';
       var ctos = r.ctos || [];
@@ -238,7 +239,7 @@
     }).then(function (x) {
       corriendo = false;
       GM_setValue('vigia_pestana', {id: PESTANA, t: Date.now()});
-      proxima(x === 'reintentar' ? 60000 : Math.max(2000, CADA_MS - (Date.now() - inicio)));
+      proxima(x === 'reintentar' ? 60000 : x === 'espera' ? ESPERA_MS : Math.max(2000, CADA_MS - (Date.now() - inicio)));
     });
   }
 
