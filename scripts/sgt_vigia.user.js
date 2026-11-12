@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Mobisond · Vigía de CTO (SGT)
 // @namespace    mobisond
-// @version      1.6
+// @version      1.7
 // @description  Con SGT abierto y la sesión iniciada, revisa cada 30 segundos las CTO que se vigilan desde QGIS (plugin 📡 Vigía de CTO) y sube cómo están. Si alguien aprieta "Actualizar ahora" en el panel, revisa enseguida. El login lo hacés vos; la sesión de SGT no sale del navegador.
 // @match        https://sgtmobile.claro.com.ar/*
 // @grant        GM_xmlhttpRequest
@@ -21,6 +21,7 @@
   var API = '/SgtMobileBackend/filter/getVecindarioSplitter/';
   var CADA_MS = 30 * 1000;              // una vuelta cada 30 segundos (si una vuelta tarda más, la siguiente arranca enseguida)
   var ENTRE_MS = 200;                   // pausa entre CTO, para no cargar a SGT
+  var PARALELO = 4;                     // CTO que se consultan a la vez (SGT tarda unos 3-4 segundos por cada una)
   var PEDIDO_MS = 5 * 1000;             // cada 5 segundos mira si alguien apretó "Actualizar ahora" en QGIS
   var YO = pcId();                                                   // esta PC (en Supabase: una sola PC revisa a la vez)
   var PESTANA = Math.random().toString(36).slice(2, 8);              // esta pestaña (en la PC: una sola pestaña revisa)
@@ -172,26 +173,35 @@
       otraPC = '';
       var ctos = r.ctos || [];
       if (!ctos.length) { mostrar('Vigía: no hay CTO vigiladas', 'gris'); return rpc('vigia_guardar', {p_pc: YO, p_res: []}); }
-      var res = [], caidas = 0, i = 0;
-      function siguiente() {
-        if (i >= ctos.length) return Promise.resolve();
-        var c = ctos[i++];
-        mostrar('Vigía: revisando ' + i + '/' + ctos.length, 'gris');
-        GM_setValue('vigia_pestana', {id: PESTANA, t: Date.now()});
-        return consultar(c.sgt, token).then(function (e) {
-          e.cto = c.cto; res.push(e);
-          if (e.estado === 'caida') caidas++;
-          if (res.length % 5 === 0) rpc('vigia_guardar', {p_pc: YO, p_res: res.slice(-5)}).catch(function () {});
-        }, function (err) {
-          if (err.message === 'sesion') throw err;
-          res.push({cto: c.cto, estado: 'error', caidos: null, total: null});
-        }).then(function () { return dormir(ENTRE_MS); }).then(siguiente);
+      var res = new Array(ctos.length), caidas = 0, i = 0, hechas = 0, tanda = [];
+      function guardarTanda() {
+        if (!tanda.length) return Promise.resolve();
+        var t = tanda; tanda = [];
+        return rpc('vigia_guardar', {p_pc: YO, p_res: t});
       }
-      return siguiente().then(function () {
-        return rpc('vigia_guardar', {p_pc: YO, p_res: res.slice(Math.floor(res.length / 5) * 5)});
+      function trabajador() {           // cada uno toma la próxima CTO de la lista hasta que no quedan
+        if (i >= ctos.length) return Promise.resolve();
+        var n = i++, c = ctos[n];
+        GM_setValue('vigia_pestana', {id: PESTANA, t: Date.now()});
+        return consultar(c.sgt, token).then(function (e) { return e; }, function (err) {
+          if (err.message === 'sesion') throw err;
+          return {estado: 'error', caidos: null, total: null};
+        }).then(function (e) {
+          e.cto = c.cto; res[n] = e; hechas++;
+          if (e.estado === 'caida') caidas++;
+          mostrar('Vigía: revisando ' + hechas + '/' + ctos.length, 'gris');
+          tanda.push(e);
+          if (tanda.length >= PARALELO) guardarTanda().catch(function () {});
+        }).then(function () { return dormir(ENTRE_MS); }).then(trabajador);
+      }
+      mostrar('Vigía: revisando 0/' + ctos.length, 'gris');
+      var equipo = [];
+      for (var k = 0; k < Math.min(PARALELO, ctos.length); k++) equipo.push(trabajador());
+      return Promise.all(equipo).then(function () {
+        return guardarTanda();
       }).then(function () {
         avisoSesion = false;
-        var det = res.map(function (e) {
+        var det = res.filter(Boolean).map(function (e) {
           return ({caida: '🔴', parcial: '🟡', ok: '🟢', sin: '⚪', error: '⚠️'}[e.estado] || '·') + ' ' + e.cto +
             (e.total ? '  ' + (e.total - e.caidos) + '/' + e.total + ' operativos' + (e.potencia ? ' · ' + e.potencia + ' dBm' : '') : e.estado === 'error' ? '  (no la encontré en SGT)' : '');
         }).join('\n');
