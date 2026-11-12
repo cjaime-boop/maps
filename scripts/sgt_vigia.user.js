@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Mobisond · Vigía de CTO (SGT)
 // @namespace    mobisond
-// @version      1.5
+// @version      1.6
 // @description  Con SGT abierto y la sesión iniciada, revisa cada 30 segundos las CTO que se vigilan desde QGIS (plugin 📡 Vigía de CTO) y sube cómo están. Si alguien aprieta "Actualizar ahora" en el panel, revisa enseguida. El login lo hacés vos; la sesión de SGT no sale del navegador.
 // @match        https://sgtmobile.claro.com.ar/*
 // @grant        GM_xmlhttpRequest
@@ -31,12 +31,20 @@
     return id;
   }
   function clave() { return GM_getValue('vigia_clave', ''); }
+  function nombre() { return GM_getValue('pc_nombre', ''); }
+  function pedirNombre() {
+    var n = prompt('Vigía de CTO: ¿cómo se llama esta PC? (lo ven los demás: "lo está revisando la PC de …")', nombre());
+    if (n !== null) GM_setValue('pc_nombre', n.trim().slice(0, 40));
+    return nombre();
+  }
   function pedirClave() {
     var c = prompt('Vigía de CTO: pegá la clave (te la pasa quien administra el Vigía).', clave());
     if (c !== null) { GM_setValue('vigia_clave', c.trim()); ciclo(true); }
   }
   GM_registerMenuCommand('Cargar clave del Vigía', pedirClave);
   GM_registerMenuCommand('Revisar ahora', function () { ciclo(true); });
+  GM_registerMenuCommand('Nombre de esta PC', function () { pedirNombre(); ciclo(true); });
+  GM_registerMenuCommand('Tomar el control (revisar desde esta PC)', function () { tomarControl(true); });
 
   function rpc(fn, args) {
     args.p_clave = clave();
@@ -58,7 +66,11 @@
   cartel.style.cssText = 'position:fixed;left:12px;bottom:12px;z-index:99999;font:12px Segoe UI,Arial,sans-serif;' +
     'padding:6px 11px;border-radius:14px;box-shadow:0 2px 8px #0003;cursor:pointer;color:#fff;background:#6b7280;user-select:none';
   cartel.title = 'Vigía de CTO (clic: revisar ahora)';
-  cartel.onclick = function () { if (!clave()) pedirClave(); else ciclo(true); };
+  cartel.onclick = function () {
+    if (!clave()) return pedirClave();
+    if (otraPC) return tomarControl(false);
+    ciclo(true);
+  };
   document.body.appendChild(cartel);
   var COLORES = {ok: '#2e7d32', gris: '#6b7280', mal: '#c62828', aviso: '#b26a00'};
   function mostrar(txt, color, detalle) {
@@ -119,12 +131,19 @@
 
   // ---------------------------------------------------------------- la vuelta
   var corriendo = false, timer = null, avisoSesion = false, conTurno = false;
+  var otraPC = '', tomar = false;      // otraPC: nombre de la PC que tiene el turno (si no es esta)
+  function tomarControl(sinPreguntar) {
+    if (!sinPreguntar && !confirm('Lo está revisando ' + (otraPC === '?' ? 'otra PC' : 'la PC de ' + otraPC) +
+        '.\n\n¿Revisar desde esta PC? La otra deja de consultar a SGT.')) return;
+    tomar = true; ciclo(true);
+  }
   var inicio = 0;
   function proxima(ms) { clearTimeout(timer); timer = setTimeout(ciclo, ms); }
 
   function ciclo(forzar) {
     if (corriendo) return;
     if (!clave()) { mostrar('Vigía: falta la clave (clic)', 'aviso'); return; }
+    if (!nombre() && !GM_getValue('pc_nombre_preguntado', false)) { GM_setValue('pc_nombre_preguntado', true); pedirNombre(); }
     var token = localStorage.getItem('token');
     if (!token || /\/login/i.test(location.pathname)) {
       mostrar('Vigía: iniciá sesión en SGT', 'mal');
@@ -133,17 +152,24 @@
     }
     var otra = GM_getValue('vigia_pestana', null);
     if (otra && otra.id !== PESTANA && Date.now() - otra.t < 45000) {
+      otraPC = '';
       mostrar('Vigía: lo está revisando otra pestaña de SGT', 'gris');
       return proxima(CADA_MS);
     }
     GM_setValue('vigia_pestana', {id: PESTANA, t: Date.now()});
     corriendo = true; inicio = Date.now();
-    rpc('vigia_lista', {p_pc: YO}).then(function (r) {
+    var pedirForzado = tomar; tomar = false;
+    rpc('vigia_lista', {p_pc: YO, p_nombre: nombre() || null, p_forzar: pedirForzado}).then(function (r) {
       conTurno = !!r.turno;
       if (!r.turno) {
-        mostrar('Vigía: lo está revisando otra PC', 'gris', 'SGT está abierto en otra PC y ya está revisando las CTO. Si la cerraron, esta toma el control en un minuto y medio.');
+        otraPC = (r.latido && r.latido.nombre) || '?';
+        mostrar('Vigía: lo está revisando ' + (otraPC === '?' ? 'otra PC' : 'la PC de ' + otraPC), 'gris',
+          'SGT está abierto en ' + (otraPC === '?' ? 'otra PC' : 'la PC de ' + otraPC) + ' y ya está revisando las CTO. ' +
+          'Si la cierran, esta toma el control en un minuto y medio.\n\nClic: revisar desde esta PC.');
+        cartel.title = cartel.title.replace('\n\n(clic: revisar ahora)', '');
         return;
       }
+      otraPC = '';
       var ctos = r.ctos || [];
       if (!ctos.length) { mostrar('Vigía: no hay CTO vigiladas', 'gris'); return rpc('vigia_guardar', {p_pc: YO, p_res: []}); }
       var res = [], caidas = 0, i = 0;
