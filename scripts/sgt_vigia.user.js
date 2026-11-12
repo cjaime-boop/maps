@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Mobisond · Vigía de CTO (SGT)
 // @namespace    mobisond
-// @version      1.8
+// @version      1.9
 // @description  Con SGT abierto y la sesión iniciada, revisa cada 30 segundos las CTO que se vigilan desde QGIS (plugin 📡 Vigía de CTO) y sube cómo están. Si alguien aprieta "Actualizar ahora" en el panel, revisa enseguida. El login lo hacés vos; la sesión de SGT no sale del navegador.
 // @match        https://sgtmobile.claro.com.ar/*
 // @grant        GM_xmlhttpRequest
@@ -249,6 +249,8 @@
   }, PEDIDO_MS);
 
   window.addEventListener('beforeunload', function () {
+    // si esta PC era la que revisaba, avisa que se cerró: el panel lo muestra y otra PC toma el turno enseguida
+    if (conTurno && clave()) rpc('vigia_sesion', {p_pc: YO, p_sesion: 'cerrada'}).catch(function () {});
     var o = GM_getValue('vigia_pestana', null);
     if (o && o.id === PESTANA) GM_setValue('vigia_pestana', null);
   });
