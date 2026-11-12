@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Mobisond · Vigía de CTO (SGT)
 // @namespace    mobisond
-// @version      1.4
-// @description  Con SGT abierto y la sesión iniciada, revisa cada 30 segundos las CTO que se vigilan desde QGIS (plugin 📡 Vigía de CTO) y sube cómo están. El login lo hacés vos; la sesión de SGT no sale del navegador.
+// @version      1.5
+// @description  Con SGT abierto y la sesión iniciada, revisa cada 30 segundos las CTO que se vigilan desde QGIS (plugin 📡 Vigía de CTO) y sube cómo están. Si alguien aprieta "Actualizar ahora" en el panel, revisa enseguida. El login lo hacés vos; la sesión de SGT no sale del navegador.
 // @match        https://sgtmobile.claro.com.ar/*
 // @grant        GM_xmlhttpRequest
 // @grant        GM_getValue
@@ -21,6 +21,7 @@
   var API = '/SgtMobileBackend/filter/getVecindarioSplitter/';
   var CADA_MS = 30 * 1000;              // una vuelta cada 30 segundos (si una vuelta tarda más, la siguiente arranca enseguida)
   var ENTRE_MS = 200;                   // pausa entre CTO, para no cargar a SGT
+  var PEDIDO_MS = 5 * 1000;             // cada 5 segundos mira si alguien apretó "Actualizar ahora" en QGIS
   var YO = pcId();                                                   // esta PC (en Supabase: una sola PC revisa a la vez)
   var PESTANA = Math.random().toString(36).slice(2, 8);              // esta pestaña (en la PC: una sola pestaña revisa)
 
@@ -117,7 +118,7 @@
   }
 
   // ---------------------------------------------------------------- la vuelta
-  var corriendo = false, timer = null, avisoSesion = false;
+  var corriendo = false, timer = null, avisoSesion = false, conTurno = false;
   var inicio = 0;
   function proxima(ms) { clearTimeout(timer); timer = setTimeout(ciclo, ms); }
 
@@ -138,6 +139,7 @@
     GM_setValue('vigia_pestana', {id: PESTANA, t: Date.now()});
     corriendo = true; inicio = Date.now();
     rpc('vigia_lista', {p_pc: YO}).then(function (r) {
+      conTurno = !!r.turno;
       if (!r.turno) {
         mostrar('Vigía: lo está revisando otra PC', 'gris', 'SGT está abierto en otra PC y ya está revisando las CTO. Si la cerraron, esta toma el control en un minuto y medio.');
         return;
@@ -184,6 +186,12 @@
       proxima(x === 'reintentar' ? 60000 : Math.max(2000, CADA_MS - (Date.now() - inicio)));
     });
   }
+
+  // "Actualizar ahora" desde QGIS: solo la pestaña que tiene el turno, y si no está en medio de una vuelta
+  setInterval(function () {
+    if (corriendo || !conTurno || !clave()) return;
+    rpc('vigia_hay_pedido', {}).then(function (hay) { if (hay === true && !corriendo) ciclo(true); }).catch(function () {});
+  }, PEDIDO_MS);
 
   window.addEventListener('beforeunload', function () {
     var o = GM_getValue('vigia_pestana', null);
