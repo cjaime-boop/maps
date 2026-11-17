@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Mobisond · Móviles Ituran → QGIS
 // @namespace    mobisond
-// @version      2.4
+// @version      2.5
 // @description  Pasa las posiciones de los móviles de Ituran al plugin "Móviles Ituran" de QGIS (127.0.0.1) y al mapa de recorridos abierto en este mismo navegador. No sale nada de la computadora.
 // @match        https://web2.ituran.com.ar/*
 // @match        http://web2.ituran.com.ar/*
@@ -188,6 +188,7 @@
           hora: campo(x, /gps.?time|gpsdate|fecha.?gps|positiontime|lastpos|datetime|^time$|^date$|^fecha$|^hora$/i, 'txt') ||
                 campo(x, /time|date|fecha|hora/i, 'txt', /ignit|encend|apag|alta|creat|install|expir|birth|start|stop|off|on$/i) || '',
           velocidad: campo(x, /speed|veloc|kmh/i, 'num'),
+          rumbo: campo(x, /heading|course|azimut|bearing|rumbo|^angle$|^direction$/i, 'num'),     // hacia dónde va (grados), si Ituran lo trae
           direccion: campo(x, /addr|direcc|address|location|ubic|street|calle/i, 'txt') || '',
           grupo: (nd && nd.grupo) || gruposVistos[pat] || campo(x, /group|grupo|fleet|flota/i, 'txt') || ''});
       }
