@@ -2375,8 +2375,11 @@
       var pases = sbRpc('bot_dispenser', {p_semana: null, p_ganador: null}).then(function (antes) {
         return dispenser(d0, encurso ? new Date() : fin, antes && antes.nombres);
       }).catch(function () { return null; });
-      return Promise.all([periodo(d0, d0), periodo(ant, ant).catch(function () { return null; }), habitual, pases]).then(function (r) {
-        var d = r[0], a = r[1], hab = r[2], ps = r[3];
+      // simultaneidad al ingresar (tabla simult_ingresos de Supabase; si no existe o no hay datos, no se muestra)
+      var finMas = new Date(fin.getTime() + 1);
+      var simul = sbRpc('simult_rango', {p_desde: d0.toISOString(), p_hasta: finMas.toISOString()}).catch(function () { return null; });
+      return Promise.all([periodo(d0, d0), periodo(ant, ant).catch(function () { return null; }), habitual, pases, simul]).then(function (r) {
+        var d = r[0], a = r[1], hab = r[2], ps = r[3], sim = r[4];
         ultimo = null;                                    // un solo día: sin gráficos
         var nomAnt = encurso ? 'ayer' : DIAS_SEM[ant.getDay()] + ' ' + dm(ant);
         var vs = function (y) { return y === null || y === undefined ? '' : ' <i>(' + nomAnt + ' ' + y + ')</i>'; };
@@ -2437,9 +2440,22 @@
           var como = Math.abs(dif) < 1 ? 'normal' : dif > 0 ? 'más que lo habitual' : 'menos que lo habitual';
           return ['Un ' + DIAS_SEM[d0.getDay()] + ' promedio: ' + uno(h) + ' ingresados → ' + (encurso ? 'por ahora ' : '') + como];
         };
+        var simTxt = function (proy) {                   // 🧮 cuántos había en mano y en espera cuando entró cada caso
+          var xs = (sim || []).filter(function (x) { return String(x.proyecto || '').toLowerCase() === proy; });
+          if (!xs.length) return [];
+          var pr = function (k) { return uno(xs.reduce(function (s0, x) { return s0 + (x[k] || 0); }, 0) / xs.length); };
+          var cargados = xs.filter(function (x) { return (x.en_mano || 0) + (x.en_espera || 0) >= 4; });
+          var peor = xs.slice().sort(function (x, y) { return (y.en_mano + y.en_espera) - (x.en_mano + x.en_espera); })[0];
+          var hh = function (t) { var z = new Date(t); return ('0' + z.getHours()).slice(-2) + ':' + ('0' + z.getMinutes()).slice(-2); };
+          var o = ['🧮 Al ingresar (' + xs.length + ' registrados): promedio ' + pr('en_mano') + ' en mano · ' + pr('en_espera') + ' en espera · ' + pr('en_pausa') + ' en pausa',
+                   'Entraron con 4 o más en mano + espera: ' + cargados.length + ' de ' + xs.length];
+          if (peor && peor.en_mano + peor.en_espera > 0)
+            o.push('Más cargado: ' + esc(peor.wo || peor.wot) + ' a las ' + hh(peor.abierto || peor.detectado) + ' con ' + peor.en_mano + ' en mano y ' + peor.en_espera + ' en espera');
+          return o;
+        };
         var bloque = function (p, pa, proy) {
           var cs = hoyDe(proy);
-          var o = ['Ingresados: ' + p.ing + vs(pa && pa.ing)].concat(habTxt(proy, p.ing), turnos(cs), zonas(cs), destino(cs), llegada(cs), ['',
+          var o = ['Ingresados: ' + p.ing + vs(pa && pa.ing)].concat(habTxt(proy, p.ing), turnos(cs), zonas(cs), destino(cs), llegada(cs), simTxt(proy), ['',
                    'Cerrados en el día: ' + p.cerrTodos + vs(pa && pa.cerrTodos)], resolucion(proy), ['Vencidos: ' + esc(vencTxtP(p))],
                    proy === 'gpon' ? [] : vencCliTxt(p), vencBajaTxt(p), [cumplTxt(p)]);
           if (proy === 'gpon') o.push('Emergencias (P1/P2): ' + p.emerg);
