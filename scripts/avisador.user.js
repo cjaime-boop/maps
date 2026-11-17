@@ -711,9 +711,13 @@
         };
       });
       // simultaneidad: si entró un caso nuevo, Supabase guarda cuántos había en mano y en espera en ese momento
-      sbRpc('simult_registrar', {p_pc: pcId(), p_casos: lista.map(function (c) {
+      // (solo se llama si en la bandeja hay algún WOT que esta PC no había mandado antes: unas pocas veces por día)
+      var yaMandados = GM_getValue('simult_mandados', {}), hayNuevo = lista.some(function (c) { return c.wot && !yaMandados[c.wot]; });
+      if (hayNuevo) sbRpc('simult_registrar', {p_pc: pcId(), p_casos: lista.map(function (c) {
         return {wot: c.wot, wo: c.wo, proyecto: c.proyecto, prio: c.prio, estado: c.estado, abierto: c.abierto};
-      })}).catch(function () {});           // si la función no existe todavía, no pasa nada
+      })}).then(function () {
+        var m = {}; lista.forEach(function (c) { if (c.wot) m[c.wot] = 1; }); GM_setValue('simult_mandados', m);
+      }).catch(function () {});             // si la función no existe todavía, no pasa nada (se reintenta en 2 min)
       return sbRpc('bot_casos_abiertos', {p_pc: pcId(), p_casos: lista});
     }).catch(function (e) { soltar(); console.log('[Mobisond] casos abiertos (QGIS): ' + (e && e.message)); });   // si la tabla no existe, no pasa nada
   }
