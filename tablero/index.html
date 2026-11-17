@@ -22,6 +22,8 @@ select{background:rgba(255,255,255,.15);color:#fff;border:0;border-radius:8px;pa
 table{width:100%;border-collapse:collapse;font-size:13px}td,th{padding:7px 4px;border-bottom:1px solid #f1f5f9;text-align:left}th{color:var(--mu);font-weight:600;font-size:12px}
 svg{display:block;width:100%;height:auto}
 .cs{display:grid;grid-template-columns:minmax(120px,240px) 1fr 34px 40px;align-items:center;gap:10px;margin:9px 0;font-size:13px}.cs small{color:var(--mu);font-size:12px;text-align:right}.cs i{display:block;height:16px;border-radius:4px}
+.mini{display:inline-flex;background:#e2e8f0;border-radius:9px;padding:3px;margin-bottom:4px}.mini button{border:0;background:none;padding:5px 14px;border-radius:7px;font:600 12.5px inherit;color:#475569;cursor:pointer}.mini .on{background:#fff;color:#0f172a;box-shadow:0 1px 2px rgba(15,23,42,.1)}
+.ley{font-size:12px;color:#475569;margin-bottom:6px}.ley b{display:inline-block;width:10px;height:10px;border-radius:2px;vertical-align:-1px;margin-right:3px}
 .zn{display:grid;grid-template-columns:70px 1fr 34px;align-items:center;gap:10px;margin:10px 0;font-size:13px}.zn i{display:block;height:20px;border-radius:4px;background:var(--gpon)}.vacio{color:var(--mu);font-size:13px;padding:10px 0}
 #login{max-width:340px;margin:80px auto;background:#fff;border-radius:16px;padding:24px;box-shadow:0 10px 30px rgba(15,23,42,.15)}
 #login h2{margin:0 0 6px;font-size:18px}#login p{color:var(--mu);font-size:13px;margin:0 0 14px}
@@ -34,7 +36,7 @@ svg{display:block;width:100%;height:auto}
 <div id="app" hidden>
 <div class="top"><div class="r1"><div><h1>📊 Tablero Mobisond · ATC</h1><small id="act"></small></div>
 <div class="seg"><button data-v="semana" class="on">Semana</button><button data-v="mes">Mes</button><button data-v="anio">Año</button></div><select id="per"></select></div>
-<div class="tabs"><button data-p="lineales" class="on">🔧 Lineales</button><button data-p="gpon">📡 GPON</button><button data-p="termino">📈 En término</button></div></div>
+<div class="tabs"><button data-p="lineales" class="on">🔧 Lineales</button><button data-p="gpon">📡 GPON</button><button data-p="termino">📈 En término</button><button data-p="simul">⏱️ Simultaneidad</button></div></div>
 <div class="wrap" id="wrap"></div></div>
 <script>
 (function () {
@@ -44,7 +46,7 @@ svg{display:block;width:100%;height:auto}
   var DSEM = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'];
   var MES = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
   var NOMBRE_CLI = {CLR: 'Claro', EDN: 'Edenor', MUNI: 'Municipal', TP: 'Telecom', MVS: 'Movistar', Otros: 'sin cliente'};
-  var st = {vista: 'semana', proy: 'lineales', per: 0, datos: null};
+  var st = {vista: 'semana', proy: 'lineales', per: 0, datos: null, pass: null, simProy: 'Lineales', simCache: {}};
   var $ = function (id) { return document.getElementById(id); };
   function lsGet(k) { try { return localStorage.getItem(k); } catch (e) { return null; } }
   function lsSet(k, v) { try { if (v === null) localStorage.removeItem(k); else localStorage.setItem(k, v); } catch (e) {} }
@@ -250,6 +252,89 @@ svg{display:block;width:100%;height:auto}
     $('wrap').innerHTML = h;
   }
 
+
+  // ---------- pestaña "Simultaneidad": cuántos casos había en mano y en espera cuando entró cada caso
+  // (lo registra el avisador desde el 17/11/2026; tabla simult_ingresos de Supabase)
+  var C_MANO = '#2563eb', C_ESP = '#f59e0b', C_PAU = '#94a3b8';
+  function leerSimul(p) {
+    var k = iso(p.desde) + '|' + iso(p.hasta);
+    if (st.simCache[k]) return Promise.resolve(st.simCache[k]);
+    return fetch(SB + '/rest/v1/rpc/simult_tablero', {method: 'POST', headers: {apikey: KEY, 'Content-Type': 'application/json'},
+      body: JSON.stringify({p_pass: st.pass, p_desde: iso(p.desde), p_hasta: iso(p.hasta)})})
+      .then(function (r) { return r.json().then(function (j) { if (!r.ok) throw new Error(j.message || r.status); st.simCache[k] = j || []; return st.simCache[k]; }); });
+  }
+  function uno(n) { return (Math.round(n * 10) / 10).toFixed(1).replace('.', ','); }
+  function grafHoras(xs) {                // por hora de ingreso: promedio en mano (azul) + en espera (naranja), apilado
+    var hs = []; for (var i = 0; i < 24; i++) hs.push({n: 0, m: 0, e: 0});
+    xs.forEach(function (x) { var h = hs[new Date(x.abierto).getHours()]; h.n++; h.m += x.mano; h.e += x.espera; });
+    var W = 1180, H = 230, x0 = 34, y0 = 20, y1 = 190, cw = (W - x0) / 24, bw = cw * 0.6;
+    var top = Math.max(2, Math.max.apply(null, hs.map(function (h) { return h.n ? (h.m + h.e) / h.n : 0; })));
+    var vmax = Math.ceil(top), s = '<svg viewBox="0 0 ' + W + ' ' + (H + 22) + '">';
+    for (var v = 0; v <= vmax; v += vmax > 6 ? 2 : 1) { var y = y1 - (y1 - y0) * v / vmax; s += '<line x1="' + x0 + '" x2="' + W + '" y1="' + y + '" y2="' + y + '" stroke="#eef0f3"/><text x="' + (x0 - 8) + '" y="' + (y + 4) + '" font-size="11" fill="#94a3b8" text-anchor="end">' + v + '</text>'; }
+    hs.forEach(function (h, i) {
+      var cx = x0 + cw * i + cw / 2;
+      if (h.n) {
+        var m = h.m / h.n, e = h.e / h.n, hm = (y1 - y0) * m / vmax, he = (y1 - y0) * e / vmax;
+        s += '<rect x="' + (cx - bw / 2) + '" y="' + (y1 - hm) + '" width="' + bw + '" height="' + hm + '" fill="' + C_MANO + '"><title>' + i + ' h: ' + uno(m) + ' en mano</title></rect>';
+        s += '<rect x="' + (cx - bw / 2) + '" y="' + (y1 - hm - he) + '" width="' + bw + '" height="' + he + '" fill="' + C_ESP + '"><title>' + i + ' h: ' + uno(e) + ' en espera</title></rect>';
+        s += '<text x="' + cx + '" y="' + (y1 - hm - he - 5) + '" font-size="11" font-weight="700" fill="#1f2937" text-anchor="middle">' + uno(m + e) + '</text>';
+      }
+      s += '<text x="' + cx + '" y="' + (y1 + 16) + '" font-size="11" fill="#64748b" text-anchor="middle">' + ('0' + i).slice(-2) + '</text>';
+      if (h.n) s += '<text x="' + cx + '" y="' + (y1 + 32) + '" font-size="10" fill="#94a3b8" text-anchor="middle">' + h.n + '</text>';
+    });
+    return s + '</svg>';
+  }
+  function cargaTramos(xs) {             // cuántos ingresos entraron con 0-1, 2-3, 4-5, 6+ en mano + en espera
+    var tr = [['0 a 1', 0, 1], ['2 a 3', 2, 3], ['4 a 5', 4, 5], ['6 o más', 6, 999]];
+    var n = tr.map(function (t) { return xs.filter(function (x) { var c = x.mano + x.espera; return c >= t[1] && c <= t[2]; }).length; });
+    var max = Math.max.apply(null, n.concat([1]));
+    return tr.map(function (t, i) {
+      var col = i < 2 ? '#93c5fd' : i === 2 ? '#f59e0b' : '#dc2626';
+      return '<div class="cs"><span>' + t[0] + ' casos</span><div><i style="width:' + (n[i] / max * 100) + '%;background:' + col + '"></i></div><strong>' + n[i] + '</strong><small>' + (xs.length ? Math.round(100 * n[i] / xs.length) : 0) + '%</small></div>';
+    }).join('');
+  }
+  function masCargados(xs) {
+    var ord = xs.slice().sort(function (a, b) { return (b.mano + b.espera) - (a.mano + a.espera) || b.espera - a.espera; }).slice(0, 8);
+    if (!ord.length) return '<div class="vacio">Sin ingresos en este período.</div>';
+    return '<table><tr><th>Entró</th><th>WO</th><th>Prio</th><th>En mano</th><th>En espera</th><th>En pausa</th></tr>' + ord.map(function (x) {
+      var d = new Date(x.abierto);
+      return '<tr><td>' + DSEM[d.getDay()] + ' ' + ddmm(d) + ' ' + ('0' + d.getHours()).slice(-2) + ':' + ('0' + d.getMinutes()).slice(-2) + '</td><td>' + esc(x.wo || x.wot) +
+             '</td><td>P' + esc(x.prio || '?') + '</td><td><b style="color:' + C_MANO + '">' + x.mano + '</b>' + (x.mano_pausa ? ' <span style="color:#94a3b8;font-size:11px">(' + x.mano_pausa + ' en pausa con cuadrilla)</span>' : '') +
+             '</td><td><b style="color:' + C_ESP + '">' + x.espera + '</b></td><td>' + x.pausa + '</td></tr>';
+    }).join('') + '</table>';
+  }
+  function pintarSimul(p) {
+    var sel = '<div class="c full" style="padding:10px 18px"><div class="mini">' + ['Lineales', 'GPON'].map(function (n) {
+      return '<button data-sp="' + n + '"' + (st.simProy === n ? ' class="on"' : '') + '>' + (n === 'Lineales' ? '🔧 ' : '📡 ') + n + '</button>'; }).join('') +
+      '</div><p style="margin:6px 0 0">Cuando entra un caso, se guarda cuántos otros casos del mismo proyecto había abiertos: <b style="color:' + C_MANO + '">en mano</b> (con cuadrilla: en curso, en camino o en una pausa con la cuadrilla ocupada, como validación con BOFO o lluvia) y <b style="color:' + C_ESP + '">en espera</b> (todavía sin cuadrilla). Se registra desde el 17/11/2026.</p></div>';
+    var atar = function () { document.querySelectorAll('[data-sp]').forEach(function (b) { b.onclick = function () { st.simProy = b.dataset.sp; pintar(); }; }); };
+    var k = iso(p.desde) + '|' + iso(p.hasta);
+    if (!st.simCache[k]) {
+      $('wrap').innerHTML = sel + '<div class="c full"><div class="vacio">Cargando…</div></div>'; atar();
+      leerSimul(p).then(function () { if (st.proy === 'simul') pintar(); }, function (e) {
+        $('wrap').innerHTML = sel + '<div class="c full"><div class="vacio">No pude leer la simultaneidad (' + esc(e.message) + ').</div></div>'; atar();
+      });
+      return;
+    }
+    var xs = st.simCache[k].filter(function (x) { return String(x.proyecto || '').toLowerCase() === st.simProy.toLowerCase(); });
+    if (!xs.length) { $('wrap').innerHTML = sel + '<div class="c full"><div class="vacio">No hay ingresos registrados en este período.</div></div>'; atar(); return; }
+    var prom = function (f) { return xs.reduce(function (a, x) { return a + f(x); }, 0) / xs.length; };
+    var cargados = xs.filter(function (x) { return x.mano + x.espera >= 4; }).length, tarde = xs.filter(function (x) { return x.tarde; }).length;
+    var peor = xs.slice().sort(function (a, b) { return (b.mano + b.espera) - (a.mano + a.espera); })[0];
+    var kpi = function (n, v, extra, col) { return '<div class="k"><small>' + n + '</small><b' + (col ? ' style="color:' + col + '"' : '') + '>' + v + '</b><i style="color:#64748b">' + extra + '</i></div>'; };
+    var h = sel;
+    h += kpi('Casos registrados', xs.length, tarde ? tarde + ' registrados tarde (más de 10 min)' : 'todos registrados a tiempo');
+    h += kpi('En mano al ingresar', uno(prom(function (x) { return x.mano; })), 'promedio · máximo ' + Math.max.apply(null, xs.map(function (x) { return x.mano; })), C_MANO);
+    h += kpi('En espera al ingresar', uno(prom(function (x) { return x.espera; })), 'promedio · máximo ' + Math.max.apply(null, xs.map(function (x) { return x.espera; })), C_ESP);
+    h += kpi('Entraron con 4 o más', cargados + ' <span style="font-size:16px;color:#64748b">(' + Math.round(100 * cargados / xs.length) + '%)</span>', 'en mano + en espera', cargados ? '#dc2626' : null);
+    h += kpi('Momento más cargado', peor.mano + peor.espera, esc(peor.wo || peor.wot) + ' · ' + peor.mano + ' en mano y ' + peor.espera + ' en espera');
+    h += kpi('En pausa al ingresar', uno(prom(function (x) { return x.pausa; })), 'promedio · pausas sin cuadrilla (nodo, otro corte, trabajo en conjunto…)', C_PAU);
+    h += '<div class="c full"><h3>Carga al ingresar, por hora del día</h3><p>Promedio de casos en mano y en espera cuando entró cada caso, según la hora de ingreso. Abajo, cuántos casos entraron en esa hora.</p><div class="ley"><b style="background:' + C_MANO + '"></b>En mano &nbsp; <b style="background:' + C_ESP + '"></b>En espera</div>' + grafHoras(xs) + '</div>';
+    h += '<div class="c"><h3>¿Con cuánta carga entraron?</h3><p>Ingresos según cuántos casos había en mano + en espera</p>' + cargaTramos(xs) + '</div>';
+    h += '<div class="c"><h3>Ingresos más cargados</h3><p>Los casos que entraron con más carga en el período</p>' + masCargados(xs) + '</div>';
+    $('wrap').innerHTML = h; atar();
+  }
+
   // ---------- pantalla
   function pintar() {
     var ps = periodos(), p = ps[st.per] || ps[0], ant = st.vista === 'semana' ? {desde: mas(p.desde, -7), hasta: mas(p.hasta, -7)}
@@ -262,6 +347,7 @@ svg{display:block;width:100%;height:auto}
     st.cmpTxt = (enCurso ? {semana: 'mismos días de la semana anterior', mes: 'mismos días del mes anterior', anio: 'mismos días del año anterior'}
                          : {semana: 'semana anterior', mes: 'mes anterior', anio: 'año anterior'})[st.vista];
     if (st.proy === 'termino') { pintarTermino(p); pintarAct(); return; }
+    if (st.proy === 'simul') { pintarSimul(p); pintarAct(); return; }
     var m = porDia(st.proy), t = sumar(m, p.desde, p.hasta), a = sumar(m, ant.desde, ant.hasta);
     var color = st.proy === 'lineales' ? '#2563eb' : '#8b5cf6', nom = st.proy === 'lineales' ? 'Lineales' : 'GPON';
     var pt = pctT(t.ing, t.ven), pa = pctT(a.ing, a.ven), hayAnt = a.dias.some(function (d) { return m[iso(d.d)]; });
@@ -288,7 +374,7 @@ svg{display:block;width:100%;height:auto}
   function arrancar(pass) {
     $('err').textContent = 'Cargando…';
     leer(pass).then(function (j) {
-      st.datos = j; lsSet('tab_pass', pass);
+      st.datos = j; st.pass = pass; lsSet('tab_pass', pass);
       $('login').hidden = true; $('app').hidden = false; pintar();
     }, function (e) {
       $('login').hidden = false; $('app').hidden = true;
