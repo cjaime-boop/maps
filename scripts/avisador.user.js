@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Mobisond · Avisador
 // @namespace    mobisond
-// @version      3.69.1
+// @version      3.69.2
 // @description  Avisa los casos nuevos (celular, campana y grupo de Telegram), los Lineales sin notas hace 25 min, los SLA y los aceptados; comandos del bot (/status, /bandeja, /autoasignar…); dispenser de la semana, racha sin vencidos y mensajes en casos pausados.
 // @match        https://*.service-now.com/*
 // @grant        GM_xmlhttpRequest
@@ -1262,6 +1262,17 @@
       }, function (e) { unaVezAlGrupo('cmd:' + p.id, 'No pude armar el resumen (' + esc(e.message) + ').', p.msg, p.chat); listo('error ServiceNow ' + e.message); });
       return;
     }
+    if (p.cmd === '/dia' || p.cmd === '/día') {
+      // "/dia" = hoy (en curso); "/dia 15-11" = ese día. Compara con el día anterior.
+      var fd = fechaDeTexto((p.texto || '').trim().split(/\s+/).slice(1).join(' '));
+      var hoyD = new Date(); hoyD.setHours(0, 0, 0, 0);
+      var diaTxt = fd === 'mal' ? Promise.resolve('No entendí la fecha. Usalo así: <code>/dia 15-11</code>')
+        : fd && fd > hoyD ? Promise.resolve('Ese día todavía no llegó 🙂') : (RESUMEN.limpiarGraf(), RESUMEN.dia(fd || hoyD));
+      diaTxt.then(function (t) {
+        conGraficos(p, t, function (ok) { listo(ok ? 'contestado' : 'no se pudo contestar'); });
+      }, function (e) { unaVezAlGrupo('cmd:' + p.id, 'No pude armar el resumen del día (' + esc(e.message) + ').', p.msg, p.chat); listo('error ServiceNow ' + e.message); });
+      return;
+    }
     if (p.cmd === '/mes') {
       // "/mes" = mes en curso; "/mes 09-2026" o "/mes 9/2026" = ese mes; el automático del 1° (pedido sin mensaje) = mes pasado
       var am = /(\d{1,2})[\/.-](\d{4})/.exec((p.texto || '').split(/\s+/).slice(1).join(' ')), autoMes = p.id < 0 && !p.msg;
@@ -1535,12 +1546,13 @@
     reintentarAvisos();
     atenderPendientes();
     seguimiento();
-    if (GM_getValue('tg_cmds', 0) < 22) {     // menú de comandos del bot (aparece al escribir "/" en el grupo)
+    if (GM_getValue('tg_cmds', 0) < 23) {     // menú de comandos del bot (aparece al escribir "/" en el grupo)
       tg('setMyCommands', {commands: [{command: 'bandeja', description: 'Casos abiertos (o /bandeja gpon, /bandeja lineales)'},
                                       {command: 'caso', description: 'Detalle de un caso: /caso WO0096818'},
                                       {command: 'seguir', description: 'Avisar notas de afuera de Mobisond en una WO: /seguir WO0097674'},
                                       {command: 'activos', description: 'Quién está activo ahora y quién entra'},
                                       {command: 'status', description: 'Resumen del día (o /status gpon, /status lineales)'},
+                                      {command: 'dia', description: 'Resumen de hoy vs ayer (o /dia 15-11)'},
                                       {command: 'semana', description: 'Resumen de esta semana (o /semana 13-10-2026)'},
                                       {command: 'mes', description: 'Resumen de este mes (o /mes 09-2026)'},
                                       {command: 'rango', description: 'Resumen entre dos fechas: /rango 01-11 10-11'},
@@ -1549,7 +1561,7 @@
                                       {command: 'rama', description: 'Casos de una rama GPON en 90 días: /rama GMRN-R0503'},
                                       {command: 'pcs', description: 'PCs conectadas y su versión del Avisador'},
                                       {command: 'dispenser', description: 'Ranking del dispenser (o /dispenser 19-10 para otra semana)'},
-                                      {command: 'racha', description: 'Racha sin vencidos de Lineales y GPON'}]}, function () { GM_setValue('tg_cmds', 22); });
+                                      {command: 'racha', description: 'Racha sin vencidos de Lineales y GPON'}]}, function () { GM_setValue('tg_cmds', 23); });
     }
     if (modoBot === null) {                    // ¿el bot está conectado a Supabase?
       modoBot = 'esperando';
@@ -2330,6 +2342,32 @@
       });
     }
 
+    // /dia: un día (hoy en curso, o el que se pida), comparado con el día anterior
+    function dia(f) {
+      var d0 = new Date(f.getTime()); d0.setHours(0, 0, 0, 0);
+      var ant = new Date(d0.getTime()); ant.setDate(ant.getDate() - 1);
+      var hoy0 = new Date(); hoy0.setHours(0, 0, 0, 0);
+      var encurso = d0.getTime() === hoy0.getTime();
+      return Promise.all([periodo(d0, d0), periodo(ant, ant).catch(function () { return null; })]).then(function (r) {
+        var d = r[0], a = r[1];
+        ultimo = null;                                    // un solo día: sin gráficos
+        var nomAnt = encurso ? 'ayer' : DIAS_SEM[ant.getDay()] + ' ' + dm(ant);
+        var vs = function (x, y) { return y === null || y === undefined ? '' : ' <i>(' + nomAnt + ' ' + y + ')</i>'; };
+        var bloque = function (p, pa, gpon) {
+          var o = ['Ingresados: ' + p.ing + vs(p.ing, pa && pa.ing), 'Cerrados: ' + p.cerrTodos + vs(p.cerrTodos, pa && pa.cerrTodos),
+                   'Vencidos: ' + esc(vencTxtP(p))].concat(gpon ? [] : vencCliTxt(p), vencBajaTxt(p), [cumplTxt(p)]);
+          if (gpon) o.push('Emergencias (P1/P2): ' + p.emerg);
+          else if (porCliente(p)) o.push(porCliente(p));
+          return o;
+        };
+        var out = ['📌 <b>Resumen del día</b> · ' + DIAS_SEM[d0.getDay()] + ' ' + dm(d0) + (encurso ? ' <i>(en curso)</i>' : ''), '', '🔧 <b>Lineales</b>', '']
+          .concat(bloque(d.L, a && a.L), SEP, ['📡 <b>GPON</b>', ''], bloque(d.G, a && a.G, true));
+        var cis = d.cis.slice(0, 5);
+        if (cis.length) { out = out.concat(SEP, ['🔁 <b>CIs repetidos en el día</b>']); cis.forEach(function (p) { out.push('• ' + esc(p[0]) + ' · ' + p[1] + ' casos'); }); }
+        return out.concat(avisosDatos(d)).join('\n');
+      });
+    }
+
     // Mes calendario. Sin fecha: el mes pasado (el automático del 1°). Con fecha: ese mes (/mes a mano = mes en curso).
     // Compara con el mes anterior.
     function mes(fechaRef) {
@@ -2774,7 +2812,7 @@
 
     if (window.top === window.self) montar();
     var ultimo = null;                     // datos del último /semana o /mes (para los gráficos)
-    return {armar: armar, semana: semana, mes: mes, rango: rango, textoDispenser: textoDispenser, inicioSemanaDisp: inicioSemanaDisp, textoRacha: textoRacha, ultimoGraf: function () { return ultimo; }, limpiarGraf: function () { ultimo = null; }, periodo: periodo};
+    return {armar: armar, semana: semana, mes: mes, rango: rango, dia: dia, textoDispenser: textoDispenser, inicioSemanaDisp: inicioSemanaDisp, textoRacha: textoRacha, ultimoGraf: function () { return ultimo; }, limpiarGraf: function () { ultimo = null; }, periodo: periodo};
   })();
   // ---------------------------------------------------------------- gráficos de /semana y /mes (una foto por proyecto)
   // Barras por día con los casos INGRESADOS ese día; la parte roja son los de esos que se vencieron (SLA neto, sin prioridad baja).
