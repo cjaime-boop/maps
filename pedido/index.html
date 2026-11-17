@@ -151,7 +151,6 @@ footer .cta{padding:12px 18px;font-size:16px}
     <!-- PASO 2 -->
     <section id="p2" hidden>
       <div style="display:flex;flex-direction:column;gap:14px">
-        <div class="aviso" id="avisoEj"><span>Cargué de ejemplo el pedido de WhatsApp de la captura.</span><button id="vaciar">Vaciar</button></div>
         <h2>Fibra y drop</h2><div class="grupo" id="g-fibra"></div>
         <h2>Botellas, CTO y splitters</h2><div class="grupo" id="g-equipos"></div>
         <h2>Consumibles</h2>
@@ -209,19 +208,12 @@ var EQUIPOS = [
   {id:"cto",n:"CTO",u:"u",paso:1},{id:"s2",n:"Splitter 1x2",u:"u",paso:1},
   {id:"s8",n:"Splitter 1x8",u:"u",paso:1},{id:"s16",n:"Splitter 1x16",u:"u",paso:1}];
 var TIPOS_RECORTE = ["48","72","72 anti roedor","144","Drop"];
-var EJEMPLO = {cant:{f48:300,b48:3,b72:3},
-  items:["2 paquetes de preformados de retención para F.O. 48","2 rollos de fleje","Hebillas","2 paquetes de precintos grandes",
-         "2 paquetes de precintos chicos","1 cinta de cada color","1 patch cord para medir con el OTDR",
-         "Recambio de pilas para la pinza de tráfico","Recambio de pilas para los dos power","Recambio de pilas para los dos lápiz ópticos","4 cruces"],
-  recortes:[{tipo:"48",m:120}]};
-
-var st = {paso:1, cuadrilla:null, fecha:hoyISO(), cant:{}, items:[], recortes:[], ejemplo:false, ok:false};
+var st = {paso:1, cuadrilla:null, fecha:hoyISO(), cant:{}, items:[], recortes:[], ok:false};
 try { var c = localStorage.getItem("pedido_cuadrilla"); if (c && CUADRILLAS.indexOf(c) >= 0) st.cuadrilla = c; } catch(e){}
 
 function hoyISO(){ var d=new Date(); d.setMinutes(d.getMinutes()-d.getTimezoneOffset()); return d.toISOString().slice(0,10); }
 function $(id){ return document.getElementById(id); }
 function esc(s){ return String(s).replace(/[&<>"]/g,function(c){return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c];}); }
-function cargarEjemplo(){ st.cant=Object.assign({},EJEMPLO.cant); st.items=EJEMPLO.items.slice(); st.recortes=EJEMPLO.recortes.map(function(r){return Object.assign({},r);}); st.ejemplo=true; }
 function todos(){ return FIBRA.concat(EQUIPOS); }
 function cant(it){ var v=st.cant[it.id]; return it.u==="m" ? v+" m" : v+(v===1?" unidad":" unidades"); }
 function itemsOk(){ return st.items.map(function(s){return s.trim();}).filter(Boolean); }
@@ -243,7 +235,6 @@ function filaHTML(it){
 function pintarMateriales(){
   $("g-fibra").innerHTML = FIBRA.map(filaHTML).join("");
   $("g-equipos").innerHTML = EQUIPOS.map(filaHTML).join("");
-  $("avisoEj").hidden = !st.ejemplo;
   pintarItems(); pintarRecortes();
 }
 function pintarItems(){
@@ -351,7 +342,7 @@ function pintarTotal(){
   sig.hidden = st.paso >= 3;
   sig.textContent = st.paso===1 ? "Siguiente" : "Revisar pedido";
 }
-function tocar(){ st.ejemplo=false; st.ok=false; var a=$("avisoEj"); if (a) a.hidden = true; }
+function tocar(){ st.ok=false; }
 function setCant(id, v){
   v = Math.max(0, Math.min(99999, parseInt(v,10) || 0));
   if (v) st.cant[id] = v; else delete st.cant[id];
@@ -380,7 +371,6 @@ document.addEventListener("click", function(e){
   if (b.dataset.rq){ st.recortes.splice(+b.dataset.rq,1); tocar(); pintarRecortes(); pintarTotal(); return; }
   if (b.id==="masItem") return agregarItem();
   if (b.id==="masRecorte"){ st.recortes.push({tipo:"48",m:0}); tocar(); pintarRecortes(); var i=st.recortes.length-1; setTimeout(function(){ var x=$("rm-"+i); if(x) x.focus(); }); return; }
-  if (b.id==="vaciar"){ st.cant={}; st.items=[]; st.recortes=[]; tocar(); pintarMateriales(); pintarTotal(); return; }
   if (b.id==="sig") return irA(st.paso+1);
   if (b.id==="enviar") return enviar();
   if (b.id==="copiar") return copiar();
