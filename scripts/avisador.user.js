@@ -2386,13 +2386,11 @@
           if (porHora[pico] > 1) o.push('Hora pico: ' + ('0' + pico).slice(-2) + ' a ' + ('0' + ((+pico + 1) % 24)).slice(-2) + ' h (' + porHora[pico] + ' casos)');
           return o;
         };
-        var destino = function (cs) {                     // qué pasó con los ingresados del día
+        var destino = function (cs) {                     // de los ingresados del día: cuántos se cerraron ese mismo día (vale para días viejos)
           if (!cs.length) return [];
-          var cerr = cs.filter(function (c) { return val(c, 'active') === 'false'; }).length;
-          var paus = cs.filter(function (c) { return val(c, 'active') !== 'false' && /pausa/i.test(dv(c, 'substate')); }).length;
-          var abiertos = cs.length - cerr - paus;
-          return ['De los ingresados: ' + cerr + (cerr === 1 ? ' cerrado' : ' cerrados') + ' · ' + paus + (paus === 1 ? ' pausado' : ' pausados') + ' · ' +
-                  abiertos + (abiertos === 1 ? ' abierto' : ' abiertos')];
+          var cerr = cs.filter(function (c) { var ce = deUtc(val(c, 'closed_at')); return val(c, 'active') === 'false' && ce && ce <= fin; }).length;
+          var quedan = cs.length - cerr;
+          return ['Cerrados el mismo día: ' + cerr + ' de ' + cs.length + ' · ' + (encurso ? 'siguen abiertos: ' : 'quedaron abiertos: ') + quedan];
         };
         var habTxt = function (proy, ing) {
           if (!hab) return [];
