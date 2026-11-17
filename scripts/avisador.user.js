@@ -2200,7 +2200,7 @@
       var dentro = function (d) { return d && d >= desde && d <= finP; };
       var ini = "javascript:gs.dateGenerate('" + iso(desde) + "','start')", fin = "javascript:gs.dateGenerate('" + iso(hasta) + "','end')";
       var q = grupoQ() + '^opened_at<=' + fin + '^active=true^ORclosed_at>=' + ini;
-      var campos = 'sys_id,number,parent,active,state,priority,opened_at,closed_at,assignment_group,service_offering,cmdb_ci';
+      var campos = 'sys_id,number,parent,active,state,priority,opened_at,closed_at,assignment_group,service_offering,cmdb_ci,work_start';
       return api('wm_task', q, campos).then(function (casos) {
         var vistos = {};
         casos = casos.filter(function (r) {
@@ -2343,7 +2343,8 @@
     }
 
     // /dia: un día (hoy en curso, o el que se pida), comparado con el día anterior y con el promedio de ese día de la
-    // semana (las 4 anteriores). Suma: ingresos por turno, qué pasó con los ingresados del día y los pases a verificación.
+    // semana (las 4 anteriores). Suma: turnos, zonas, cerrados el mismo día, demora en arrancar,
+    // tiempo de resolución, pases a verificación y pausas por Nodo.
     var TURNOS = [['Mañana', 6, 14], ['Tarde', 14, 22], ['Noche', 22, 6]];   // horas de ingreso (la noche cruza las 00)
     function dia(f) {
       var d0 = new Date(f.getTime()); d0.setHours(0, 0, 0, 0);
@@ -2392,6 +2393,36 @@
           var quedan = cs.length - cerr;
           return ['Cerrados el mismo día: ' + cerr + ' de ' + cs.length + ' · ' + (encurso ? 'siguen abiertos: ' : 'quedaron abiertos: ') + quedan];
         };
+        var durTxt = function (ms) {
+          var m = Math.round(ms / 60000), dd = Math.floor(m / 1440), h = Math.floor((m % 1440) / 60), mi = m % 60;
+          return dd ? dd + ' d ' + h + ' h' : h ? h + ' h' + (mi ? ' ' + mi + ' min' : '') : mi + ' min';
+        };
+        var woDe = function (c) { return dv(c, 'parent') || dv(c, 'number'); };
+        var resolucion = function (proy) {                // casos cerrados en el día: desde que entraron hasta que se cerraron
+          var cs = d.casos.filter(function (c) { var ce = deUtc(val(c, 'closed_at')); return proyecto(c) === proy && val(c, 'active') === 'false' && ce && ce >= d0 && ce <= fin && deUtc(val(c, 'opened_at')); })
+                          .map(function (c) { return {c: c, t: deUtc(val(c, 'closed_at')) - deUtc(val(c, 'opened_at'))}; }).filter(function (x) { return x.t > 0; })
+                          .sort(function (x, y) { return x.t - y.t; });
+          if (!cs.length) return [];
+          var prom = cs.reduce(function (s0, x) { return s0 + x.t; }, 0) / cs.length;
+          var o = ['Tiempo de resolución (cerrados en el día): promedio ' + durTxt(prom)];
+          if (cs.length > 1) o.push('Más rápido: ' + esc(woDe(cs[0].c)) + ' en ' + durTxt(cs[0].t) + ' · más lento: ' + esc(woDe(cs[cs.length - 1].c)) + ' en ' + durTxt(cs[cs.length - 1].t));
+          return o;
+        };
+        var llegada = function (cs) {                     // ingresados del día: desde que entraron hasta que se arrancó a trabajar
+          var xs = cs.map(function (c) { var ws = deUtc(val(c, 'work_start')), ab = deUtc(val(c, 'opened_at')); return ws && ab && ws > ab ? {c: c, t: ws - ab} : null; })
+                     .filter(Boolean);
+          if (!xs.length) return [];
+          var prom = xs.reduce(function (s0, x) { return s0 + x.t; }, 0) / xs.length;
+          var lentos = xs.filter(function (x) { return x.t > 2 * 36e5; }).sort(function (x, y) { return y.t - x.t; });
+          var o = ['Demora en arrancar (ingreso → en curso): promedio ' + durTxt(prom) + (xs.length < cs.length ? ' <i>(' + xs.length + ' de ' + cs.length + ' arrancados)</i>' : '')];
+          if (lentos.length) o.push('Más de 2 h: ' + lentos.length + ' · ' + lentos.slice(0, 3).map(function (x) { return esc(woDe(x.c)) + ' (' + durTxt(x.t) + ')'; }).join(' · '));
+          return o;
+        };
+        var zonas = function (cs) {
+          var z = {}; cs.forEach(function (c) { var m = /_([A-Z]{4})_BA$/i.exec(dv(c, 'service_offering')); var k = m ? m[1].toUpperCase() : 'otra'; z[k] = (z[k] || 0) + 1; });
+          var ks = Object.keys(z).sort(function (x, y) { return z[y] - z[x]; });
+          return ks.length ? ['Por zona: ' + ks.map(function (k) { return z[k] + ' ' + k; }).join(' · ')] : [];
+        };
         var habTxt = function (proy, ing) {
           if (!hab) return [];
           var h = hab[proy], dif = ing - h;
@@ -2400,8 +2431,8 @@
         };
         var bloque = function (p, pa, proy) {
           var cs = hoyDe(proy);
-          var o = ['Ingresados: ' + p.ing + vs(pa && pa.ing)].concat(habTxt(proy, p.ing), turnos(cs), destino(cs), ['',
-                   'Cerrados en el día: ' + p.cerrTodos + vs(pa && pa.cerrTodos), 'Vencidos: ' + esc(vencTxtP(p))],
+          var o = ['Ingresados: ' + p.ing + vs(pa && pa.ing)].concat(habTxt(proy, p.ing), turnos(cs), zonas(cs), destino(cs), llegada(cs), ['',
+                   'Cerrados en el día: ' + p.cerrTodos + vs(pa && pa.cerrTodos)], resolucion(proy), ['Vencidos: ' + esc(vencTxtP(p))],
                    proy === 'gpon' ? [] : vencCliTxt(p), vencBajaTxt(p), [cumplTxt(p)]);
           if (proy === 'gpon') o.push('Emergencias (P1/P2): ' + p.emerg);
           else if (porCliente(p)) o.push(porCliente(p));
@@ -2415,11 +2446,14 @@
           var quienes = Object.keys(cuenta).sort(function (x, y) { return cuenta[y] - cuenta[x]; });
           out.push('', '✅ Pasados a verificación: ' + ps.casos.length + (quienes.length ? ' · ' + quienes.map(function (q) { return esc(q) + ' ' + cuenta[q]; }).join(' · ') : '') +
                    (sin ? ' · sin dueño ' + sin : ''));
+          var pat = ps.pateos || {}, pq = Object.keys(pat).sort(function (x, y) { return pat[y] - pat[x]; });
+          var totPat = pq.reduce(function (s0, q) { return s0 + pat[q]; }, 0);
+          out.push('🦵 Pausados por Nodo/Falla Red del Cliente: ' + totPat + (pq.length ? ' · ' + pq.map(function (q) { return esc(q) + ' ' + pat[q]; }).join(' · ') : ''));
         }
         out = out.concat(SEP, ['📡 <b>GPON</b>', ''], bloque(d.G, a && a.G, 'gpon'));
         var cis = d.cis.slice(0, 5);
         if (cis.length) { out = out.concat(SEP, ['🔁 <b>CIs repetidos en el día</b>']); cis.forEach(function (p) { out.push('• ' + esc(p[0]) + ' · ' + p[1] + ' casos'); }); }
-        out.push('', '<i>Turnos por hora de ingreso: mañana 06–14 · tarde 14–22 · noche 22–06</i>');
+        out.push('', '<i>Turnos por hora de ingreso: mañana 06–14 · tarde 14–22 · noche 22–06. Tiempos brutos (con pausas).</i>');
         return out.concat(avisosDatos(d)).join('\n');
       });
     }
