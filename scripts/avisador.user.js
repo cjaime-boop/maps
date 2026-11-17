@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Mobisond · Avisador
 // @namespace    mobisond
-// @version      3.69.2
+// @version      3.69.3
 // @description  Avisa los casos nuevos (celular, campana y grupo de Telegram), los Lineales sin notas hace 25 min, los SLA y los aceptados; comandos del bot (/status, /bandeja, /autoasignar…); dispenser de la semana, racha sin vencidos y mensajes en casos pausados.
 // @match        https://*.service-now.com/*
 // @grant        GM_xmlhttpRequest
@@ -710,6 +710,10 @@
           aviso_notas: avisoNotas || null, pc: pcId()
         };
       });
+      // simultaneidad: si entró un caso nuevo, Supabase guarda cuántos había en mano y en espera en ese momento
+      sbRpc('simult_registrar', {p_pc: pcId(), p_casos: lista.map(function (c) {
+        return {wot: c.wot, wo: c.wo, proyecto: c.proyecto, prio: c.prio, estado: c.estado, abierto: c.abierto};
+      })}).catch(function () {});           // si la función no existe todavía, no pasa nada
       return sbRpc('bot_casos_abiertos', {p_pc: pcId(), p_casos: lista});
     }).catch(function (e) { soltar(); console.log('[Mobisond] casos abiertos (QGIS): ' + (e && e.message)); });   // si la tabla no existe, no pasa nada
   }
