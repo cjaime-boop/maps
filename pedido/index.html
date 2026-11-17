@@ -5,6 +5,10 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="robots" content="noindex">
 <meta name="theme-color" content="#1a5b8d">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="../app-180.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Pedidos">
 <style>:root{padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px);color-scheme:light}body{margin:0;font:14px system-ui,sans-serif}img{max-width:100%}[hidden]{display:none!important}*,*::before,*::after{box-sizing:border-box}</style>
 <title>Pedido de Materiales</title>
 <meta name="claude:viewport-fit-sides" content="cover">
@@ -111,6 +115,12 @@ footer .cta{padding:12px 18px;font-size:16px}
 .hecho{display:flex;flex-direction:column;gap:2px;background:var(--ok-soft);color:var(--ok);border-radius:12px;padding:12px 14px}
 .hecho b{font-size:17px}
 .hecho span{color:var(--ink);font-size:14px}
+.instalar{display:flex;align-items:center;gap:12px;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:12px}
+.instalar img{width:44px;height:44px;border-radius:10px;flex:none}
+.instalar div{flex:1;min-width:0;font-size:14px;color:var(--muted)}
+.instalar div b{display:block;color:var(--ink);font-size:16px}
+.instalar .cta{padding:10px 16px;font-size:15px}
+.instalar .x{all:unset;cursor:pointer;color:var(--muted);font-size:18px;padding:4px 6px}
 @media (prefers-reduced-motion: reduce){*{transition:none!important}}
 </style>
 
@@ -130,7 +140,9 @@ footer .cta{padding:12px 18px;font-size:16px}
     <!-- PASO 1 -->
     <section id="p1">
       <div style="display:flex;flex-direction:column;gap:14px">
+        <div id="inst"></div>
         <h2>Cuadrilla</h2>
+        <div class="alerta mal" id="faltaC" hidden>⚠ Primero tocá tu nombre.</div>
         <div class="chips" id="cuadrillas"></div>
         <label class="campo" for="fecha">Fecha<input type="date" id="fecha"></label>
       </div>
@@ -184,8 +196,8 @@ footer .cta{padding:12px 18px;font-size:16px}
 </div>
 
 <script>
-// Nombres de ejemplo (en la versión real salen del formulario)
-var CUADRILLAS = ["Martín Ruiz","Pablo Ortega","Lucas Ferrari","Jorge Medina","Ariel Sosa","Damián Paz","Hernán Vidal","Matías Correa"];
+// Las cuadrillas del formulario "Control Materiales MTTO ATC"
+var CUADRILLAS = ["Diego D' Olivo","Cristian Penayo","Diego Penayo","Gustavo Blanco","Brian Soria","Hugo Romero","Diego Cabezas","Nicolas Villafañe","Jonathan Mendoza","Victor Alderete","Sebastian Rojas","Sergio Godoy"];
 var MODO_PRUEBA = true;   // en prueba no se manda nada al formulario del depósito
 // Los campos del formulario "Control Materiales MTTO ATC"
 var FIBRA = [
@@ -203,10 +215,8 @@ var EJEMPLO = {cant:{f48:300,b48:3,b72:3},
          "Recambio de pilas para la pinza de tráfico","Recambio de pilas para los dos power","Recambio de pilas para los dos lápiz ópticos","4 cruces"],
   recortes:[{tipo:"48",m:120}]};
 
-var st = {paso:1, cuadrilla:null, fecha:hoyISO(), cant:{}, items:[], recortes:[], ejemplo:true, ok:false};
+var st = {paso:1, cuadrilla:null, fecha:hoyISO(), cant:{}, items:[], recortes:[], ejemplo:false, ok:false};
 try { var c = localStorage.getItem("pedido_cuadrilla"); if (c && CUADRILLAS.indexOf(c) >= 0) st.cuadrilla = c; } catch(e){}
-if (!st.cuadrilla) st.cuadrilla = CUADRILLAS[3];
-cargarEjemplo();
 
 function hoyISO(){ var d=new Date(); d.setMinutes(d.getMinutes()-d.getTimezoneOffset()); return d.toISOString().slice(0,10); }
 function $(id){ return document.getElementById(id); }
@@ -325,6 +335,7 @@ function pintarListo(){
 // ---- navegación
 function irA(p){
   if (p===4 && !st.ok) p = 3;
+  if (p>1 && !st.cuadrilla){ p = 1; $("faltaC").hidden = false; }
   st.paso = p;
   [1,2,3,4].forEach(function(i){ $("p"+i).hidden = i!==p; });
   [1,2,3].forEach(function(i){ $("t"+i).setAttribute("aria-selected", i===Math.min(p,3)); });
@@ -335,7 +346,7 @@ function irA(p){
 }
 function pintarTotal(){
   var n = todos().filter(function(it){return st.cant[it.id];}).length + itemsOk().length + recortesOk().length;
-  $("tot").innerHTML = "<b>"+esc(st.cuadrilla)+"</b>"+(n ? n+" ítem"+(n>1?"s":"")+" en el pedido" : "Pedido vacío");
+  $("tot").innerHTML = "<b>"+(st.cuadrilla ? esc(st.cuadrilla) : "Elegí tu cuadrilla")+"</b>"+(n ? n+" ítem"+(n>1?"s":"")+" en el pedido" : "Pedido vacío");
   var sig = $("sig");
   sig.hidden = st.paso >= 3;
   sig.textContent = st.paso===1 ? "Siguiente" : "Revisar pedido";
@@ -361,7 +372,7 @@ function copiar(){
 document.addEventListener("click", function(e){
   var b = e.target.closest("button,a"); if (!b) return;
   if (b.dataset.p) return irA(+b.dataset.p);
-  if (b.dataset.c){ st.cuadrilla = b.dataset.c; st.ok=false; try{ localStorage.setItem("pedido_cuadrilla", st.cuadrilla); }catch(_){} pintarCuadrillas(); pintarTotal(); return; }
+  if (b.dataset.c){ st.cuadrilla = b.dataset.c; st.ok=false; try{ localStorage.setItem("pedido_cuadrilla", st.cuadrilla); }catch(_){} $("faltaC").hidden = true; pintarCuadrillas(); pintarTotal(); return; }
   if (b.dataset.mas) return setCant(b.dataset.mas, (st.cant[b.dataset.mas]||0) + paso(b.dataset.mas));
   if (b.dataset.menos) return setCant(b.dataset.menos, (st.cant[b.dataset.menos]||0) - paso(b.dataset.menos));
   if (b.dataset.pon) return setCant(b.dataset.pon, +b.dataset.v);
@@ -389,6 +400,26 @@ document.addEventListener("input", function(e){
   if (t.dataset.rt){ st.recortes[+t.dataset.rt].tipo = t.value; tocar(); return; }
   if (t.id==="fecha"){ st.fecha = t.value || hoyISO(); st.ok=false; }
 });
+// ---- instalar como app (ícono en la pantalla de inicio)
+function ls(k, v){ try { if (v === undefined) return localStorage.getItem(k); localStorage.setItem(k, v); } catch(_){ return null; } }
+var avisoInstalar = null;
+var instalada = (window.matchMedia && matchMedia("(display-mode: standalone)").matches) || navigator.standalone;
+var esIOS = /iphone|ipad|ipod/i.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+window.addEventListener("beforeinstallprompt", function(e){ e.preventDefault(); avisoInstalar = e; ofrecerInstalar(); });
+window.addEventListener("appinstalled", function(){ instalada = true; ofrecerInstalar(); });
+function ofrecerInstalar(){
+  var c = $("inst");
+  if (instalada || ls("ped_no_instalar") || (!avisoInstalar && !esIOS)) { c.innerHTML = ""; return; }
+  c.innerHTML = '<div class="instalar"><img src="../app-192.png" alt=""><div><b>Instalar la app</b>' +
+    (avisoInstalar ? "Queda el ícono en la pantalla de inicio." : "Tocá Compartir ⬆︎ y después “Agregar a inicio”.") + "</div>" +
+    (avisoInstalar ? '<button class="cta" id="bInst" type="button">Instalar</button>' : "") +
+    '<button class="x" id="bNo" type="button" aria-label="No mostrar más">✕</button></div>';
+  var bi = $("bInst");
+  if (bi) bi.onclick = function(){ avisoInstalar.prompt(); avisoInstalar.userChoice.then(function(){ avisoInstalar = null; ofrecerInstalar(); }); };
+  $("bNo").onclick = function(){ ls("ped_no_instalar", "1"); ofrecerInstalar(); };
+}
+ofrecerInstalar();
+if ("serviceWorker" in navigator) { try { navigator.serviceWorker.register("sw.js").catch(function(){}); } catch(_){} }
 $("fecha").value = st.fecha;
 pintarCuadrillas(); pintarTotal();
 </script>
