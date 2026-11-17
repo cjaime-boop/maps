@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Mobisond · Vigía de CTO (SGT)
 // @namespace    mobisond
-// @version      1.9
-// @description  Con SGT abierto y la sesión iniciada, revisa cada 30 segundos las CTO que se vigilan desde QGIS (plugin 📡 Vigía de CTO) y sube cómo están. Si alguien aprieta "Actualizar ahora" en el panel, revisa enseguida. El login lo hacés vos; la sesión de SGT no sale del navegador.
+// @version      2.0
+// @description  Con SGT abierto y la sesión iniciada, revisa cada 1 minuto las CTO que se vigilan desde QGIS (plugin 📡 Vigía de CTO) y sube cómo están. Si alguien aprieta "Actualizar ahora" en el panel, revisa enseguida. El login lo hacés vos; la sesión de SGT no sale del navegador.
 // @match        https://sgtmobile.claro.com.ar/*
 // @grant        GM_xmlhttpRequest
 // @grant        GM_getValue
@@ -19,11 +19,11 @@
 
   var SB_URL = 'https://gnqvhlpknxtdnzuxfybc.supabase.co', SB_PUBLICA = 'sb_publishable_dUhjyCfRfNtLVLfOYnJ1WA_hfPD3kk9';
   var API = '/SgtMobileBackend/filter/getVecindarioSplitter/';
-  var CADA_MS = 30 * 1000;              // una vuelta cada 30 segundos (si una vuelta tarda más, la siguiente arranca enseguida)
+  var CADA_MS = 60 * 1000;              // una vuelta por minuto (si una vuelta tarda más, la siguiente arranca enseguida)
   var ENTRE_MS = 200;                   // pausa entre CTO, para no cargar a SGT
   var PARALELO = 4;                     // CTO que se consultan a la vez (SGT tarda unos 3-4 segundos por cada una)
-  var ESPERA_MS = 10 * 1000;            // la PC sin turno pregunta cada 10 segundos si puede tomarlo
-  var PEDIDO_MS = 5 * 1000;             // cada 5 segundos mira si alguien apretó "Actualizar ahora" en QGIS
+  var ESPERA_MS = 30 * 1000;            // la PC sin turno pregunta cada 30 segundos si puede tomarlo
+  var PEDIDO_MS = 10 * 1000;            // cada 10 segundos mira si alguien apretó "Actualizar ahora" en QGIS
   var YO = pcId();                                                   // esta PC (en Supabase: una sola PC revisa a la vez)
   var PESTANA = Math.random().toString(36).slice(2, 8);              // esta pestaña (en la PC: una sola pestaña revisa)
 
@@ -172,7 +172,7 @@
       return proxima(60000);
     }
     var otra = GM_getValue('vigia_pestana', null);
-    if (otra && otra.id !== PESTANA && Date.now() - otra.t < 45000) {
+    if (otra && otra.id !== PESTANA && Date.now() - otra.t < 90000) {
       otraPC = '';
       mostrar('Vigía: lo está revisando otra pestaña de SGT', 'gris');
       return proxima(CADA_MS);
