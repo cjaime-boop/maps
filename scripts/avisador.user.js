@@ -2342,28 +2342,86 @@
       });
     }
 
-    // /dia: un día (hoy en curso, o el que se pida), comparado con el día anterior
+    // /dia: un día (hoy en curso, o el que se pida), comparado con el día anterior y con el promedio de ese día de la
+    // semana (las 4 anteriores). Suma: ingresos por turno, qué pasó con los ingresados del día y los pases a verificación.
+    var TURNOS = [['Mañana', 6, 14], ['Tarde', 14, 22], ['Noche', 22, 6]];   // horas de ingreso (la noche cruza las 00)
     function dia(f) {
       var d0 = new Date(f.getTime()); d0.setHours(0, 0, 0, 0);
+      var fin = new Date(d0.getTime()); fin.setHours(23, 59, 59, 999);
       var ant = new Date(d0.getTime()); ant.setDate(ant.getDate() - 1);
       var hoy0 = new Date(); hoy0.setHours(0, 0, 0, 0);
       var encurso = d0.getTime() === hoy0.getTime();
-      return Promise.all([periodo(d0, d0), periodo(ant, ant).catch(function () { return null; })]).then(function (r) {
-        var d = r[0], a = r[1];
+      // mismo día de la semana, las 4 anteriores: una sola consulta de ingresos (sin SLA)
+      var ini4 = new Date(d0.getTime()); ini4.setDate(ini4.getDate() - 28);
+      var q4 = grupoQ() + "^opened_at>=javascript:gs.dateGenerate('" + iso(ini4) + "','start')^opened_at<=javascript:gs.dateGenerate('" + iso(ant) + "','end')";
+      var habitual = api('wm_task', q4, 'number,state,opened_at,assignment_group').then(function (rs) {
+        var vistos = {}, cuenta = {lineales: 0, gpon: 0};
+        rs.forEach(function (c) {
+          var n = dv(c, 'number'), ab = deUtc(val(c, 'opened_at'));
+          if (vistos[n] || /cancel/i.test(dv(c, 'state')) || !ab || ab.getDay() !== d0.getDay()) return; vistos[n] = 1;
+          var pr = proyecto(c); if (cuenta[pr] !== undefined) cuenta[pr]++;
+        });
+        return {lineales: cuenta.lineales / 4, gpon: cuenta.gpon / 4};
+      }).catch(function () { return null; });
+      var pases = sbRpc('bot_dispenser', {p_semana: null, p_ganador: null}).then(function (antes) {
+        return dispenser(d0, encurso ? new Date() : fin, antes && antes.nombres);
+      }).catch(function () { return null; });
+      return Promise.all([periodo(d0, d0), periodo(ant, ant).catch(function () { return null; }), habitual, pases]).then(function (r) {
+        var d = r[0], a = r[1], hab = r[2], ps = r[3];
         ultimo = null;                                    // un solo día: sin gráficos
         var nomAnt = encurso ? 'ayer' : DIAS_SEM[ant.getDay()] + ' ' + dm(ant);
-        var vs = function (x, y) { return y === null || y === undefined ? '' : ' <i>(' + nomAnt + ' ' + y + ')</i>'; };
-        var bloque = function (p, pa, gpon) {
-          var o = ['Ingresados: ' + p.ing + vs(p.ing, pa && pa.ing), 'Cerrados: ' + p.cerrTodos + vs(p.cerrTodos, pa && pa.cerrTodos),
-                   'Vencidos: ' + esc(vencTxtP(p))].concat(gpon ? [] : vencCliTxt(p), vencBajaTxt(p), [cumplTxt(p)]);
-          if (gpon) o.push('Emergencias (P1/P2): ' + p.emerg);
+        var vs = function (y) { return y === null || y === undefined ? '' : ' <i>(' + nomAnt + ' ' + y + ')</i>'; };
+        var uno = function (n) { return String(Math.round(n * 10) / 10).replace('.', ','); };
+        var hoyDe = function (proy) {                     // ingresados del día de ese proyecto
+          return d.casos.filter(function (c) { var ab = deUtc(val(c, 'opened_at')); return proyecto(c) === proy && ab && ab >= d0 && ab <= fin; });
+        };
+        var turnos = function (cs) {
+          if (!cs.length) return [];
+          var t = TURNOS.map(function (x) {
+            return cs.filter(function (c) { var h = deUtc(val(c, 'opened_at')).getHours(); return x[1] < x[2] ? h >= x[1] && h < x[2] : h >= x[1] || h < x[2]; }).length;
+          });
+          var porHora = {}; cs.forEach(function (c) { var h = deUtc(val(c, 'opened_at')).getHours(); porHora[h] = (porHora[h] || 0) + 1; });
+          var pico = Object.keys(porHora).sort(function (x, y) { return porHora[y] - porHora[x] || x - y; })[0];
+          var o = ['Por turno: ' + TURNOS.map(function (x, i) { return x[0] + ' ' + t[i]; }).join(' · ')];
+          if (porHora[pico] > 1) o.push('Hora pico: ' + ('0' + pico).slice(-2) + ' a ' + ('0' + ((+pico + 1) % 24)).slice(-2) + ' h (' + porHora[pico] + ' casos)');
+          return o;
+        };
+        var destino = function (cs) {                     // qué pasó con los ingresados del día
+          if (!cs.length) return [];
+          var cerr = cs.filter(function (c) { return val(c, 'active') === 'false'; }).length;
+          var paus = cs.filter(function (c) { return val(c, 'active') !== 'false' && /pausa/i.test(dv(c, 'substate')); }).length;
+          var abiertos = cs.length - cerr - paus;
+          return ['De los ingresados: ' + cerr + (cerr === 1 ? ' cerrado' : ' cerrados') + ' · ' + paus + (paus === 1 ? ' pausado' : ' pausados') + ' · ' +
+                  abiertos + (abiertos === 1 ? ' abierto' : ' abiertos')];
+        };
+        var habTxt = function (proy, ing) {
+          if (!hab) return [];
+          var h = hab[proy], dif = ing - h;
+          var como = Math.abs(dif) < 1 ? 'normal' : dif > 0 ? 'más que lo habitual' : 'menos que lo habitual';
+          return ['Un ' + DIAS_SEM[d0.getDay()] + ' promedio: ' + uno(h) + ' ingresados → ' + (encurso ? 'por ahora ' : '') + como];
+        };
+        var bloque = function (p, pa, proy) {
+          var cs = hoyDe(proy);
+          var o = ['Ingresados: ' + p.ing + vs(pa && pa.ing)].concat(habTxt(proy, p.ing), turnos(cs), destino(cs), ['',
+                   'Cerrados en el día: ' + p.cerrTodos + vs(pa && pa.cerrTodos), 'Vencidos: ' + esc(vencTxtP(p))],
+                   proy === 'gpon' ? [] : vencCliTxt(p), vencBajaTxt(p), [cumplTxt(p)]);
+          if (proy === 'gpon') o.push('Emergencias (P1/P2): ' + p.emerg);
           else if (porCliente(p)) o.push(porCliente(p));
           return o;
         };
         var out = ['📌 <b>Resumen del día</b> · ' + DIAS_SEM[d0.getDay()] + ' ' + dm(d0) + (encurso ? ' <i>(en curso)</i>' : ''), '', '🔧 <b>Lineales</b>', '']
-          .concat(bloque(d.L, a && a.L), SEP, ['📡 <b>GPON</b>', ''], bloque(d.G, a && a.G, true));
+          .concat(bloque(d.L, a && a.L, 'lineales'));
+        if (ps) {                                         // pases a verificación de Lineales en el día, por dispatcher
+          var cuenta = {}, sin = 0;
+          ps.casos.forEach(function (c) { if (c.quien) cuenta[c.quien] = (cuenta[c.quien] || 0) + 1; else sin++; });
+          var quienes = Object.keys(cuenta).sort(function (x, y) { return cuenta[y] - cuenta[x]; });
+          out.push('', '✅ Pasados a verificación: ' + ps.casos.length + (quienes.length ? ' · ' + quienes.map(function (q) { return esc(q) + ' ' + cuenta[q]; }).join(' · ') : '') +
+                   (sin ? ' · sin dueño ' + sin : ''));
+        }
+        out = out.concat(SEP, ['📡 <b>GPON</b>', ''], bloque(d.G, a && a.G, 'gpon'));
         var cis = d.cis.slice(0, 5);
         if (cis.length) { out = out.concat(SEP, ['🔁 <b>CIs repetidos en el día</b>']); cis.forEach(function (p) { out.push('• ' + esc(p[0]) + ' · ' + p[1] + ' casos'); }); }
+        out.push('', '<i>Turnos por hora de ingreso: mañana 06–14 · tarde 14–22 · noche 22–06</i>');
         return out.concat(avisosDatos(d)).join('\n');
       });
     }
