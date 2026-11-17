@@ -1,6 +1,6 @@
 // Pedido de materiales: hace que la página se pueda instalar como app.
 // Pide siempre la versión nueva; si no hay señal, abre la última que guardó.
-var CACHE = 'pedido-v1';
+var CACHE = 'pedido-v2';
 self.addEventListener('install', function () { self.skipWaiting(); });
 self.addEventListener('activate', function (e) { e.waitUntil(self.clients.claim()); });
 self.addEventListener('fetch', function (e) {

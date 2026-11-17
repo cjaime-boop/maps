@@ -397,16 +397,24 @@ var instalada = (window.matchMedia && matchMedia("(display-mode: standalone)").m
 var esIOS = /iphone|ipad|ipod/i.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
 window.addEventListener("beforeinstallprompt", function(e){ e.preventDefault(); avisoInstalar = e; ofrecerInstalar(); });
 window.addEventListener("appinstalled", function(){ instalada = true; ofrecerInstalar(); });
+var ocultoInstalar = false;
+var enOtraApp = /\bwv\b|WhatsApp|FBAN|FBAV|Instagram|Line\//i.test(navigator.userAgent);   // navegador de adentro de WhatsApp, etc.
+var esSamsung = /SamsungBrowser/i.test(navigator.userAgent);
 function ofrecerInstalar(){
   var c = $("inst");
-  if (instalada || ls("ped_no_instalar") || (!avisoInstalar && !esIOS)) { c.innerHTML = ""; return; }
-  c.innerHTML = '<div class="instalar"><img src="../app-192.png" alt=""><div><b>Instalar la app</b>' +
-    (avisoInstalar ? "Queda el ícono en la pantalla de inicio." : "Tocá Compartir ⬆︎ y después “Agregar a inicio”.") + "</div>" +
+  if (instalada || ocultoInstalar) { c.innerHTML = ""; return; }
+  var txt;
+  if (avisoInstalar) txt = "Queda el ícono en la pantalla de inicio.";
+  else if (enOtraApp) txt = "Abrí este link en " + (esIOS ? "Safari" : "Chrome") + " para poder instalarla (desde WhatsApp no se puede).";
+  else if (esIOS) txt = "Tocá Compartir ⬆︎ y después “Agregar a inicio”.";
+  else if (esSamsung) txt = "Tocá el menú ☰ y después “Agregar página a” → “Pantalla de inicio”.";
+  else txt = "Tocá el menú ⋮ de Chrome y después “Instalar app” o “Agregar a la pantalla principal”.";
+  c.innerHTML = '<div class="instalar"><img src="../app-192.png" alt=""><div><b>Instalar la app</b>' + txt + "</div>" +
     (avisoInstalar ? '<button class="cta" id="bInst" type="button">Instalar</button>' : "") +
-    '<button class="x" id="bNo" type="button" aria-label="No mostrar más">✕</button></div>';
+    '<button class="x" id="bNo" type="button" aria-label="Ocultar">✕</button></div>';
   var bi = $("bInst");
   if (bi) bi.onclick = function(){ avisoInstalar.prompt(); avisoInstalar.userChoice.then(function(){ avisoInstalar = null; ofrecerInstalar(); }); };
-  $("bNo").onclick = function(){ ls("ped_no_instalar", "1"); ofrecerInstalar(); };
+  $("bNo").onclick = function(){ ocultoInstalar = true; ofrecerInstalar(); };
 }
 ofrecerInstalar();
 if ("serviceWorker" in navigator) { try { navigator.serviceWorker.register("sw.js").catch(function(){}); } catch(_){} }
