@@ -258,7 +258,7 @@ svg{display:block;width:100%;height:auto}
 
 
   // ---------- pestaña "Simultaneidad": cuántos casos había en mano y en espera cuando entró cada caso
-  // (lo registra el avisador desde el 17/11/2026; tabla simult_ingresos de Supabase)
+  // (hay datos desde el 17/11/2026)
   var C_MANO = '#2563eb', C_ESP = '#f59e0b', C_PAU = '#94a3b8';
   function leerSimul(p) {
     var k = iso(p.desde) + '|' + iso(p.hasta);
@@ -339,8 +339,8 @@ svg{display:block;width:100%;height:auto}
     $('wrap').innerHTML = h; atar();
   }
 
-  // ---------- vista Día: casos del día (tabla tab_casos, la sube el Avisador una vez por día)
-  var TURNOS = [['Mañana', 6, 14, '06–14'], ['Tarde', 14, 22, '14–22'], ['Noche', 22, 6, '22–06']];   // por hora de ingreso, igual que /dia
+  // ---------- vista Día: casos del día
+  var TURNOS = [['Mañana', 6, 14, '06–14'], ['Tarde', 14, 22, '14–22'], ['Noche', 22, 6, '22–06']];   // por hora de ingreso
   function leerDia(d) {
     var k = iso(d);
     if (st.diaCache[k]) return Promise.resolve(st.diaCache[k]);
@@ -374,8 +374,8 @@ svg{display:block;width:100%;height:auto}
       h += '<div class="k" style="grid-column:span 3"><small>Venían de antes</small><b>' + antes.length + '</b><i style="color:#64748b">abiertos a las 00:00' + (antes.length ? ' · ' + res + (res === 1 ? ' se resolvió' : ' se resolvieron') + ' en el día' : '') + '</i></div>';
       h += '<div class="k" style="grid-column:span 3"><small>Vencidos</small><b style="color:#dc2626">' + nVen + '</b><i style="color:#64748b">un ' + nomDia + ' habitual: ' + unoH(hv) + '</i></div>';
       if (!cs.length) {
-        h += '<div class="c full"><div class="vacio">' + (iso(d0) === iso(hoy()) ? 'Hoy todavía no está cargado: el tablero se actualiza una vez por día. Para ver hoy en vivo, usá /dia en el bot.'
-             : 'No hay detalle de casos para este día. El detalle se guarda desde que se actualizó el Avisador (3.71), con las últimas 3 semanas.') + '</div></div>';
+        h += '<div class="c full"><div class="vacio">' + (iso(d0) === iso(hoy()) ? 'Hoy todavía no está cargado: el tablero se actualiza una vez por día.'
+             : 'No hay detalle de casos para este día.') + '</div></div>';
         $('wrap').innerHTML = h; return;
       }
       // por turno (por hora de ingreso; la noche va de 22 a 06 del mismo día) y la carga más alta
@@ -386,7 +386,7 @@ svg{display:block;width:100%;height:auto}
         return {n: t[0] + ' ' + t[3], ing: es.length, ven: es.filter(function (c) { return c.ven; }).length, max: Math.max.apply(null, hs.map(function (q) { return q.ab; }))};
       });
       var pico = 0; horas.forEach(function (q, hh) { if (q.ab > horas[pico].ab) pico = hh; });
-      h += '<div class="c"><h3>Por turno</h3><p>Ingresados, vencidos y la carga más alta de cada turno (por hora de ingreso, como /dia)</p><table><tr><th>Turno</th><th>Ingresados</th><th>Vencidos</th><th>En término</th><th>Máx. abiertos</th></tr>' +
+      h += '<div class="c"><h3>Por turno</h3><p>Ingresados, vencidos y la carga más alta de cada turno (por hora de ingreso)</p><table><tr><th>Turno</th><th>Ingresados</th><th>Vencidos</th><th>En término</th><th>Máx. abiertos</th></tr>' +
         tt.map(function (t) { return '<tr><td>' + t.n + '</td><td><b>' + t.ing + '</b></td><td>' + t.ven + '</td><td>' + pill(pctT(t.ing, t.ven)) + '</td><td>' + t.max + '</td></tr>'; }).join('') + '</table>' +
         (horas[pico].ab ? '<p style="margin-top:12px">⚠️ El momento más cargado: <b>' + ('0' + pico).slice(-2) + ':00, con ' + horas[pico].ab + (horas[pico].ab === 1 ? ' caso abierto' : ' casos abiertos') + '</b>.</p>' : '') + '</div>';
       // ingresos por hora: barras = casos abiertos en esa hora, puntos = casos que entraron
@@ -415,7 +415,7 @@ svg{display:block;width:100%;height:auto}
         antes.map(function (c) { return fila(c, true); }).join('') + ing.map(function (c) { return fila(c, false); }).join('') + '</table></div>';
       $('wrap').innerHTML = h;
     }, function (e) {
-      $('wrap').innerHTML = '<div class="c full"><div class="vacio">No pude leer el detalle del día (' + esc(e.message) + '). ¿Ya se corrió el SQL de la vista Día en Supabase?</div></div>';
+      $('wrap').innerHTML = '<div class="c full"><div class="vacio">No pude leer el detalle del día (' + esc(e.message) + ').</div></div>';
     });
   }
 
