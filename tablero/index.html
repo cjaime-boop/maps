@@ -76,7 +76,8 @@ svg{display:block;width:100%;height:auto}
   }
   function periodos() {                    // lista para el selector (más nuevo primero)
     var h = hoy(), o = [];
-    if (st.vista === 'dia') for (var k = 0; k < 60; k++) { var d = mas(h, -k); o.push({desde: d, hasta: d}); }
+    if (st.vista === 'dia') for (var k = 1; k <= 60; k++)   // desde ayer: el día en curso todavía no está cargado
+      { var d = mas(h, -k); o.push({desde: d, hasta: d}); }
     else if (st.vista === 'semana') for (var i = 0; i < 26; i++) { var l = mas(lunes(h), -7 * i); o.push({desde: l, hasta: mas(l, 6)}); }
     else if (st.vista === 'anio') for (var y = h.getFullYear(); y >= 2026; y--) o.push({desde: new Date(y, 0, 1), hasta: new Date(y, 11, 31)});
     else for (var j = 0; j < 12; j++) { var a = new Date(h.getFullYear(), h.getMonth() - j, 1); o.push({desde: a, hasta: new Date(a.getFullYear(), a.getMonth() + 1, 0)}); }
@@ -85,7 +86,7 @@ svg{display:block;width:100%;height:auto}
   function nombrePer(p) {
     if (st.vista === 'anio') return String(p.desde.getFullYear());
     if (st.vista === 'dia') { var k = Math.round((hoy() - p.desde) / 864e5);
-      return (k === 0 ? 'Hoy · ' : k === 1 ? 'Ayer · ' : '') + DSEM[p.desde.getDay()] + ' ' + ddmm(p.desde); }
+      return (k === 1 ? 'Ayer · ' : '') + DSEM[p.desde.getDay()] + ' ' + ddmm(p.desde); }
     return st.vista === 'semana' ? ddmm(p.desde) + ' al ' + ddmm(p.hasta) : MES[p.desde.getMonth()].replace(/^./, function (c) { return c.toUpperCase(); }) + ' ' + p.desde.getFullYear();
   }
   function sumar(m, desde, hasta) {
@@ -374,8 +375,7 @@ svg{display:block;width:100%;height:auto}
       h += '<div class="k" style="grid-column:span 3"><small>Venían de antes</small><b>' + antes.length + '</b><i style="color:#64748b">abiertos a las 00:00' + (antes.length ? ' · ' + res + (res === 1 ? ' se resolvió' : ' se resolvieron') + ' en el día' : '') + '</i></div>';
       h += '<div class="k" style="grid-column:span 3"><small>Vencidos</small><b style="color:#dc2626">' + nVen + '</b><i style="color:#64748b">un ' + nomDia + ' habitual: ' + unoH(hv) + '</i></div>';
       if (!cs.length) {
-        h += '<div class="c full"><div class="vacio">' + (iso(d0) === iso(hoy()) ? 'Hoy todavía no está cargado: el tablero se actualiza una vez por día.'
-             : 'No hay detalle de casos para este día.') + '</div></div>';
+        h += '<div class="c full"><div class="vacio">' + 'No hay detalle de casos para este día.' + '</div></div>';
         $('wrap').innerHTML = h; return;
       }
       // por turno (por hora de ingreso; la noche va de 22 a 06 del mismo día) y la carga más alta
