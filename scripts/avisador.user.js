@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Mobisond · Avisador
 // @namespace    mobisond
-// @version      3.69.3
+// @version      3.69.4
 // @description  Avisa los casos nuevos (celular, campana y grupo de Telegram), los Lineales sin notas hace 25 min, los SLA y los aceptados; comandos del bot (/status, /bandeja, /autoasignar…); dispenser de la semana, racha sin vencidos y mensajes en casos pausados.
 // @match        https://*.service-now.com/*
 // @grant        GM_xmlhttpRequest
@@ -3194,9 +3194,16 @@
   function infoPC() {
     if (window.top !== window.self || !token() || sesionCaida() || !hayGrupo()) return;
     var u = GM_getValue('sn_usuario', null);
+    // Una sola vez por minuto por PC (antes lo mandaba cada pestaña: con varias abiertas se multiplicaban los registros
+    // de Supabase). Si cambia algo (versión, usuario, lista vigilada) sale enseguida.
+    if (vigilada()) GM_setValue('pcinfo_lista_t', Date.now());
+    var lista = Date.now() - GM_getValue('pcinfo_lista_t', 0) < 3 * 60000;     // alguna pestaña de esta PC vigila la lista
     var mandar = function (nombre) {
-      sbRpc('bot_pc_info_guardar', {p_pc: pcId(), p_version: typeof GM_info !== 'undefined' ? GM_info.script.version : '',
-                                    p_usuario: nombre || '', p_lista: !!vigilada()}).catch(function () {});
+      var version = typeof GM_info !== 'undefined' ? GM_info.script.version : '';
+      var firma = [version, nombre || '', lista].join('|'), ult = GM_getValue('pcinfo_ult', {t: 0, firma: ''});
+      if (ult.firma === firma && Date.now() - ult.t < 55000) return;           // otra pestaña de esta PC ya lo mandó
+      GM_setValue('pcinfo_ult', {t: Date.now(), firma: firma});
+      sbRpc('bot_pc_info_guardar', {p_pc: pcId(), p_version: version, p_usuario: nombre || '', p_lista: lista}).catch(function () {});
     };
     if (u && Date.now() - u.t < 6 * 3600000) return mandar(u.nombre);    // el usuario se vuelve a mirar cada 6 h
     api('sys_user', 'sys_id=javascript:gs.getUserID()', 'name,user_name').then(function (rs) {
