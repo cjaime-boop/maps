@@ -35,7 +35,7 @@ svg{display:block;width:100%;height:auto}
 <input id="pass" type="password" autocomplete="current-password"><button id="entrar">Entrar</button><div class="err" id="err"></div></div>
 <div id="app" hidden>
 <div class="top"><div class="r1"><div><h1>📊 Tablero Mobisond · ATC</h1><small id="act"></small></div>
-<div class="seg"><button data-v="semana" class="on">Semana</button><button data-v="mes">Mes</button><button data-v="anio">Año</button></div><select id="per"></select></div>
+<div class="seg"><button data-v="dia">Día</button><button data-v="semana" class="on">Semana</button><button data-v="mes">Mes</button><button data-v="anio">Año</button></div><select id="per"></select></div>
 <div class="tabs"><button data-p="lineales" class="on">🔧 Lineales</button><button data-p="gpon">📡 GPON</button><button data-p="termino">📈 En término</button><button data-p="simul">⏱️ Simultaneidad</button></div></div>
 <div class="wrap" id="wrap"></div></div>
 <script>
@@ -76,13 +76,16 @@ svg{display:block;width:100%;height:auto}
   }
   function periodos() {                    // lista para el selector (más nuevo primero)
     var h = hoy(), o = [];
-    if (st.vista === 'semana') for (var i = 0; i < 26; i++) { var l = mas(lunes(h), -7 * i); o.push({desde: l, hasta: mas(l, 6)}); }
+    if (st.vista === 'dia') for (var k = 0; k < 60; k++) { var d = mas(h, -k); o.push({desde: d, hasta: d}); }
+    else if (st.vista === 'semana') for (var i = 0; i < 26; i++) { var l = mas(lunes(h), -7 * i); o.push({desde: l, hasta: mas(l, 6)}); }
     else if (st.vista === 'anio') for (var y = h.getFullYear(); y >= 2026; y--) o.push({desde: new Date(y, 0, 1), hasta: new Date(y, 11, 31)});
     else for (var j = 0; j < 12; j++) { var a = new Date(h.getFullYear(), h.getMonth() - j, 1); o.push({desde: a, hasta: new Date(a.getFullYear(), a.getMonth() + 1, 0)}); }
     return o;
   }
   function nombrePer(p) {
     if (st.vista === 'anio') return String(p.desde.getFullYear());
+    if (st.vista === 'dia') { var k = Math.round((hoy() - p.desde) / 864e5);
+      return (k === 0 ? 'Hoy · ' : k === 1 ? 'Ayer · ' : '') + DSEM[p.desde.getDay()] + ' ' + ddmm(p.desde); }
     return st.vista === 'semana' ? ddmm(p.desde) + ' al ' + ddmm(p.hasta) : MES[p.desde.getMonth()].replace(/^./, function (c) { return c.toUpperCase(); }) + ' ' + p.desde.getFullYear();
   }
   function sumar(m, desde, hasta) {
@@ -104,6 +107,7 @@ svg{display:block;width:100%;height:auto}
     for (var v = 0; v <= vmax; v += vmax / 4) { var y = y1 - (y1 - y0) * v / vmax; s += '<line x1="' + x0 + '" x2="' + W + '" y1="' + y + '" y2="' + y + '" stroke="#eef0f3"/><text x="' + (x0 - 8) + '" y="' + (y + 4) + '" font-size="11" fill="#94a3b8" text-anchor="end">' + v + '</text>'; }
     t.dias.forEach(function (d, i) {
       var cx = x0 + cw * i + cw / 2, hi = (y1 - y0) * d.ing / vmax, hv = (y1 - y0) * d.ven / vmax;
+      if (d.sel) s += '<rect x="' + (x0 + cw * i + 3) + '" y="' + (y0 - 8) + '" width="' + (cw - 6) + '" height="' + (y1 - y0 + 58) + '" rx="8" fill="#fef9c3" stroke="#facc15"/>';
       if (d.ing) s += '<rect x="' + (cx - bw / 2) + '" y="' + (y1 - hi) + '" width="' + bw + '" height="' + hi + '" rx="3" fill="' + color + '"/>';
       if (d.ven) s += '<rect x="' + (cx - bw / 2) + '" y="' + (y1 - hv) + '" width="' + bw + '" height="' + hv + '" fill="#dc2626"/>' + (!mes && hv > 16 ? '<text x="' + cx + '" y="' + (y1 - hv / 2 + 4) + '" font-size="12" font-weight="700" fill="#fff" text-anchor="middle">' + d.ven + '</text>' : '');
       if (d.ing) s += '<text x="' + cx + '" y="' + (y1 - hi - 5) + '" font-size="' + (mes ? 10 : 12) + '" font-weight="700" fill="#1f2937" text-anchor="middle">' + d.ing + '</text>';
@@ -209,8 +213,8 @@ svg{display:block;width:100%;height:auto}
 
   // ---------- pestaña "En término": % en término de Lineales y GPON en el tiempo (día por día, o mes por mes en Año)
   function puntos(m, p) {
-    var t = sumar(m, p.desde, p.hasta);
-    if (st.vista === 'semana') return t.dias.map(function (d) { return {lab: DSEM[d.d.getDay()] + ' ' + dd(d.d), p: d.falta ? null : pctT(d.ing, d.ven), ing: d.ing, ven: d.ven}; });
+    var t = st.vista === 'dia' ? sumar(m, mas(p.desde, -13), p.hasta) : sumar(m, p.desde, p.hasta);
+    if (st.vista === 'semana' || st.vista === 'dia') return t.dias.map(function (d) { return {lab: DSEM[d.d.getDay()] + ' ' + dd(d.d), p: d.falta ? null : pctT(d.ing, d.ven), ing: d.ing, ven: d.ven}; });
     if (st.vista === 'mes') {                   // mes: semana por semana (día por día salta mucho con pocos casos)
       var sem = [], idx = {};
       t.dias.forEach(function (d) { var k = iso(lunes(d.d)); if (!(k in idx)) { idx[k] = sem.length; sem.push({lab: 'Sem. ' + ddmm(d.d), ing: 0, ven: 0, falta: true}); }
@@ -245,7 +249,7 @@ svg{display:block;width:100%;height:auto}
     var kpi = function (n, v, extra) { return '<div class="k"><small>' + n + '</small><b style="color:' + (v === null ? '#0f172a' : v >= 75 ? '#16a34a' : '#dc2626') + '">' + (v === null ? '—' : v + '%') + '</b><i style="color:#64748b">' + extra + '</i></div>'; };
     var h = kpi('Lineales en término', pl, tl.ing + ' ingresados · ' + tl.ven + ' vencidos') + kpi('GPON en término', pg, tg.ing + ' ingresados · ' + tg.ven + ' vencidos') +
             kpi('Total en término', pt, (tl.ing + tg.ing) + ' ingresados · ' + (tl.ven + tg.ven) + ' vencidos');
-    var cada = {semana: ['por día', 'cada día'], mes: ['por semana', 'cada semana'], anio: ['por mes', 'cada mes']}[st.vista];
+    var cada = {dia: ['por día (últimos 14)', 'cada día'], semana: ['por día', 'cada día'], mes: ['por semana', 'cada semana'], anio: ['por mes', 'cada mes']}[st.vista];
     h += '<div class="c full"><h3>% en término ' + cada[0] + '</h3><p>De los casos ingresados ' + cada[1] +
          ', cuántos no se vencieron. La línea punteada marca el 75%.</p><div style="font-size:12px;color:#475569;margin-bottom:6px"><b style="display:inline-block;width:10px;height:10px;border-radius:2px;background:#2563eb;vertical-align:-1px"></b> Lineales &nbsp; <b style="display:inline-block;width:10px;height:10px;border-radius:2px;background:#8b5cf6;vertical-align:-1px"></b> GPON</div>' +
          grafLineas([{nombre: 'Lineales', color: '#2563eb', pts: puntos(L, p)}, {nombre: 'GPON', color: '#8b5cf6', pts: puntos(G, p)}]) + '</div>';
@@ -337,15 +341,17 @@ svg{display:block;width:100%;height:auto}
 
   // ---------- pantalla
   function pintar() {
-    var ps = periodos(), p = ps[st.per] || ps[0], ant = st.vista === 'semana' ? {desde: mas(p.desde, -7), hasta: mas(p.hasta, -7)}
+    var ps = periodos(), p = ps[st.per] || ps[0], ant = st.vista === 'dia' ? {desde: mas(p.desde, -1), hasta: mas(p.desde, -1)}
+      : st.vista === 'semana' ? {desde: mas(p.desde, -7), hasta: mas(p.hasta, -7)}
       : st.vista === 'anio' ? {desde: new Date(p.desde.getFullYear() - 1, 0, 1), hasta: new Date(p.desde.getFullYear() - 1, 11, 31)}
       : {desde: new Date(p.desde.getFullYear(), p.desde.getMonth() - 1, 1), hasta: new Date(p.desde.getFullYear(), p.desde.getMonth(), 0)};
-    $('per').innerHTML = ps.map(function (x, i) { return '<option value="' + i + '"' + (i === st.per ? ' selected' : '') + '>' + nombrePer(x) + (i === 0 ? ' (en curso)' : '') + '</option>'; }).join('');
+    $('per').innerHTML = ps.map(function (x, i) { return '<option value="' + i + '"' + (i === st.per ? ' selected' : '') + '>' + nombrePer(x) + (i === 0 && st.vista !== 'dia' ? ' (en curso)' : '') + '</option>'; }).join('');
     // período en curso: se compara con los mismos días del período anterior (ej. lunes a miércoles contra lunes a miércoles)
     var h0 = hoy(), enCurso = p.hasta > h0, corridos = Math.round((Math.min(h0, p.hasta) - p.desde) / 864e5);
-    if (enCurso) ant.hasta = st.vista === 'semana' ? mas(ant.desde, corridos) : new Date(Math.min(mas(ant.desde, corridos), ant.hasta));
-    st.cmpTxt = (enCurso ? {semana: 'mismos días de la semana anterior', mes: 'mismos días del mes anterior', anio: 'mismos días del año anterior'}
+    if (enCurso && st.vista !== 'dia') ant.hasta = st.vista === 'semana' ? mas(ant.desde, corridos) : new Date(Math.min(mas(ant.desde, corridos), ant.hasta));
+    st.cmpTxt = st.vista === 'dia' ? 'el día anterior' : (enCurso ? {semana: 'mismos días de la semana anterior', mes: 'mismos días del mes anterior', anio: 'mismos días del año anterior'}
                          : {semana: 'semana anterior', mes: 'mes anterior', anio: 'año anterior'})[st.vista];
+    var hoyNoCargado = st.vista === 'dia' && iso(p.desde) === iso(h0);
     if (st.proy === 'termino') { pintarTermino(p); pintarAct(); return; }
     if (st.proy === 'simul') { pintarSimul(p); pintarAct(); return; }
     var m = porDia(st.proy), t = sumar(m, p.desde, p.hasta), a = sumar(m, ant.desde, ant.hasta);
@@ -355,10 +361,13 @@ svg{display:block;width:100%;height:auto}
     h += '<div class="k"><small>Ingresados</small><b>' + t.ing + '</b>' + flecha(hayAnt ? t.ing - a.ing : null, '', false).replace(/color:#(16a34a|dc2626)/, 'color:#64748b') + '</div>';
     h += '<div class="k"><small>En término</small><b style="color:' + (pt === null ? '#0f172a' : pt >= 75 ? '#16a34a' : '#dc2626') + '">' + (pt === null ? '—' : pt + '%') + '</b>' + flecha(hayAnt && pt !== null && pa !== null ? pt - pa : null, ' pts', true) + '</div>';
     h += '<div class="k"><small>Vencidos</small><b style="color:#dc2626">' + t.ven + '</b>' + flecha(hayAnt ? t.ven - a.ven : null, '', false) + '</div>';
-    if (st.vista === 'anio') h += '<div class="c full"><h3>' + nom + ' · por mes de ingreso</h3><p>Casos ingresados por mes; en rojo, los que se vencieron. Abajo, el % en término de cada mes.</p>' + grafMeses(t, color) + '</div>';
+    if (hoyNoCargado) h += '<div class="c full" style="background:#fffbeb;border-color:#fde68a"><b>Hoy todavía no está cargado.</b> El tablero se actualiza una vez por día; para ver hoy en vivo, usá /dia en el bot.</div>';
+    if (st.vista === 'dia') { var t14 = sumar(m, mas(p.desde, -13), p.hasta); t14.dias[t14.dias.length - 1].sel = true;
+      h += '<div class="c full"><h3>' + nom + ' · últimos 14 días</h3><p>Casos ingresados por día; en rojo, los que se vencieron. Resaltado, el día elegido. Abajo, el % en término de cada día.</p>' + grafDias(t14, color) + '</div>'; }
+    else if (st.vista === 'anio') h += '<div class="c full"><h3>' + nom + ' · por mes de ingreso</h3><p>Casos ingresados por mes; en rojo, los que se vencieron. Abajo, el % en término de cada mes.</p>' + grafMeses(t, color) + '</div>';
     else h += '<div class="c full"><h3>' + nom + ' · por día de ingreso</h3><p>Casos ingresados por día; en rojo, los que se vencieron.' + (st.vista === 'semana' ? ' Abajo, el % en término de cada día.' : ' En gris, los fines de semana.') + '</p>' + grafDias(t, color) + '</div>';
-    if (st.proy === 'lineales') h += '<div class="c"><h3>Por cliente</h3><p>Ingresados y vencidos del período</p>' + clientes(t) + '<div style="margin-top:14px">' + findes(t) + '</div></div>';
-    else h += '<div class="c"><h3>Ramas con más casos (90 días)</h3>' + ramas() + '<div style="margin-top:14px">' + findes(t) + '</div></div>';
+    if (st.proy === 'lineales') h += '<div class="c"><h3>Por cliente</h3><p>Ingresados y vencidos del período</p>' + clientes(t) + (st.vista === 'dia' ? '' : '<div style="margin-top:14px">' + findes(t) + '</div>') + '</div>';
+    else h += '<div class="c"><h3>Ramas con más casos (90 días)</h3>' + ramas() + (st.vista === 'dia' ? '' : '<div style="margin-top:14px">' + findes(t) + '</div>') + '</div>';
     h += '<div class="c"><h3>En término, últimas 12 semanas</h3><p>% de los casos ingresados que no se vencieron</p>' + grafTendencia(m, color) + '</div>';
     var cz = causas(t, color);
     var cajaCausas = '<div class="c' + (st.proy === 'lineales' ? ' full' : '') + '"><h3>Causas de cierre</h3><p>Causa de la afectación de los casos cerrados en el período (del formulario de cierre)' + (cz.tot ? ' · ' + cz.tot + (cz.tot === 1 ? ' cerrado' : ' cerrados') : '') + '</p>' + cz.html + '</div>';
