@@ -46,7 +46,7 @@ svg{display:block;width:100%;height:auto}
   var DSEM = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'];
   var MES = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
   var NOMBRE_CLI = {CLR: 'Claro', EDN: 'Edenor', MUNI: 'Municipal', TP: 'Telecom', MVS: 'Movistar', Otros: 'sin cliente'};
-  var st = {vista: 'semana', proy: 'lineales', per: 0, datos: null, pass: null, simProy: 'Lineales', simCache: {}};
+  var st = {diaCache: {}, vista: 'semana', proy: 'lineales', per: 0, datos: null, pass: null, simProy: 'Lineales', simCache: {}};
   var $ = function (id) { return document.getElementById(id); };
   function lsGet(k) { try { return localStorage.getItem(k); } catch (e) { return null; } }
   function lsSet(k, v) { try { if (v === null) localStorage.removeItem(k); else localStorage.setItem(k, v); } catch (e) {} }
@@ -339,6 +339,86 @@ svg{display:block;width:100%;height:auto}
     $('wrap').innerHTML = h; atar();
   }
 
+  // ---------- vista Día: casos del día (tabla tab_casos, la sube el Avisador una vez por día)
+  var TURNOS = [['Mañana', 6, 14, '06–14'], ['Tarde', 14, 22, '14–22'], ['Noche', 22, 6, '22–06']];   // por hora de ingreso, igual que /dia
+  function leerDia(d) {
+    var k = iso(d);
+    if (st.diaCache[k]) return Promise.resolve(st.diaCache[k]);
+    return fetch(SB + '/rest/v1/rpc/tab_dia', {method: 'POST', headers: {apikey: KEY, 'Content-Type': 'application/json'},
+      body: JSON.stringify({p_pass: st.pass, p_dia: k})})
+      .then(function (r) { return r.json().then(function (j) { if (!r.ok) throw new Error(j.message || r.status); st.diaCache[k] = j; return j; }); });
+  }
+  function hm(t) { return ('0' + t.getHours()).slice(-2) + ':' + ('0' + t.getMinutes()).slice(-2); }
+  function turnoDe(t) { var hh = t.getHours(); return hh >= 6 && hh < 14 ? 0 : hh >= 14 && hh < 22 ? 1 : 2; }
+  function abiertosEn(cs, a, b) { return cs.filter(function (c) { return c.ab < b && (!c.ce || c.ce > a); }).length; }   // abiertos en algún momento entre a y b
+  function pintarDia(p) {
+    var proy = st.proy, color = proy === 'lineales' ? '#2563eb' : '#8b5cf6', nom = proy === 'lineales' ? 'Lineales' : 'GPON';
+    var d0 = new Date(p.desde.getFullYear(), p.desde.getMonth(), p.desde.getDate()), d1 = mas(d0, 1);
+    $('wrap').innerHTML = '<div class="c full"><div class="vacio">Cargando el día…</div></div>';
+    leerDia(d0).then(function (j) {
+      if (st.vista !== 'dia' || st.proy !== proy || iso(d0) !== iso((periodos()[st.per] || {}).desde || d0)) return;   // ya cambió de vista
+      var cs = (j.casos || []).filter(function (c) { return c.proyecto === proy; }).map(function (c) {
+        return {wo: c.wo, prio: c.prio, cli: c.cli, ven: c.vencido, baja: c.baja, ab: new Date(c.abierto), ce: c.cerrado ? new Date(c.cerrado) : null};
+      });
+      var ing = cs.filter(function (c) { return c.ab >= d0; }), antes = cs.filter(function (c) { return c.ab < d0; });
+      var m = porDia(proy), x = m[iso(d0)] || {ing: 0, ven: 0};
+      // habitual: el mismo día de la semana, las 4 anteriores
+      var hi = 0, hv = 0; for (var s = 1; s <= 4; s++) { var y = m[iso(mas(d0, -7 * s))] || {}; hi += y.ing || 0; hv += y.ven || 0; }
+      var nomDia = ['domingo', 'lunes', 'martes', 'miércoles', 'jueves', 'viernes', 'sábado'][d0.getDay()];
+      var nIng = Math.max(x.ing || 0, ing.length), nVen = Math.max(x.ven || 0, ing.filter(function (c) { return c.ven; }).length);
+      var pt = pctT(nIng, nVen), ph = pctT(hi, hv), unoH = function (n) { return String(Math.round(n / 4 * 10) / 10).replace('.', ','); };
+      var res = antes.filter(function (c) { return c.ce && c.ce < d1; }).length;
+      var h = '';
+      h += '<div class="k" style="grid-column:span 3"><small>Ingresados</small><b>' + nIng + '</b><i style="color:#64748b">un ' + nomDia + ' habitual: ' + unoH(hi) + '</i></div>';
+      h += '<div class="k" style="grid-column:span 3"><small>En término</small><b style="color:' + (pt === null ? '#0f172a' : pt >= 75 ? '#16a34a' : '#dc2626') + '">' + (pt === null ? '—' : pt + '%') + '</b><i style="color:#64748b">' + nVen + (nVen === 1 ? ' vencido' : ' vencidos') + (ph === null ? '' : ' · habitual ' + ph + '%') + '</i></div>';
+      h += '<div class="k" style="grid-column:span 3"><small>Venían de antes</small><b>' + antes.length + '</b><i style="color:#64748b">abiertos a las 00:00' + (antes.length ? ' · ' + res + (res === 1 ? ' se resolvió' : ' se resolvieron') + ' en el día' : '') + '</i></div>';
+      h += '<div class="k" style="grid-column:span 3"><small>Vencidos</small><b style="color:#dc2626">' + nVen + '</b><i style="color:#64748b">un ' + nomDia + ' habitual: ' + unoH(hv) + '</i></div>';
+      if (!cs.length) {
+        h += '<div class="c full"><div class="vacio">' + (iso(d0) === iso(hoy()) ? 'Hoy todavía no está cargado: el tablero se actualiza una vez por día. Para ver hoy en vivo, usá /dia en el bot.'
+             : 'No hay detalle de casos para este día. El detalle se guarda desde que se actualizó el Avisador (3.71), con las últimas 3 semanas.') + '</div></div>';
+        $('wrap').innerHTML = h; return;
+      }
+      // por turno (por hora de ingreso; la noche va de 22 a 06 del mismo día) y la carga más alta
+      var horas = []; for (var i = 0; i < 24; i++) { var a = new Date(d0.getTime() + i * 36e5); horas.push({ing: 0, ab: abiertosEn(cs, a, new Date(a.getTime() + 36e5))}); }
+      ing.forEach(function (c) { horas[c.ab.getHours()].ing++; });
+      var tt = TURNOS.map(function (t, k) {
+        var es = ing.filter(function (c) { return turnoDe(c.ab) === k; }), hs = horas.filter(function (q, hh) { return turnoDe(new Date(d0.getTime() + hh * 36e5)) === k; });
+        return {n: t[0] + ' ' + t[3], ing: es.length, ven: es.filter(function (c) { return c.ven; }).length, max: Math.max.apply(null, hs.map(function (q) { return q.ab; }))};
+      });
+      var pico = 0; horas.forEach(function (q, hh) { if (q.ab > horas[pico].ab) pico = hh; });
+      h += '<div class="c"><h3>Por turno</h3><p>Ingresados, vencidos y la carga más alta de cada turno (por hora de ingreso, como /dia)</p><table><tr><th>Turno</th><th>Ingresados</th><th>Vencidos</th><th>En término</th><th>Máx. abiertos</th></tr>' +
+        tt.map(function (t) { return '<tr><td>' + t.n + '</td><td><b>' + t.ing + '</b></td><td>' + t.ven + '</td><td>' + pill(pctT(t.ing, t.ven)) + '</td><td>' + t.max + '</td></tr>'; }).join('') + '</table>' +
+        (horas[pico].ab ? '<p style="margin-top:12px">⚠️ El momento más cargado: <b>' + ('0' + pico).slice(-2) + ':00, con ' + horas[pico].ab + (horas[pico].ab === 1 ? ' caso abierto' : ' casos abiertos') + '</b>.</p>' : '') + '</div>';
+      // ingresos por hora: barras = casos abiertos en esa hora, puntos = casos que entraron
+      var W = 560, H = 200, x0 = 26, y1 = 150, cw = (W - x0 - 6) / 24, top = Math.max(4, Math.max.apply(null, horas.map(function (q) { return q.ab; })));
+      var g = '<svg viewBox="0 0 ' + W + ' ' + H + '">';
+      for (var v = 0; v <= top; v += Math.max(1, Math.round(top / 4))) { var yy = y1 - (y1 - 22) * v / top; g += '<line x1="' + x0 + '" x2="' + W + '" y1="' + yy + '" y2="' + yy + '" stroke="#eef0f3"/><text x="' + (x0 - 5) + '" y="' + (yy + 4) + '" font-size="10" fill="#94a3b8" text-anchor="end">' + v + '</text>'; }
+      horas.forEach(function (q, hh) {
+        var cx = x0 + cw * hh + cw / 2, bh = (y1 - 22) * q.ab / top;
+        if (q.ab) g += '<rect x="' + (cx - cw * 0.38) + '" y="' + (y1 - bh) + '" width="' + (cw * 0.76) + '" height="' + bh + '" rx="2" fill="' + (proy === 'lineales' ? '#dbeafe' : '#ede9fe') + '"><title>' + ('0' + hh).slice(-2) + ':00 · ' + q.ab + ' abiertos</title></rect>';
+        if (q.ing) g += '<circle cx="' + cx + '" cy="' + (y1 - bh - 10) + '" r="' + (q.ing > 1 ? 8 : 6) + '" fill="' + color + '"><title>' + q.ing + (q.ing === 1 ? ' ingreso' : ' ingresos') + '</title></circle>' + (q.ing > 1 ? '<text x="' + cx + '" y="' + (y1 - bh - 6.5) + '" font-size="10" font-weight="700" fill="#fff" text-anchor="middle">' + q.ing + '</text>' : '');
+        if (hh % 3 === 0) g += '<text x="' + cx + '" y="' + (y1 + 16) + '" font-size="10.5" fill="#64748b" text-anchor="middle">' + ('0' + hh).slice(-2) + '</text>';
+      });
+      g += '</svg>';
+      h += '<div class="c"><h3>Ingresos por hora</h3><p>Cuándo entraron los casos y cuántos había abiertos en cada hora</p><div class="ley"><b style="background:' + color + ';border-radius:50%"></b>entró un caso &nbsp; <b style="background:' + (proy === 'lineales' ? '#dbeafe' : '#ede9fe') + '"></b>casos abiertos en esa hora</div>' + g + '</div>';
+      // casos del día: primero los que venían de antes
+      var fila = function (c, deAntes) {
+        var sla = c.baja ? '<span class="pill" style="background:#f1f5f9;color:#475569">prioridad baja</span>'
+          : c.ven ? '<span class="pill" style="background:#fee2e2;color:#991b1b">vencido</span>'
+          : !c.ce || c.ce >= d1 ? '<span class="pill" style="background:#fef3c7;color:#92400e">sigue abierto</span>'
+          : '<span class="pill" style="background:#dcfce7;color:#166534">en término</span>';
+        if (c.ce && c.ce < d1 && c.ce >= d0) sla += ' <small style="color:#64748b">resuelto ' + hm(c.ce) + '</small>';
+        return '<tr' + (deAntes ? ' style="background:#f8fafc"' : '') + '><td>' + esc(c.wo) + '</td><td>' + (deAntes ? ddmm(c.ab) + ' ' + hm(c.ab) + ' <small style="color:#64748b">◀ de antes</small>' : hm(c.ab)) +
+          '</td><td>' + (c.prio ? 'P' + c.prio : '') + '</td><td>' + esc(c.cli || '') + (proy === 'lineales' && NOMBRE_CLI[c.cli] ? ' <small style="color:#64748b">' + NOMBRE_CLI[c.cli] + '</small>' : '') + '</td><td>' + sla + '</td></tr>';
+      };
+      h += '<div class="c full"><h3>Casos del día</h3><p>Los que estuvieron abiertos ese día: primero los que venían de antes</p><table><tr><th>WO</th><th>Entró</th><th>Prio</th><th>' + (proy === 'lineales' ? 'Cliente' : 'Zona') + '</th><th>SLA</th></tr>' +
+        antes.map(function (c) { return fila(c, true); }).join('') + ing.map(function (c) { return fila(c, false); }).join('') + '</table></div>';
+      $('wrap').innerHTML = h;
+    }, function (e) {
+      $('wrap').innerHTML = '<div class="c full"><div class="vacio">No pude leer el detalle del día (' + esc(e.message) + '). ¿Ya se corrió el SQL de la vista Día en Supabase?</div></div>';
+    });
+  }
+
   // ---------- pantalla
   function pintar() {
     var ps = periodos(), p = ps[st.per] || ps[0], ant = st.vista === 'dia' ? {desde: mas(p.desde, -1), hasta: mas(p.desde, -1)}
@@ -351,9 +431,9 @@ svg{display:block;width:100%;height:auto}
     if (enCurso && st.vista !== 'dia') ant.hasta = st.vista === 'semana' ? mas(ant.desde, corridos) : new Date(Math.min(mas(ant.desde, corridos), ant.hasta));
     st.cmpTxt = st.vista === 'dia' ? 'el día anterior' : (enCurso ? {semana: 'mismos días de la semana anterior', mes: 'mismos días del mes anterior', anio: 'mismos días del año anterior'}
                          : {semana: 'semana anterior', mes: 'mes anterior', anio: 'año anterior'})[st.vista];
-    var hoyNoCargado = st.vista === 'dia' && iso(p.desde) === iso(h0);
     if (st.proy === 'termino') { pintarTermino(p); pintarAct(); return; }
     if (st.proy === 'simul') { pintarSimul(p); pintarAct(); return; }
+    if (st.vista === 'dia') { pintarDia(p); pintarAct(); return; }
     var m = porDia(st.proy), t = sumar(m, p.desde, p.hasta), a = sumar(m, ant.desde, ant.hasta);
     var color = st.proy === 'lineales' ? '#2563eb' : '#8b5cf6', nom = st.proy === 'lineales' ? 'Lineales' : 'GPON';
     var pt = pctT(t.ing, t.ven), pa = pctT(a.ing, a.ven), hayAnt = a.dias.some(function (d) { return m[iso(d.d)]; });
@@ -361,10 +441,7 @@ svg{display:block;width:100%;height:auto}
     h += '<div class="k"><small>Ingresados</small><b>' + t.ing + '</b>' + flecha(hayAnt ? t.ing - a.ing : null, '', false).replace(/color:#(16a34a|dc2626)/, 'color:#64748b') + '</div>';
     h += '<div class="k"><small>En término</small><b style="color:' + (pt === null ? '#0f172a' : pt >= 75 ? '#16a34a' : '#dc2626') + '">' + (pt === null ? '—' : pt + '%') + '</b>' + flecha(hayAnt && pt !== null && pa !== null ? pt - pa : null, ' pts', true) + '</div>';
     h += '<div class="k"><small>Vencidos</small><b style="color:#dc2626">' + t.ven + '</b>' + flecha(hayAnt ? t.ven - a.ven : null, '', false) + '</div>';
-    if (hoyNoCargado) h += '<div class="c full" style="background:#fffbeb;border-color:#fde68a"><b>Hoy todavía no está cargado.</b> El tablero se actualiza una vez por día; para ver hoy en vivo, usá /dia en el bot.</div>';
-    if (st.vista === 'dia') { var t14 = sumar(m, mas(p.desde, -13), p.hasta); t14.dias[t14.dias.length - 1].sel = true;
-      h += '<div class="c full"><h3>' + nom + ' · últimos 14 días</h3><p>Casos ingresados por día; en rojo, los que se vencieron. Resaltado, el día elegido. Abajo, el % en término de cada día.</p>' + grafDias(t14, color) + '</div>'; }
-    else if (st.vista === 'anio') h += '<div class="c full"><h3>' + nom + ' · por mes de ingreso</h3><p>Casos ingresados por mes; en rojo, los que se vencieron. Abajo, el % en término de cada mes.</p>' + grafMeses(t, color) + '</div>';
+    if (st.vista === 'anio') h += '<div class="c full"><h3>' + nom + ' · por mes de ingreso</h3><p>Casos ingresados por mes; en rojo, los que se vencieron. Abajo, el % en término de cada mes.</p>' + grafMeses(t, color) + '</div>';
     else h += '<div class="c full"><h3>' + nom + ' · por día de ingreso</h3><p>Casos ingresados por día; en rojo, los que se vencieron.' + (st.vista === 'semana' ? ' Abajo, el % en término de cada día.' : ' En gris, los fines de semana.') + '</p>' + grafDias(t, color) + '</div>';
     if (st.proy === 'lineales') h += '<div class="c"><h3>Por cliente</h3><p>Ingresados y vencidos del período</p>' + clientes(t) + (st.vista === 'dia' ? '' : '<div style="margin-top:14px">' + findes(t) + '</div>') + '</div>';
     else h += '<div class="c"><h3>Ramas con más casos (90 días)</h3>' + ramas() + (st.vista === 'dia' ? '' : '<div style="margin-top:14px">' + findes(t) + '</div>') + '</div>';

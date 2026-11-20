@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Mobisond · Avisador
 // @namespace    mobisond
-// @version      3.70
+// @version      3.71
 // @description  Avisa los casos nuevos (celular, campana y grupo de Telegram), los Lineales sin notas hace 25 min, los SLA y los aceptados; comandos del bot (/status, /bandeja, /autoasignar…); dispenser de la semana, racha sin vencidos y mensajes en casos pausados.
 // @match        https://*.service-now.com/*
 // @grant        GM_xmlhttpRequest
@@ -2269,7 +2269,18 @@
           var cis = contar(casos.filter(function (c) { return dentro(deUtc(val(c, 'opened_at'))) && dv(c, 'cmdb_ci'); })
                                 .map(function (c) { return dv(c, 'cmdb_ci'); }))
                     .filter(function (p) { return p[1] > 1; }).sort(function (a, b) { return b[1] - a[1]; });
-          return {L: calc('lineales'), G: calc('gpon'), cis: cis, sinVerif: false, sinSla: res[1] === null, casos: casos};
+          // tablero, vista Día: el detalle de cada caso del período (incluye los que venían de antes y seguían abiertos)
+          var lista = casos.map(function (c) {
+            var pr = proyecto(c); if (pr !== 'lineales' && pr !== 'gpon') return null;
+            var n = dv(c, 'number'), ci = dv(c, 'cmdb_ci'), ab = deUtc(val(c, 'opened_at'));
+            var ce = val(c, 'active') === 'false' && val(c, 'closed_at') ? deUtc(val(c, 'closed_at')) : null;
+            if (!ab) return null;
+            return {wot: n, wo: dv(c, 'parent') || n, proyecto: pr, abierto: ab.toISOString(), cerrado: ce ? ce.toISOString() : '',
+                    prio: String(val(c, 'priority') || '').replace(/\D/g, '').slice(0, 1),
+                    cli: pr === 'lineales' ? (cliente(c) || 'Otros') : (ramaDe(ci) ? ci.split('-')[0].toUpperCase() : 'Otros'),
+                    vencido: !!vencAlguna[n] && !prioBaja(c), baja: prioBaja(c)};
+          }).filter(Boolean);
+          return {L: calc('lineales'), G: calc('gpon'), cis: cis, sinVerif: false, sinSla: res[1] === null, casos: casos, lista: lista};
         });
       });
     }
@@ -3244,7 +3255,10 @@
       }).catch(function () { return null; });
       var causasDesde = new Date(hasta.getTime()); causasDesde.setDate(causasDesde.getDate() - 2);   // causas: solo los últimos 3 días
       return Promise.all([tablaDias(desde, hasta, causasDesde), ramas]).then(function (x) {
-        return sbRpc('tab_guardar', {p_dias: x[0], p_ramas: x[1]});
+        return sbRpc('tab_guardar', {p_dias: x[0], p_ramas: x[1]}).then(function () {
+          // detalle de cada caso para la vista Día (si la tabla todavía no existe en Supabase, no frena lo demás)
+          return sbRpc('tab_casos_guardar', {p_casos: x[0].lista || []}).catch(function (e) { botLog('tablero, casos del día: ' + e.message); });
+        });
       }).then(function () { soltar(); botLog('tablero actualizado'); }, function (e) {   // falló: se suelta en Supabase para reintentar en 15 min (esta PC u otra)
         soltar(); GM_setValue('tab_hora', ''); sbRpc('bot_soltar', {p_aviso: 'tab:' + hora}).catch(function () {}); botLog('tablero: ' + e.message);
       });
@@ -3311,6 +3325,7 @@
           dias.push({proyecto: 'lineales', dia: k, ing: d.L.porDia[k] || 0, ven: d.L.vDia[k] || 0, cli: cl});
           dias.push({proyecto: 'gpon', dia: k, ing: d.G.porDia[k] || 0, ven: d.G.vDia[k] || 0, cli: zg});
         }
+        dias.lista = d.lista || [];                                         // vista Día del tablero (va aparte, a tab_casos)
         return dias;
       });
     });
