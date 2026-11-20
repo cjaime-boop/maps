@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Mobisond · Avisador
 // @namespace    mobisond
-// @version      3.69.4
+// @version      3.70
 // @description  Avisa los casos nuevos (celular, campana y grupo de Telegram), los Lineales sin notas hace 25 min, los SLA y los aceptados; comandos del bot (/status, /bandeja, /autoasignar…); dispenser de la semana, racha sin vencidos y mensajes en casos pausados.
 // @match        https://*.service-now.com/*
 // @grant        GM_xmlhttpRequest
@@ -1554,7 +1554,7 @@
     reintentarAvisos();
     atenderPendientes();
     seguimiento();
-    if (GM_getValue('tg_cmds', 0) < 23) {     // menú de comandos del bot (aparece al escribir "/" en el grupo)
+    if (GM_getValue('tg_cmds', 0) < 24) {     // menú de comandos del bot (aparece al escribir "/" en el grupo)
       tg('setMyCommands', {commands: [{command: 'bandeja', description: 'Casos abiertos (o /bandeja gpon, /bandeja lineales)'},
                                       {command: 'caso', description: 'Detalle de un caso: /caso WO0096818'},
                                       {command: 'seguir', description: 'Avisar notas de afuera de Mobisond en una WO: /seguir WO0097674'},
@@ -1569,7 +1569,8 @@
                                       {command: 'rama', description: 'Casos de una rama GPON en 90 días: /rama GMRN-R0503'},
                                       {command: 'pcs', description: 'PCs conectadas y su versión del Avisador'},
                                       {command: 'dispenser', description: 'Ranking del dispenser (o /dispenser 19-10 para otra semana)'},
-                                      {command: 'racha', description: 'Racha sin vencidos de Lineales y GPON'}]}, function () { GM_setValue('tg_cmds', 23); });
+                                      {command: 'racha', description: 'Racha sin vencidos de Lineales y GPON'},
+                                      {command: 'motivacion', description: 'Una imagen para levantar el ánimo ✨'}]}, function () { GM_setValue('tg_cmds', 24); });
     }
     if (modoBot === null) {                    // ¿el bot está conectado a Supabase?
       modoBot = 'esperando';
