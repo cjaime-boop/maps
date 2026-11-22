@@ -67,6 +67,8 @@ tfoot td{font-weight:700;background:var(--soft)}
 .fs select{flex:1;min-width:160px}.fs input{width:80px;text-align:center}
 .split .bts{display:flex;gap:8px;flex-wrap:wrap}
 .chip.div{border-style:dashed;color:var(--muted)}
+.toast{display:flex;align-items:center;gap:12px}
+.undo{border:0;background:var(--cyan);color:#06202c;border-radius:8px;padding:6px 10px;font:700 14px var(--f-body);cursor:pointer}
 .login{max-width:360px;margin:40px auto;background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:20px;display:flex;flex-direction:column;gap:12px}
 .login input{font:500 16px var(--f-body);padding:10px 12px;border:1px solid var(--line);border-radius:9px;background:var(--panel);color:var(--ink)}
 .err{color:#c0392b;font-size:14px;min-height:18px}
@@ -160,7 +162,11 @@ function sugerida(x){   // el nombre de ServiceNow llevado al de la lista (ej. "
   for (var i=0;i<l.length;i++) if (norm(l[i])===n) return l[i];
   return x.sugerida;
 }
-function toast(t){ var e=$("toast"); e.textContent=t; e.hidden=false; clearTimeout(e._t); e._t=setTimeout(function(){ e.hidden=true; },1800); }
+function toast(t, deshacer){   // con "deshacer", el aviso queda 8 segundos con el botón Deshacer
+  var e=$("toast"); e.innerHTML = esc(t) + (deshacer ? ' <button type="button" class="undo" id="undo">↩ Deshacer</button>' : ""); e.hidden=false;
+  clearTimeout(e._t); e._t=setTimeout(function(){ e.hidden=true; }, deshacer ? 8000 : 1800);
+  if (deshacer) $("undo").onclick = function(){ e.hidden=true; clearTimeout(e._t); deshacer(); };
+}
 
 // ---------- datos
 function cargarRango(){
@@ -245,7 +251,8 @@ $("bus2").addEventListener("input", pintarA);
 document.addEventListener("click",function(e){
   var cb=e.target.closest("[data-cambiar]");
   if (cb){ var y=st.ult7.filter(function(z){return z.id===cb.dataset.cambiar;})[0]; if(!y) return;
-    rpc("mat_asignar",{p_id:y.id,p_reparto:[]}).then(function(){ y.reparto=[]; st.pend.unshift(y); actualizar(y); st.verTodas=false; pintarA(); toast(y.wo+": elegí la cuadrilla"); }, error); return; }
+    var antes = y.reparto.slice();
+    rpc("mat_asignar",{p_id:y.id,p_reparto:[]}).then(function(){ y.reparto=[]; st.pend.unshift(y); actualizar(y); st.verTodas=false; pintarA(); toast(y.wo+": elegí la cuadrilla", function(){ volverAPendiente(y, antes); }); }, error); return; }
   var dv=e.target.closest("[data-dividir]");
   if (dv){ abrirDivision(dv.dataset.dividir); return; }
   var ag=e.target.closest("[data-mas]");
@@ -262,8 +269,17 @@ function asignar(x, rep, boton){
   if (boton) boton.disabled = true;
   rpc("mat_asignar",{p_id:x.id,p_reparto:rep}).then(function(){
     x.reparto=rep; st.pend=st.pend.filter(function(z){return z!==x;}); st.ult7=st.ult7.filter(function(z){return z.id!==x.id;}); st.ult7.unshift(x); actualizar(x);
-    pintarA(); toast(x.wo+" → "+rep.map(function(r){ return r.cuadrilla+(rep.length>1?" ("+num(r.cant)+")":""); }).join(" · "));
+    pintarA(); toast(x.wo+" → "+rep.map(function(r){ return r.cuadrilla+(rep.length>1?" ("+num(r.cant)+")":""); }).join(" · "), function(){ volverAPendiente(x, []); });
   }, function(e){ if (boton) boton.disabled=false; toast(e.message); });
+}
+// deshacer: la descarga vuelve como estaba (por asignar, o con el reparto que tenía)
+function volverAPendiente(x, antes){
+  rpc("mat_asignar",{p_id:x.id,p_reparto:antes}).then(function(){
+    x.reparto = antes; actualizar(x);
+    st.pend = st.pend.filter(function(z){ return z.id!==x.id; }); st.ult7 = st.ult7.filter(function(z){ return z.id!==x.id; });
+    if (antes.length) st.ult7.unshift(x); else { st.pend.push(x); st.pend.sort(function(a,b){ return String(b.fecha).localeCompare(String(a.fecha)); }); }
+    pintarA(); toast("Deshecho: " + x.wo + (antes.length ? " vuelve a " + antes.map(function(r){ return r.cuadrilla; }).join(" · ") : " vuelve a por asignar"));
+  }, function(e){ toast("No se pudo deshacer (" + e.message + ")"); });
 }
 // dividir una descarga entre cuadrillas (ej. 2 botellas: 1 de cada una)
 function filaSplit(x, c, n){
