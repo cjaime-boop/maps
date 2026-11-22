@@ -127,7 +127,7 @@ tfoot td{font-weight:700;background:var(--soft)}
       <button class="btn pri" id="agAbrir" type="button">＋ Agregar material</button>
     </div>
     <div class="card" id="fAg" style="margin-top:16px" hidden>
-      <h2>Agregar material a mano <span class="nota" id="agProy" style="text-transform:none;letter-spacing:0;font:500 13px var(--f-body)"></span></h2>
+      <h2>Agregar material <span class="nota" id="agProy" style="text-transform:none;letter-spacing:0;font:500 13px var(--f-body)"></span></h2>
       <form class="agf" id="agForm">
         <div class="seg" role="group" aria-label="¿Tiene WO?"><button class="btn sel" id="agCon" type="button">Con WO</button><button class="btn" id="agSin" type="button">Sin WO</button></div>
         <label id="agWoL">WO<input id="agWo" placeholder="WO0097595" autocomplete="off"></label>
@@ -223,7 +223,7 @@ function pintarC(){
   var np = deProy(st.filas).filter(function(x){ return !x.reparto.length; }).length;
   $("avisoPend").hidden = !np; $("avisoPend").textContent = "⏳ Hay " + np + (np===1?" descarga":" descargas") + " de este período que todavía no tienen cuadrilla asignada: no entran en los totales por cuadrilla.";
   $("tDes").innerHTML = fs.length ? '<thead><tr><th>WO</th><th>Fecha</th><th>Material</th><th class="n">Cant.</th><th>Cuadrilla</th></tr></thead><tbody>' +
-    fs.map(function(l){ return '<tr><td class="wo">'+(l.x.wo?esc(l.x.wo):'<span class="nota">Sin WO</span>')+(l.x.manual?' <span class="pend man" title="'+esc(l.x.nota||"Cargado a mano")+'">a mano</span>':'')+'</td><td>'+dmy(l.x.fecha)+'</td><td>'+esc(l.x.item)+'</td><td class="n">'+num(l.cant)+(l.cant!==+l.x.cant?' <span class="nota">de '+num(l.x.cant)+'</span>':'')+'</td><td>'+(l.cuadrilla?esc(l.cuadrilla):'<span class="pend">sin asignar</span>')+'</td></tr>'; }).join("") + '</tbody>' : '';
+    fs.map(function(l){ return '<tr><td class="wo">'+(l.x.wo?esc(l.x.wo):'<span class="nota">Sin WO</span>')+'</td><td>'+dmy(l.x.fecha)+'</td><td>'+esc(l.x.item)+'</td><td class="n">'+num(l.cant)+(l.cant!==+l.x.cant?' <span class="nota">de '+num(l.x.cant)+'</span>':'')+'</td><td>'+(l.cuadrilla?esc(l.cuadrilla):'<span class="pend">sin asignar</span>')+'</td></tr>'; }).join("") + '</tbody>' : '';
   $("cMat").hidden = !!$("cua").value;
   if (!$("cua").value){
     var con = cs.filter(function(c){ return fs.some(function(l){ return l.cuadrilla===c; }); }), m = {};
@@ -242,7 +242,7 @@ function pintarA(){
   $("notaA").textContent = st.verTodas ? "Las ya asignadas de la última semana. Si alguna quedó mal, tocá Cambiar." + (st.proy==="gpon" ? " En GPON se asignan solas a la cuadrilla de la WOT (dicen \"automática\")." : "")
     : "Descargas que todavía no tienen cuadrilla. Viene sugerida la asignada a la WOT: tocá ✓ para confirmarla, o elegí otra." + (st.proy==="gpon" ? " En GPON solo quedan acá las que no tenían a nadie asignado o que alguien cambió." : "");
   var linea = function(x){ return '<div class="top">'+(x.wo ? '<span class="wob"><button class="cop" type="button" data-copiar="'+esc(x.wo)+'" title="Copiar '+esc(x.wo)+'" aria-label="Copiar '+esc(x.wo)+'">⧉</button><b>'+esc(x.wo)+'</b></span>' : '<b class="sinwo">Sin WO</b>')+
-    '<span>'+dmy(x.fecha)+'</span><span>'+esc(x.item)+' · <b style="font-size:15px;color:var(--ink)">'+num(x.cant)+' '+unidad(x.item)+'</b></span>'+(x.manual ? '<span class="pend man">cargado a mano</span>' : '')+'</div>'+
+    '<span>'+dmy(x.fecha)+'</span><span>'+esc(x.item)+' · <b style="font-size:15px;color:var(--ink)">'+num(x.cant)+' '+unidad(x.item)+'</b></span>'+'</div>'+
     (x.manual && x.nota ? '<div class="nota">📝 '+esc(x.nota)+'</div>' : ''); };
   if (st.verTodas){
     var ys = deProy(st.ult7).filter(function(x){ return x.reparto.length && (!b || String(x.wo||"").indexOf(b)>=0); });
