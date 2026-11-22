@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Mobisond · Avisador
 // @namespace    mobisond
-// @version      3.71
+// @version      3.72
 // @description  Avisa los casos nuevos (celular, campana y grupo de Telegram), los Lineales sin notas hace 25 min, los SLA y los aceptados; comandos del bot (/status, /bandeja, /autoasignar…); dispenser de la semana, racha sin vencidos y mensajes en casos pausados.
 // @match        https://*.service-now.com/*
 // @grant        GM_xmlhttpRequest
@@ -3332,6 +3332,54 @@
   }
   setTimeout(subirTablero, 60000);
   setInterval(subirTablero, 15 * 60000);
+
+  // ---------------------------------------------------------------- materiales por WO
+  // Cada 30 min (una sola PC, Supabase decide cuál) lee las descargas de materiales de las WOT de Lineales y GPON
+  // (la misma tabla del reporte "Materiales Mobisond") y las sube a Supabase con la cuadrilla asignada a la WOT como sugerencia.
+  // La primera vez carga desde el 1/9/2026; después, los últimos 10 días. La cuadrilla la confirman los dispatchers en la página.
+  var MAT_Q = 'asset_service_order_task.dispatch_group=ab15665beb7822141c6ff905cad0cdd7^ORasset_service_order_task.dispatch_group=9884b4e59716c610ea7a70300153af98^asset_modelISNOTEMPTY';
+  function subirMateriales() {
+    if (!hayGrupo() || !soyLider() || sesionCaida()) return;
+    var t = new Date(), turno = t.getFullYear() + '-' + (t.getMonth() + 1) + '-' + t.getDate() + '-' + t.getHours() + '-' + (t.getMinutes() < 30 ? 0 : 1);
+    if (GM_getValue('mat_turno', '') === turno) return;
+    GM_setValue('mat_turno', turno);
+    sbRpc('bot_reclamar', {p_aviso: 'mat:' + turno, p_pc: pcId()}).then(function (gano) {
+      if (gano === false) return;
+      var inicial = !GM_getValue('mat_inicial_ok', false), desde = new Date();
+      desde.setDate(desde.getDate() - 10);
+      var dq = inicial ? '2026-09-01' : desde.getFullYear() + '-' + ('0' + (desde.getMonth() + 1)).slice(-2) + '-' + ('0' + desde.getDate()).slice(-2);
+      var campos = 'asset_sys_id,wot_parent,asset_service_order_task,wot_assignment_group,asset_model,asset_quantity,asset_sys_created_on,asset_status';
+      var todas = [], pagina = function (off) {
+        var h = {'Accept': 'application/json'}, tk = token(); if (tk) h['X-UserToken'] = tk;
+        return fetch(location.origin + '/api/now/table/u_tabla_materialesprev?sysparm_display_value=all&sysparm_exclude_reference_link=true&sysparm_limit=1000&sysparm_offset=' + off +
+                     '&sysparm_fields=' + campos + '&sysparm_query=' + encodeURIComponent(MAT_Q + '^asset_sys_created_on>=' + dq + '^ORDERBYasset_sys_created_on'),
+                     {credentials: 'same-origin', headers: h}).then(function (r) {
+          if (r.status === 401) sesionPerdida();
+          if (!r.ok) throw new Error('ServiceNow ' + r.status);
+          return r.json();
+        }).then(function (j) { var rs = j.result || []; todas = todas.concat(rs); return rs.length === 1000 ? pagina(off + 1000) : todas; });
+      };
+      return pagina(0).then(function (rs) {
+        var filas = rs.map(function (r) {
+          var g = dv(r, 'wot_assignment_group'), pr = /^C-TL/i.test(g) ? 'lineales' : /^C-GZ1/i.test(g) ? 'gpon' : '';
+          var ms = utc(vl(r, 'asset_sys_created_on')), f = ms ? new Date(ms) : null;
+          if (!pr || !f) return null;
+          return {id: vl(r, 'asset_sys_id'), wo: dv(r, 'wot_parent'), wot: dv(r, 'asset_service_order_task'), proyecto: pr,
+                  item: dv(r, 'asset_model'), cant: vl(r, 'asset_quantity'), fecha: f.toISOString(), estado: dv(r, 'asset_status')};
+        }).filter(Boolean);
+        var wots = filas.map(function (f) { return f.wot; }).filter(function (w, i, a) { return w && a.indexOf(w) === i; });
+        var lotes = []; for (var i = 0; i < wots.length; i += 100) lotes.push(wots.slice(i, i + 100));
+        return Promise.all(lotes.map(function (l) { return api('wm_task', 'numberIN' + l.join(','), 'number,assigned_to'); })).then(function (rr) {
+          var asig = {}; [].concat.apply([], rr).forEach(function (w) { asig[dv(w, 'number')] = dv(w, 'assigned_to'); });
+          filas.forEach(function (f) { f.sugerida = asig[f.wot] || ''; });
+          var envios = []; for (var k = 0; k < filas.length; k += 300) envios.push(filas.slice(k, k + 300));
+          return envios.reduce(function (p, lote) { return p.then(function () { return sbRpc('mat_guardar', {p_filas: lote}); }); }, Promise.resolve());
+        }).then(function () { if (inicial) GM_setValue('mat_inicial_ok', true); });
+      });
+    }).catch(function (e) { GM_setValue('mat_turno', ''); botLog('materiales: ' + e.message); });
+  }
+  setTimeout(subirMateriales, 90000);
+  setInterval(subirMateriales, 5 * 60000);
 
   // ---------------------------------------------------------------- cuándo revisar
   setTimeout(controles, 4000);
