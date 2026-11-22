@@ -151,7 +151,8 @@ function lineas(xs){
   });
   return out;
 }
-function repTxt(x){ return x.reparto.map(function(r){ return esc(r.cuadrilla) + (x.reparto.length>1 ? " ("+num(r.cant)+")" : ""); }).join(" · "); }
+function repTxt(x){ return x.reparto.map(function(r){ return esc(r.cuadrilla) + (x.reparto.length>1 ? " ("+num(r.cant)+")" : ""); }).join(" · ") +
+  (x.reparto.some(function(r){ return r.por==="automático"; }) ? ' <span class="pend" style="background:var(--soft);color:var(--accent)">automática</span>' : ''); }
 function sugerida(x){   // el nombre de ServiceNow llevado al de la lista (ej. "Diego Dolivo" -> "Diego D' Olivo")
   if (!x.sugerida) return "";
   var n = norm(x.sugerida), l = LISTA.lineales.concat(LISTA.gpon);
@@ -205,7 +206,8 @@ function pintarA(){
   var b = $("bus2").value.trim().toUpperCase(), ps = deProy(st.pend), cs = cuadrillas();
   $("nPend").textContent = ps.length;
   $("fP").classList.toggle("sel", !st.verTodas); $("fT").classList.toggle("sel", st.verTodas);
-  $("notaA").textContent = st.verTodas ? "Las ya asignadas de la última semana. Si alguna quedó mal, tocá Cambiar." : "Descargas que todavía no tienen cuadrilla. Viene sugerida la asignada a la WOT: tocá ✓ para confirmarla, o elegí otra.";
+  $("notaA").textContent = st.verTodas ? "Las ya asignadas de la última semana. Si alguna quedó mal, tocá Cambiar." + (st.proy==="gpon" ? " En GPON se asignan solas a la cuadrilla de la WOT (dicen \"automática\")." : "")
+    : "Descargas que todavía no tienen cuadrilla. Viene sugerida la asignada a la WOT: tocá ✓ para confirmarla, o elegí otra." + (st.proy==="gpon" ? " En GPON solo quedan acá las que no tenían a nadie asignado o que alguien cambió." : "");
   var linea = function(x){ return '<div class="top"><b>'+esc(x.wo)+'</b><span>'+dmy(x.fecha)+'</span><span>'+esc(x.item)+' · <b style="font-size:15px;color:var(--ink)">'+num(x.cant)+' '+unidad(x.item)+'</b></span></div>'; };
   if (st.verTodas){
     var ys = deProy(st.ult7).filter(function(x){ return x.reparto.length && (!b || String(x.wo).indexOf(b)>=0); });
