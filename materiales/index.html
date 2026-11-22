@@ -69,6 +69,10 @@ tfoot td{font-weight:700;background:var(--soft)}
 .chip.div{border-style:dashed;color:var(--muted)}
 .toast{display:flex;align-items:center;gap:12px}
 .undo{border:0;background:var(--cyan);color:#06202c;border-radius:8px;padding:6px 10px;font:700 14px var(--f-body);cursor:pointer}
+.wob{display:inline-flex;align-items:center;gap:6px}
+.cop{border:1px solid var(--line);background:var(--bg);color:var(--muted);border-radius:7px;width:30px;height:30px;font-size:16px;line-height:1;cursor:pointer;padding:0}
+.cop:hover{color:var(--accent);border-color:var(--accent)}
+.cop:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
 .login{max-width:360px;margin:40px auto;background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:20px;display:flex;flex-direction:column;gap:12px}
 .login input{font:500 16px var(--f-body);padding:10px 12px;border:1px solid var(--line);border-radius:9px;background:var(--panel);color:var(--ink)}
 .err{color:#c0392b;font-size:14px;min-height:18px}
@@ -214,7 +218,7 @@ function pintarA(){
   $("fP").classList.toggle("sel", !st.verTodas); $("fT").classList.toggle("sel", st.verTodas);
   $("notaA").textContent = st.verTodas ? "Las ya asignadas de la última semana. Si alguna quedó mal, tocá Cambiar." + (st.proy==="gpon" ? " En GPON se asignan solas a la cuadrilla de la WOT (dicen \"automática\")." : "")
     : "Descargas que todavía no tienen cuadrilla. Viene sugerida la asignada a la WOT: tocá ✓ para confirmarla, o elegí otra." + (st.proy==="gpon" ? " En GPON solo quedan acá las que no tenían a nadie asignado o que alguien cambió." : "");
-  var linea = function(x){ return '<div class="top"><b>'+esc(x.wo)+'</b><span>'+dmy(x.fecha)+'</span><span>'+esc(x.item)+' · <b style="font-size:15px;color:var(--ink)">'+num(x.cant)+' '+unidad(x.item)+'</b></span></div>'; };
+  var linea = function(x){ return '<div class="top"><span class="wob"><button class="cop" type="button" data-copiar="'+esc(x.wo)+'" title="Copiar '+esc(x.wo)+'" aria-label="Copiar '+esc(x.wo)+'">⧉</button><b>'+esc(x.wo)+'</b></span><span>'+dmy(x.fecha)+'</span><span>'+esc(x.item)+' · <b style="font-size:15px;color:var(--ink)">'+num(x.cant)+' '+unidad(x.item)+'</b></span></div>'; };
   if (st.verTodas){
     var ys = deProy(st.ult7).filter(function(x){ return x.reparto.length && (!b || String(x.wo).indexOf(b)>=0); });
     $("lista").innerHTML = ys.map(function(x){ return '<div class="decl">'+linea(x)+'<div class="ya"><b>✓ '+repTxt(x)+'</b><button class="btn" data-cambiar="'+esc(x.id)+'" type="button">Cambiar</button></div></div>'; }).join("")
@@ -249,6 +253,8 @@ $("bus2").addEventListener("input", pintarA);
 ["cua","bus"].forEach(function(i){ $(i).addEventListener("input",pintarC); });
 ["desde","hasta"].forEach(function(i){ $(i).addEventListener("change",function(){ if ($(i).value && $(i).value < "2026-09-01") $(i).value = "2026-09-01"; cargarRango().then(pintarC, error); }); });   // hay datos desde el 1/9/2026
 document.addEventListener("click",function(e){
+  var cp=e.target.closest("[data-copiar]");
+  if (cp){ var w=cp.dataset.copiar; try { navigator.clipboard.writeText(w).then(function(){ toast(w+" copiada"); }, function(){ toast("No se pudo copiar"); }); } catch(_){ toast("No se pudo copiar"); } return; }
   var cb=e.target.closest("[data-cambiar]");
   if (cb){ var y=st.ult7.filter(function(z){return z.id===cb.dataset.cambiar;})[0]; if(!y) return;
     var antes = y.reparto.slice();
