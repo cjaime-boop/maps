@@ -93,8 +93,8 @@ tfoot td{font-weight:700;background:var(--soft)}
   </form>
   <section id="vC" hidden>
     <div class="filtros">
-      <label for="desde">Desde<input type="date" id="desde"></label>
-      <label for="hasta">Hasta<input type="date" id="hasta"></label>
+      <label for="desde">Desde<input type="date" id="desde" min="2026-09-01"></label>
+      <label for="hasta">Hasta<input type="date" id="hasta" min="2026-09-01"></label>
       <label for="cua" class="grow">Cuadrilla<select id="cua"></select></label>
       <label for="bus" class="grow">Buscar WO<input id="bus" placeholder="WO0097595"></label>
       <button class="btn pri" id="copiar" type="button">Copiar resumen</button>
@@ -241,7 +241,7 @@ $("tC").onclick=function(){tab(false)}; $("tA").onclick=function(){tab(true)};
 $("fP").onclick=function(){ st.verTodas=false; pintarA(); }; $("fT").onclick=function(){ st.verTodas=true; pintarA(); };
 $("bus2").addEventListener("input", pintarA);
 ["cua","bus"].forEach(function(i){ $(i).addEventListener("input",pintarC); });
-["desde","hasta"].forEach(function(i){ $(i).addEventListener("change",function(){ cargarRango().then(pintarC, error); }); });
+["desde","hasta"].forEach(function(i){ $(i).addEventListener("change",function(){ if ($(i).value && $(i).value < "2026-09-01") $(i).value = "2026-09-01"; cargarRango().then(pintarC, error); }); });   // hay datos desde el 1/9/2026
 document.addEventListener("click",function(e){
   var cb=e.target.closest("[data-cambiar]");
   if (cb){ var y=st.ult7.filter(function(z){return z.id===cb.dataset.cambiar;})[0]; if(!y) return;
