@@ -73,6 +73,14 @@ tfoot td{font-weight:700;background:var(--soft)}
 .cop{border:1px solid var(--line);background:var(--bg);color:var(--muted);border-radius:7px;width:30px;height:30px;font-size:16px;line-height:1;cursor:pointer;padding:0}
 .cop:hover{color:var(--accent);border-color:var(--accent)}
 .cop:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+.agf{display:flex;flex-wrap:wrap;gap:10px;align-items:end;padding:12px 14px}
+.agf label{display:flex;flex-direction:column;gap:4px;font-size:12px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.6px}
+.agf input,.agf select{font:500 15px var(--f-body);padding:8px 10px;border:1px solid var(--line);border-radius:8px;background:var(--panel);color:var(--ink);min-width:0}
+.agf .grow{flex:1;min-width:200px}.agf .full{flex-basis:100%}.agf #agCant{width:110px}
+.agf .bts{flex-basis:100%;display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.yatiene{flex-basis:100%;background:var(--soft);border-radius:8px;padding:8px 10px;font-size:13.5px}
+.man{background:var(--soft);color:var(--accent)}
+.sinwo{font-size:17px;color:var(--muted)}
 .login{max-width:360px;margin:40px auto;background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:20px;display:flex;flex-direction:column;gap:12px}
 .login input{font:500 16px var(--f-body);padding:10px 12px;border:1px solid var(--line);border-radius:9px;background:var(--panel);color:var(--ink)}
 .err{color:#c0392b;font-size:14px;min-height:18px}
@@ -116,6 +124,21 @@ tfoot td{font-weight:700;background:var(--soft)}
     <div class="filtros">
       <label for="bus2" class="grow">Buscar WO<input id="bus2" placeholder="WO0097595"></label>
       <div class="seg" role="group"><button class="btn sel" id="fP" type="button">Por asignar</button><button class="btn" id="fT" type="button">Asignadas (últimos 7 días)</button></div>
+      <button class="btn pri" id="agAbrir" type="button">＋ Agregar material</button>
+    </div>
+    <div class="card" id="fAg" style="margin-top:16px" hidden>
+      <h2>Agregar material a mano <span class="nota" id="agProy" style="text-transform:none;letter-spacing:0;font:500 13px var(--f-body)"></span></h2>
+      <form class="agf" id="agForm">
+        <div class="seg" role="group" aria-label="¿Tiene WO?"><button class="btn sel" id="agCon" type="button">Con WO</button><button class="btn" id="agSin" type="button">Sin WO</button></div>
+        <label id="agWoL">WO<input id="agWo" placeholder="WO0097595" autocomplete="off"></label>
+        <label class="grow">Material<input id="agItem" list="agItems" placeholder="Escribí para buscar…" autocomplete="off"></label><datalist id="agItems"></datalist>
+        <label>Cantidad <span id="agUni" style="text-transform:none"></span><input id="agCant" type="number" min="0" step="any" inputmode="decimal"></label>
+        <label>Fecha<input id="agFecha" type="date" min="2026-09-01"></label>
+        <label class="grow">Cuadrilla<select id="agCua"></select></label>
+        <div class="yatiene" id="agYa" hidden></div>
+        <label class="full">Nota (opcional)<input id="agNota" placeholder="Ej.: no la cargaron en la WOT · reparación sin caso" autocomplete="off"></label>
+        <div class="bts"><button class="btn pri" type="submit" id="agOk">Guardar</button><button class="btn" type="button" id="agNo">Cancelar</button><span class="err" id="agErr"></span></div>
+      </form>
     </div>
     <p class="nota" id="notaA" style="margin:12px 0 0"></p>
     <div class="lista" id="lista"></div>
@@ -185,7 +208,7 @@ function deProy(xs){ return xs.filter(function(x){ return x.proyecto===st.proy &
 // ---------- depósito
 function filtradas(){
   var c=$("cua").value, b=$("bus").value.trim().toUpperCase();
-  return lineas(deProy(st.filas)).filter(function(l){ return (!c || l.cuadrilla===c) && (!b || String(l.x.wo).toUpperCase().indexOf(b)>=0); });
+  return lineas(deProy(st.filas)).filter(function(l){ return (!c || l.cuadrilla===c) && (!b || String(l.x.wo||"Sin WO").toUpperCase().indexOf(b)>=0); });
 }
 function pintarC(){
   var cs = cuadrillas(), sel = $("cua").value;
@@ -200,7 +223,7 @@ function pintarC(){
   var np = deProy(st.filas).filter(function(x){ return !x.reparto.length; }).length;
   $("avisoPend").hidden = !np; $("avisoPend").textContent = "⏳ Hay " + np + (np===1?" descarga":" descargas") + " de este período que todavía no tienen cuadrilla asignada: no entran en los totales por cuadrilla.";
   $("tDes").innerHTML = fs.length ? '<thead><tr><th>WO</th><th>Fecha</th><th>Material</th><th class="n">Cant.</th><th>Cuadrilla</th></tr></thead><tbody>' +
-    fs.map(function(l){ return '<tr><td class="wo">'+esc(l.x.wo)+'</td><td>'+dmy(l.x.fecha)+'</td><td>'+esc(l.x.item)+'</td><td class="n">'+num(l.cant)+(l.cant!==+l.x.cant?' <span class="nota">de '+num(l.x.cant)+'</span>':'')+'</td><td>'+(l.cuadrilla?esc(l.cuadrilla):'<span class="pend">sin asignar</span>')+'</td></tr>'; }).join("") + '</tbody>' : '';
+    fs.map(function(l){ return '<tr><td class="wo">'+(l.x.wo?esc(l.x.wo):'<span class="nota">Sin WO</span>')+(l.x.manual?' <span class="pend man" title="'+esc(l.x.nota||"Cargado a mano")+'">a mano</span>':'')+'</td><td>'+dmy(l.x.fecha)+'</td><td>'+esc(l.x.item)+'</td><td class="n">'+num(l.cant)+(l.cant!==+l.x.cant?' <span class="nota">de '+num(l.x.cant)+'</span>':'')+'</td><td>'+(l.cuadrilla?esc(l.cuadrilla):'<span class="pend">sin asignar</span>')+'</td></tr>'; }).join("") + '</tbody>' : '';
   $("cMat").hidden = !!$("cua").value;
   if (!$("cua").value){
     var con = cs.filter(function(c){ return fs.some(function(l){ return l.cuadrilla===c; }); }), m = {};
@@ -218,14 +241,18 @@ function pintarA(){
   $("fP").classList.toggle("sel", !st.verTodas); $("fT").classList.toggle("sel", st.verTodas);
   $("notaA").textContent = st.verTodas ? "Las ya asignadas de la última semana. Si alguna quedó mal, tocá Cambiar." + (st.proy==="gpon" ? " En GPON se asignan solas a la cuadrilla de la WOT (dicen \"automática\")." : "")
     : "Descargas que todavía no tienen cuadrilla. Viene sugerida la asignada a la WOT: tocá ✓ para confirmarla, o elegí otra." + (st.proy==="gpon" ? " En GPON solo quedan acá las que no tenían a nadie asignado o que alguien cambió." : "");
-  var linea = function(x){ return '<div class="top"><span class="wob"><button class="cop" type="button" data-copiar="'+esc(x.wo)+'" title="Copiar '+esc(x.wo)+'" aria-label="Copiar '+esc(x.wo)+'">⧉</button><b>'+esc(x.wo)+'</b></span><span>'+dmy(x.fecha)+'</span><span>'+esc(x.item)+' · <b style="font-size:15px;color:var(--ink)">'+num(x.cant)+' '+unidad(x.item)+'</b></span></div>'; };
+  var linea = function(x){ return '<div class="top">'+(x.wo ? '<span class="wob"><button class="cop" type="button" data-copiar="'+esc(x.wo)+'" title="Copiar '+esc(x.wo)+'" aria-label="Copiar '+esc(x.wo)+'">⧉</button><b>'+esc(x.wo)+'</b></span>' : '<b class="sinwo">Sin WO</b>')+
+    '<span>'+dmy(x.fecha)+'</span><span>'+esc(x.item)+' · <b style="font-size:15px;color:var(--ink)">'+num(x.cant)+' '+unidad(x.item)+'</b></span>'+(x.manual ? '<span class="pend man">cargado a mano</span>' : '')+'</div>'+
+    (x.manual && x.nota ? '<div class="nota">📝 '+esc(x.nota)+'</div>' : ''); };
   if (st.verTodas){
-    var ys = deProy(st.ult7).filter(function(x){ return x.reparto.length && (!b || String(x.wo).indexOf(b)>=0); });
-    $("lista").innerHTML = ys.map(function(x){ return '<div class="decl">'+linea(x)+'<div class="ya"><b>✓ '+repTxt(x)+'</b><button class="btn" data-cambiar="'+esc(x.id)+'" type="button">Cambiar</button></div></div>'; }).join("")
+    var ys = deProy(st.ult7).filter(function(x){ return x.reparto.length && (!b || String(x.wo||"").indexOf(b)>=0); });
+    $("lista").innerHTML = ys.map(function(x){ return '<div class="decl">'+linea(x)+'<div class="ya"><b>✓ '+repTxt(x)+'</b><button class="btn" data-cambiar="'+esc(x.id)+'" type="button">Cambiar</button>'+
+      (x.wo ? '<button class="btn" data-agregar="'+esc(x.wo)+'" data-cua="'+esc(x.reparto[0].cuadrilla)+'" type="button">＋ Material</button>' : '')+
+      (x.manual ? '<button class="btn" data-borrar="'+esc(x.id)+'" type="button">🗑 Borrar</button>' : '')+'</div></div>'; }).join("")
       || '<div class="vacio">No hay descargas asignadas en la última semana.</div>';
     return;
   }
-  ps = ps.filter(function(x){ return !b || String(x.wo).indexOf(b)>=0; });
+  ps = ps.filter(function(x){ return !b || String(x.wo||"").indexOf(b)>=0; });
   if (!ps.length){ $("lista").innerHTML = '<div class="vacio">No hay descargas sin cuadrilla. 👌</div>'; return; }
   $("lista").innerHTML = ps.map(function(x){
     var s = sugerida(x);
@@ -245,7 +272,7 @@ function tab(a){
   else { pintarC(); }
 }
 function error(e){ toast("No pude leer los datos ("+e.message+")"); }
-function proyecto(p){ st.proy=p; $("pL").classList.toggle("sel",p==="lineales"); $("pG").classList.toggle("sel",p==="gpon"); $("cua").value=""; enCarga ? pintarA() : pintarC(); if(!DEPOSITO) $("nPend").textContent = deProy(st.pend).length; }
+function proyecto(p){ st.proy=p; if (!$("fAg").hidden) prepararAg(); $("pL").classList.toggle("sel",p==="lineales"); $("pG").classList.toggle("sel",p==="gpon"); $("cua").value=""; enCarga ? pintarA() : pintarC(); if(!DEPOSITO) $("nPend").textContent = deProy(st.pend).length; }
 $("pL").onclick=function(){proyecto("lineales")}; $("pG").onclick=function(){proyecto("gpon")};
 $("tC").onclick=function(){tab(false)}; $("tA").onclick=function(){tab(true)};
 $("fP").onclick=function(){ st.verTodas=false; pintarA(); }; $("fT").onclick=function(){ st.verTodas=true; pintarA(); };
@@ -255,6 +282,10 @@ $("bus2").addEventListener("input", pintarA);
 document.addEventListener("click",function(e){
   var cp=e.target.closest("[data-copiar]");
   if (cp){ var w=cp.dataset.copiar; try { navigator.clipboard.writeText(w).then(function(){ toast(w+" copiada"); }, function(){ toast("No se pudo copiar"); }); } catch(_){ toast("No se pudo copiar"); } return; }
+  var ag2=e.target.closest("[data-agregar]");
+  if (ag2){ abrirAg(ag2.dataset.agregar, ag2.dataset.cua); return; }
+  var bo=e.target.closest("[data-borrar]");
+  if (bo){ borrar(bo.dataset.borrar); return; }
   var cb=e.target.closest("[data-cambiar]");
   if (cb){ var y=st.ult7.filter(function(z){return z.id===cb.dataset.cambiar;})[0]; if(!y) return;
     var antes = y.reparto.slice();
@@ -317,6 +348,69 @@ $("copiar").onclick=function(){
     Object.keys(tot).sort().map(function(m){ return "• "+m+": "+num(tot[m])+" "+unidad(m); }).join("\n");
   try{ navigator.clipboard.writeText(t).then(function(){toast("Copiado");},function(){toast("No se pudo copiar");}); }catch(_){ toast("No se pudo copiar"); }
 };
+
+// ---------- agregar a mano (un material que no se cargó en la WOT, o sin WO)
+st.items = null; st.sinWo = false;
+function prepararAg(){
+  $("agProy").textContent = "· " + (st.proy==="gpon" ? "GPON" : "Lineales");
+  var sel=$("agCua").value; $("agCua").innerHTML = '<option value="">Elegí…</option>' + cuadrillas().map(function(c){ return '<option'+(c===sel?' selected':'')+'>'+esc(c)+'</option>'; }).join("");
+  var its = (st.items||[]).filter(function(i){ return i.proyecto===st.proy; }).map(function(i){ return i.item; });
+  st.filas.concat(st.ult7, st.pend).forEach(function(x){ if (x.proyecto===st.proy && x.item && its.indexOf(x.item)<0) its.push(x.item); });
+  its.sort(function(a,b){ return a.localeCompare(b, "es", {numeric:true}); });
+  $("agItems").innerHTML = its.map(function(i){ return '<option value="'+esc(i)+'">'; }).join("");
+  verAg();
+}
+function sinWo(v){ st.sinWo=v; $("agCon").classList.toggle("sel",!v); $("agSin").classList.toggle("sel",v); $("agWoL").hidden=v; verAg(); }
+function verAg(){   // la unidad, y lo que ya tiene cargado esa WO (para no duplicar)
+  $("agUni").textContent = $("agItem").value.trim() ? "("+unidad($("agItem").value)+")" : "";
+  var w = $("agWo").value.trim().toUpperCase(), vistos = {}, ya = [];
+  if (!st.sinWo && /^WO\d{5,}$/.test(w)) st.filas.concat(st.ult7, st.pend).forEach(function(x){
+    if (x.wo===w && x.estado!=="Eliminado" && !vistos[x.id]){ vistos[x.id]=1; ya.push(x); } });
+  $("agYa").hidden = !ya.length;
+  $("agYa").innerHTML = ya.length ? "<b>"+esc(w)+" ya tiene:</b> " + ya.map(function(x){ return esc(x.item)+" "+num(x.cant)+" "+unidad(x.item)+(x.reparto.length?" ("+x.reparto.map(function(r){return esc(r.cuadrilla);}).join(", ")+")":""); }).join(" · ") : "";
+}
+function abrirAg(wo, cua){
+  $("fAg").hidden=false; $("agErr").textContent="";
+  if (!$("agFecha").value) $("agFecha").value = iso(new Date());
+  $("agFecha").max = iso(new Date());
+  if (wo){ sinWo(false); $("agWo").value = wo; }
+  prepararAg(); if (cua) $("agCua").value = cua;
+  if (!st.items) rpc("mat_items").then(function(r){ st.items = r||[]; prepararAg(); if (cua) $("agCua").value = cua; }, function(){ st.items = []; });
+  $("fAg").scrollIntoView({behavior:"smooth", block:"start"}); (wo ? $("agItem") : $("agWo")).focus({preventScroll:true});
+}
+function cerrarAg(){ $("fAg").hidden=true; $("agForm").reset(); sinWo(false); $("agYa").hidden=true; }
+function meter(x){   // una fila nueva o recuperada en las listas que usa la página
+  [st.ult7, st.filas].forEach(function(l){ for (var i=l.length-1;i>=0;i--) if (l[i].id===x.id) l.splice(i,1); });
+  st.ult7.unshift(x);
+  if (String(x.fecha).slice(0,10) >= $("desde").value && String(x.fecha).slice(0,10) <= $("hasta").value) st.filas.unshift(x);
+}
+function borrar(id){
+  var x = st.ult7.filter(function(z){ return z.id===id; })[0]; if (!x) return;
+  rpc("mat_borrar", {p_id:id}).then(function(){
+    x.estado="Eliminado"; pintarA();
+    toast("Borrado: "+(x.wo||"Sin WO")+" · "+x.item, function(){
+      rpc("mat_borrar", {p_id:id, p_volver:true}).then(function(){ x.estado="Manual"; meter(x); pintarA(); toast("Recuperado"); }, function(e){ toast("No se pudo deshacer ("+e.message+")"); });
+    });
+  }, function(e){ toast(e.message); });
+}
+$("agAbrir").onclick=function(){ abrirAg(); };
+$("agNo").onclick=cerrarAg;
+$("agCon").onclick=function(){ sinWo(false); $("agWo").focus(); }; $("agSin").onclick=function(){ sinWo(true); };
+["agWo","agItem"].forEach(function(i){ $(i).addEventListener("input", verAg); });
+$("agForm").addEventListener("submit", function(e){
+  e.preventDefault();
+  var w = st.sinWo ? "" : $("agWo").value.trim().toUpperCase(), it=$("agItem").value.trim(), n=+String($("agCant").value).replace(",","."), c=$("agCua").value, f=$("agFecha").value;
+  var falta = (!st.sinWo && !/^WO\d{5,}$/.test(w)) ? "Poné la WO (ej. WO0097595) o elegí Sin WO." : !it ? "Elegí el material." : !(n>0) ? "Poné la cantidad." : !c ? "Elegí la cuadrilla." : (!f || f<"2026-09-01" || f>iso(new Date())) ? "Revisá la fecha." : "";
+  $("agErr").textContent = falta; if (falta) return;
+  $("agOk").disabled = true;
+  rpc("mat_agregar", {p_wo:w, p_proyecto:st.proy, p_item:it, p_cant:n, p_fecha:f, p_cuadrilla:c, p_nota:$("agNota").value.trim()||null}).then(function(x){
+    $("agOk").disabled=false; meter(x); if (st.items && !st.items.some(function(i){ return i.proyecto===x.proyecto && i.item===x.item; })) st.items.push({proyecto:x.proyecto, item:x.item});
+    cerrarAg(); st.verTodas=true; pintarA();
+    toast("Agregado: "+(x.wo||"Sin WO")+" · "+x.item+" "+num(x.cant)+" "+unidad(x.item)+" → "+c, function(){
+      rpc("mat_borrar", {p_id:x.id}).then(function(){ x.estado="Eliminado"; pintarA(); toast("Deshecho: no se agregó"); }, function(e){ toast("No se pudo deshacer ("+e.message+")"); });
+    });
+  }, function(e){ $("agOk").disabled=false; $("agErr").textContent = e.message; });
+});
 
 // ---------- entrar
 var h0 = new Date(), d0 = new Date(); d0.setDate(1);
