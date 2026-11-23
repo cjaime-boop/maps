@@ -236,7 +236,9 @@ function pintarC(){
 
 // ---------- carga de cuadrillas
 // Asignadas: sin buscar, las de la última semana; buscando una WO, de todas las fechas (se leen una vez, al buscar)
-st.todas = null;
+st.todas = null; st.dias = 7;   // sin buscar: cuántos días para atrás se ven ("Mostrar más" suma una semana)
+function toLocal(t){ return iso(new Date(t)); }
+function corte(){ var d=new Date(); d.setDate(d.getDate()-st.dias); var s=iso(d); return s < "2026-09-01" ? "2026-09-01" : s; }
 function asignadas(){ var vis={}, out=[]; st.ult7.concat(st.todas||[]).forEach(function(x){ if(!vis[x.id]){ vis[x.id]=1; out.push(x); } }); return out; }
 function porId(id){ return asignadas().filter(function(z){ return z.id===id; })[0]; }
 function cargarTodas(){
@@ -247,7 +249,7 @@ function pintarA(){
   var b = $("bus2").value.trim().toUpperCase(), ps = deProy(st.pend), cs = cuadrillas();
   $("nPend").textContent = ps.length;
   $("fP").classList.toggle("sel", !st.verTodas); $("fT").classList.toggle("sel", st.verTodas);
-  $("notaA").textContent = st.verTodas ? "Las ya asignadas de la última semana (para una más vieja, buscá la WO). Si alguna quedó mal, tocá Cambiar." + (st.proy==="gpon" ? " En GPON se asignan solas a la cuadrilla de la WOT (dicen \"automática\")." : "")
+  $("notaA").textContent = st.verTodas ? "Las ya asignadas de la última semana (para ver más viejas, buscá la WO o tocá Mostrar más al final). Si alguna quedó mal, tocá Cambiar." + (st.proy==="gpon" ? " En GPON se asignan solas a la cuadrilla de la WOT (dicen \"automática\")." : "")
     : "Descargas que todavía no tienen cuadrilla. Viene sugerida la asignada a la WOT: tocá ✓ para confirmarla, o elegí otra." + (st.proy==="gpon" ? " En GPON solo quedan acá las que no tenían a nadie asignado o que alguien cambió." : "");
   var linea = function(x){ return '<div class="top">'+(x.wo ? '<span class="wob"><button class="cop" type="button" data-copiar="'+esc(x.wo)+'" title="Copiar '+esc(x.wo)+'" aria-label="Copiar '+esc(x.wo)+'">⧉</button><b>'+esc(x.wo)+'</b></span>' : '<b class="sinwo">Sin WO</b>')+
     '<span>'+dmy(x.fecha)+'</span><span>'+esc(x.item)+' · <b style="font-size:15px;color:var(--ink)">'+num(x.cant)+' '+unidad(x.item)+'</b></span>'+'</div>'+
@@ -257,14 +259,22 @@ function pintarA(){
       $("notaA").textContent = "Buscando \u201c"+b+"\u201d en todas las fechas (desde el 1/9/2026). Si alguna quedó mal, tocá Cambiar.";
       if (!st.todas){ $("lista").innerHTML = '<div class="vacio">Buscando…</div>'; cargarTodas(); return; }
     }
-    var ys = deProy(b ? asignadas() : st.ult7).filter(function(x){ return x.reparto.length && (!b || String(x.wo||"").indexOf(b)>=0); })
+    var c7 = corte(), en7 = {}; st.ult7.forEach(function(x){ en7[x.id]=1; });
+    if (!b && st.dias > 7){
+      $("notaA").textContent = "Las ya asignadas desde el "+dmyIso(c7)+". Si alguna quedó mal, tocá Cambiar.";
+      if (!st.todas){ $("lista").innerHTML = '<div class="vacio">Cargando…</div>'; cargarTodas(); return; }
+    }
+    var ys = deProy(b || st.dias > 7 ? asignadas() : st.ult7).filter(function(x){ return x.reparto.length && (b ? String(x.wo||"").indexOf(b)>=0 : (en7[x.id] || toLocal(x.fecha) >= c7)); })
       .sort(function(p,q){ return String(q.fecha).localeCompare(String(p.fecha)); });
-    var mas = ys.length > 150 ? ys.length - 150 : 0; ys = ys.slice(0, 150);
+    var mas = b && ys.length > 150 ? ys.length - 150 : 0; if (mas) ys = ys.slice(0, 150);
+    var masBtn = !b && c7 > "2026-09-01" ? '<div class="vacio" style="text-align:center"><button class="btn" type="button" id="masA">Mostrar más</button></div>' : '';
     $("lista").innerHTML = ys.map(function(x){ return '<div class="decl">'+linea(x)+'<div class="ya"><b>✓ '+repTxt(x)+'</b><button class="btn" data-cambiar="'+esc(x.id)+'" type="button">Cambiar</button>'+
       (x.wo ? '<button class="btn" data-agregar="'+esc(x.wo)+'" data-cua="'+esc(x.reparto[0].cuadrilla)+'" type="button">＋ Material</button>' : '')+
       (x.manual ? '<button class="btn" data-borrar="'+esc(x.id)+'" type="button">🗑 Borrar</button>' : '')+'</div></div>'; }).join("")
       + (mas ? '<div class="vacio">… y '+mas+' más: escribí la WO completa.</div>' : '')
       || '<div class="vacio">'+(b ? 'No encontré esa WO asignada.' : 'No hay descargas asignadas en la última semana.')+'</div>';
+    $("lista").insertAdjacentHTML("beforeend", masBtn);
+    if (masBtn) $("masA").onclick = function(){ st.dias += 7; this.disabled = true; this.textContent = "Cargando…"; pintarA(); };
     return;
   }
   ps = ps.filter(function(x){ return !b || String(x.wo||"").indexOf(b)>=0; });
@@ -285,7 +295,7 @@ function pintarA(){
 var enCarga = false;
 function tab(a){
   enCarga = a; $("tC").setAttribute("aria-selected",!a); $("tA").setAttribute("aria-selected",a); $("vC").hidden=a; $("vA").hidden=!a;
-  if (a) { st.todas = null; $("lista").innerHTML='<div class="vacio">Cargando…</div>'; cargarPend().then(pintarA, error); }
+  if (a) { st.todas = null; st.dias = 7; $("lista").innerHTML='<div class="vacio">Cargando…</div>'; cargarPend().then(pintarA, error); }
   else { pintarC(); }
 }
 function error(e){ toast("No pude leer los datos ("+e.message+")"); }
