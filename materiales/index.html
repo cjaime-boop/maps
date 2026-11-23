@@ -81,6 +81,7 @@ tfoot td{font-weight:700;background:var(--soft)}
 .yatiene{flex-basis:100%;background:var(--soft);border-radius:8px;padding:8px 10px;font-size:13.5px}
 .man{background:var(--soft);color:var(--accent)}
 .sinwo{font-size:17px;color:var(--muted)}
+input::placeholder{color:#9aa8b8;font-style:italic;font-weight:400}
 .login{max-width:360px;margin:40px auto;background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:20px;display:flex;flex-direction:column;gap:12px}
 .login input{font:500 16px var(--f-body);padding:10px 12px;border:1px solid var(--line);border-radius:9px;background:var(--panel);color:var(--ink)}
 .err{color:#c0392b;font-size:14px;min-height:18px}
@@ -110,7 +111,7 @@ tfoot td{font-weight:700;background:var(--soft)}
       <label for="desde">Desde<input type="date" id="desde" min="2026-09-01"></label>
       <label for="hasta">Hasta<input type="date" id="hasta" min="2026-09-01"></label>
       <label for="cua" class="grow">Cuadrilla<select id="cua"></select></label>
-      <label for="bus" class="grow">Buscar WO<input id="bus" placeholder="WO0097595"></label>
+      <label for="bus" class="grow">Buscar WO<input id="bus" placeholder="ej: WO0000000"></label>
       <button class="btn pri" id="copiar" type="button">Copiar resumen</button>
     </div>
     <div class="aviso" id="avisoPend" hidden></div>
@@ -122,7 +123,7 @@ tfoot td{font-weight:700;background:var(--soft)}
   </section>
   <section id="vA" hidden>
     <div class="filtros">
-      <label for="bus2" class="grow">Buscar WO<input id="bus2" placeholder="WO0097595"></label>
+      <label for="bus2" class="grow">Buscar WO<input id="bus2" placeholder="ej: WO0000000"></label>
       <div class="seg" role="group"><button class="btn sel" id="fP" type="button">Por asignar</button><button class="btn" id="fT" type="button">Asignadas</button></div>
       <button class="btn pri" id="agAbrir" type="button">＋ Agregar material</button>
     </div>
@@ -130,7 +131,7 @@ tfoot td{font-weight:700;background:var(--soft)}
       <h2>Agregar material <span class="nota" id="agProy" style="text-transform:none;letter-spacing:0;font:500 13px var(--f-body)"></span></h2>
       <form class="agf" id="agForm">
         <div class="seg" role="group" aria-label="¿Tiene WO?"><button class="btn sel" id="agCon" type="button">Con WO</button><button class="btn" id="agSin" type="button">Sin WO</button></div>
-        <label id="agWoL">WO<input id="agWo" placeholder="WO0097595" autocomplete="off"></label>
+        <label id="agWoL">WO<input id="agWo" placeholder="ej: WO0000000" autocomplete="off"></label>
         <label class="grow">Material<input id="agItem" list="agItems" placeholder="Escribí para buscar…" autocomplete="off"></label><datalist id="agItems"></datalist>
         <label>Cantidad <span id="agUni" style="text-transform:none"></span><input id="agCant" type="number" min="0" step="any" inputmode="decimal"></label>
         <label>Fecha<input id="agFecha" type="date" min="2026-09-01"></label>
@@ -208,11 +209,13 @@ function deProy(xs){ return xs.filter(function(x){ return x.proyecto===st.proy &
 // ---------- depósito
 function filtradas(){
   var c=$("cua").value, b=$("bus").value.trim().toUpperCase();
-  return lineas(deProy(st.filas)).filter(function(l){ return (!c || l.cuadrilla===c) && (!b || String(l.x.wo||"Sin WO").toUpperCase().indexOf(b)>=0); });
+  return lineas(deProy(st.filas)).filter(function(l){ return (!c || (c==="__sin" ? !l.cuadrilla : l.cuadrilla===c)) && (!b || String(l.x.wo||"Sin WO").toUpperCase().indexOf(b)>=0); });
 }
 function pintarC(){
   var cs = cuadrillas(), sel = $("cua").value;
-  $("cua").innerHTML = '<option value="">Todas</option>' + cs.map(function(c){ return '<option'+(c===sel?' selected':'')+'>'+esc(c)+'</option>'; }).join("");
+  var nsin = deProy(st.filas).filter(function(x){ return !x.reparto.length; }).length;
+  $("cua").innerHTML = '<option value="">Todas</option>' + cs.map(function(c){ return '<option'+(c===sel?' selected':'')+'>'+esc(c)+'</option>'; }).join("") +
+    '<option value="__sin"'+(sel==="__sin"?' selected':'')+'>⏳ Sin asignar ('+nsin+')</option>';
   var fs = filtradas(), tot = {};
   fs.forEach(function(l){ tot[l.x.item]=(tot[l.x.item]||0)+l.cant; });
   var mats = Object.keys(tot).sort();
@@ -371,7 +374,7 @@ function guardarDivision(id, boton){
 }
 $("copiar").onclick=function(){
   var fs=filtradas(), tot={}; fs.forEach(function(l){ tot[l.x.item]=(tot[l.x.item]||0)+l.cant; });
-  var c=$("cua").value, t="*Consumo de materiales · "+(st.proy==="lineales"?"Lineales":"GPON")+"*\n\n"+(c?"Cuadrilla: "+c+"\n\n":"")+"Del "+dmyIso($("desde").value)+" al "+dmyIso($("hasta").value)+"\n\n"+
+  var c=$("cua").value, t="*Consumo de materiales · "+(st.proy==="lineales"?"Lineales":"GPON")+"*\n\n"+(c?"Cuadrilla: "+(c==="__sin"?"sin asignar":c)+"\n\n":"")+"Del "+dmyIso($("desde").value)+" al "+dmyIso($("hasta").value)+"\n\n"+
     Object.keys(tot).sort().map(function(m){ return "• "+m+": "+num(tot[m])+" "+unidad(m); }).join("\n");
   try{ navigator.clipboard.writeText(t).then(function(){toast("Copiado");},function(){toast("No se pudo copiar");}); }catch(_){ toast("No se pudo copiar"); }
 };
