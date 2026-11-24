@@ -462,7 +462,7 @@ svg{display:block;width:100%;height:auto}
           '<div class="kv">' + caja('▶️ En curso', nC, '#dcfce7', '#166534', cnt.camino ? cnt.camino + ' en camino' : '') +
           caja('⏸️ Pausados', cnt.pausado || 0, '#fef3c7', '#92400e') +
           caja('⏳ Sin atender', cnt.sin || 0, '#fee2e2', '#991b1b') +
-          caja('🔍 Verificación', nV, '#f1f5f9', '#475569', cnt.aceptado ? cnt.aceptado + ' aceptados' : '') + '</div></div>';
+          caja('🔍 Verificación', nV, '#f1f5f9', '#475569', cnt.aceptado ? cnt.aceptado + (cnt.aceptado === 1 ? ' aceptado' : ' aceptados') : '') + '</div></div>';
       });
       [['Lineales', 'Enlace'], ['GPON', 'CTO']].forEach(function (pr) {
         var xs = cs.filter(function (c) { return c.proyecto === pr[0]; });
@@ -470,7 +470,8 @@ svg{display:block;width:100%;height:auto}
         xs.sort(function (a, b) { return ORDEN_EST.indexOf(a.estado) - ORDEN_EST.indexOf(b.estado) || (+a.prio || 9) - (+b.prio || 9) || (a.ab || 0) - (b.ab || 0); });
         h += '<div class="c full"><h3>' + pr[0] + ' · casos abiertos</h3><div style="overflow-x:auto"><table class="vt"><tr><th>WO</th><th>Prio</th><th>' + pr[1] + '</th><th>Estado</th><th>Abierto hace</th><th>SLA</th></tr>' +
           xs.map(function (c) {
-            var sla = !c.sla ? '<small>—</small>' : c.sla.vencido ? '<span class="pill" style="background:#fee2e2;color:#991b1b">vencido</span>'
+            var sla = !c.sla ? '<small>—</small>' : c.sla.vencido ? '<span class="pill" style="background:#fee2e2;color:#991b1b">vencido' + (c.vence && c.vence < ahora ? ' ' + (ddmm(c.vence) !== ddmm(new Date()) ? ddmm(c.vence) + ' ' : '') + hm(c.vence) : '') + '</span>' +
+                (c.vence && c.vence < ahora ? ' <small>hace ' + dur((ahora - c.vence) / 60000) + '</small>' : '')
               : c.sla.pausado ? '<span class="pill" style="background:#f1f5f9;color:#475569">en pausa</span>'
               : c.vence ? '<span class="pill" style="background:' + (c.vence - ahora < 36e5 ? '#fef3c7;color:#92400e' : '#dcfce7;color:#166534') + '">vence ' + (ddmm(c.vence) !== ddmm(new Date()) ? ddmm(c.vence) + ' ' : '') + hm(c.vence) + '</span> <small>en ' + dur((c.vence - ahora) / 60000) + '</small>' : '<small>—</small>';
             return '<tr><td><b>' + esc(c.wo || '') + '</b></td><td>' + (c.prio ? 'P' + esc(c.prio) : '') + '</td><td>' + esc(c.ci || '') + '</td><td>' + chip(c.estado) +
