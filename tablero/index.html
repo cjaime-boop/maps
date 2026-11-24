@@ -29,14 +29,20 @@ svg{display:block;width:100%;height:auto}
 #login h2{margin:0 0 6px;font-size:18px}#login p{color:var(--mu);font-size:13px;margin:0 0 14px}
 #login input{width:100%;border:1px solid #cbd5e1;border-radius:8px;padding:10px;font-size:14px}#login button{margin-top:10px;width:100%;border:0;background:#2563eb;color:#fff;border-radius:8px;padding:10px;font:600 14px inherit;cursor:pointer}
 #login .err{color:var(--red);font-size:12.5px;margin-top:8px;min-height:16px}
+.seg [data-v="vivo"]:before{content:"";display:inline-block;width:8px;height:8px;border-radius:50%;background:#ef4444;margin-right:6px;vertical-align:1px;animation:late 1.6s infinite}
+@keyframes late{0%{box-shadow:0 0 0 0 rgba(239,68,68,.7)}70%{box-shadow:0 0 0 7px rgba(239,68,68,0)}100%{box-shadow:0 0 0 0 rgba(239,68,68,0)}}
+.vp{grid-column:span 6}.vp .tot{display:flex;align-items:baseline;gap:10px;margin:2px 0 12px}.vp .tot b{font-size:34px}.vp .tot span{color:var(--mu);font-size:13px}
+.est{display:grid;grid-template-columns:1fr auto;gap:6px 12px;font-size:13.5px}.est span{color:#334155}.est b{text-align:right}
+.chip{display:inline-block;border-radius:10px;padding:3px 9px;font-size:11.5px;font-weight:700;white-space:nowrap}
+.vt td{vertical-align:top}.vt td:first-child,.vt td:nth-child(5){white-space:nowrap}.vt small{color:var(--mu)}
 @media (max-width:820px){.k{grid-column:span 12}.c{grid-column:span 12}.wrap{padding:14px}.top{padding:14px 14px 0}.seg{margin-left:0}}
 </style></head><body>
 <div id="login" hidden><h2>📊 Tablero Mobisond</h2><p>Escribí la contraseña del tablero.</p>
 <input id="pass" type="password" autocomplete="current-password"><button id="entrar">Entrar</button><div class="err" id="err"></div></div>
 <div id="app" hidden>
 <div class="top"><div class="r1"><div><h1>📊 Tablero Mobisond · ATC</h1><small id="act"></small></div>
-<div class="seg"><button data-v="dia">Día</button><button data-v="semana" class="on">Semana</button><button data-v="mes">Mes</button><button data-v="anio">Año</button></div><select id="per"></select></div>
-<div class="tabs"><button data-p="lineales" class="on">🔧 Lineales</button><button data-p="gpon">📡 GPON</button><button data-p="termino">📈 En término</button><button data-p="simul">⏱️ Simultaneidad</button></div></div>
+<div class="seg"><button data-v="vivo">En vivo</button><button data-v="dia">Día</button><button data-v="semana" class="on">Semana</button><button data-v="mes">Mes</button><button data-v="anio">Año</button></div><select id="per"></select></div>
+<div class="tabs" id="tabs"><button data-p="lineales" class="on">🔧 Lineales</button><button data-p="gpon">📡 GPON</button><button data-p="termino">📈 En término</button><button data-p="simul">⏱️ Simultaneidad</button></div></div>
 <div class="wrap" id="wrap"></div></div>
 <script>
 (function () {
@@ -419,8 +425,64 @@ svg{display:block;width:100%;height:auto}
     });
   }
 
+  // ---------- vista En vivo: los casos abiertos ahora (se actualiza sola cada minuto)
+  var EST = {sin: ['⏳ Sin atender', '#fee2e2', '#991b1b'], camino: ['🚗 En camino', '#dbeafe', '#1e40af'], curso: ['▶️ En curso', '#dcfce7', '#166534'],
+             pausado: ['⏸️ Pausado', '#fef3c7', '#92400e'], verif: ['🔍 En verificación', '#ede9fe', '#5b21b6'], aceptado: ['✅ Aceptado por el cliente', '#f1f5f9', '#475569']};
+  var ORDEN_EST = ['sin', 'camino', 'curso', 'pausado', 'verif', 'aceptado'];
+  function leerVivo() {
+    return fetch(SB + '/rest/v1/rpc/tab_vivo', {method: 'POST', headers: {apikey: KEY, 'Content-Type': 'application/json'}, body: JSON.stringify({p_pass: st.pass})})
+      .then(function (r) { return r.json().then(function (j) { if (!r.ok) throw new Error(j.message || r.status); return j; }); });
+  }
+  function fecha(v) { if (v === null || v === undefined || v === '') return null; var d = new Date(typeof v === 'string' && /^\d+$/.test(v) ? +v : v); return isNaN(d) ? null : d; }
+  function dur(min) { min = Math.max(0, Math.round(min)); if (min < 60) return min + ' min'; var hh = Math.floor(min / 60), m = min % 60;
+    if (hh < 24) return hh + ' h' + (m ? ' ' + ('0' + m).slice(-2) : ''); var dd2 = Math.floor(hh / 24); return dd2 + (dd2 === 1 ? ' día' : ' días') + (hh % 24 ? ' ' + (hh % 24) + ' h' : ''); }
+  function chip(e) { var x = EST[e] || [e || '—', '#f1f5f9', '#475569']; return '<span class="chip" style="background:' + x[1] + ';color:' + x[2] + '">' + x[0] + '</span>'; }
+  function pintarVivo(primera) {
+    clearTimeout(st.vivoT);
+    if (primera) $('wrap').innerHTML = '<div class="c full"><div class="vacio">Cargando los casos abiertos…</div></div>';
+    leerVivo().then(function (j) {
+      if (st.vista !== 'vivo') return;
+      var ahora = Date.now(), act = fecha(j.actualizado), viejo = !act || ahora - act > 10 * 60000;
+      $('act').innerHTML = act ? (viejo ? '⚠️ Sin datos nuevos desde las ' + hm(act) + (ddmm(act) !== ddmm(new Date()) ? ' del ' + ddmm(act) : '') + ' · se actualiza solo'
+        : 'En vivo · actualizado ' + hm(act) + ' · se actualiza solo cada minuto') : 'Todavía no hay datos en vivo';
+      var cs = (j.casos || []).map(function (c) { c.ab = fecha(c.abierto); c.vence = c.sla ? fecha(c.sla.vence) : null; return c; });
+      var h = '';
+      [['Lineales', '🔵', '#2563eb'], ['GPON', '🟣', '#8b5cf6']].forEach(function (pr) {
+        var xs = cs.filter(function (c) { return c.proyecto === pr[0]; }), cnt = {};
+        xs.forEach(function (c) { cnt[c.estado] = (cnt[c.estado] || 0) + 1; });
+        var ven = xs.filter(function (c) { return c.sla && c.sla.vencido; }).length;
+        h += '<div class="c vp"><h3>' + pr[1] + ' ' + pr[0] + '</h3><div class="tot"><b style="color:' + pr[2] + '">' + xs.length + '</b><span>' + (xs.length === 1 ? 'caso abierto' : 'casos abiertos') +
+          (ven ? ' · <b style="font-size:13px;color:#dc2626">' + ven + ' con SLA vencido</b>' : '') + '</span></div>' +
+          (xs.length ? '<div class="est">' + ORDEN_EST.filter(function (e) { return cnt[e]; }).map(function (e) { return '<span>' + EST[e][0] + '</span><b' + (e === 'sin' ? ' style="color:#dc2626"' : '') + '>' + cnt[e] + '</b>'; }).join('') + '</div>'
+            : '<div class="vacio">Sin casos abiertos 😴</div>') + '</div>';
+      });
+      [['Lineales', 'Enlace'], ['GPON', 'CTO']].forEach(function (pr) {
+        var xs = cs.filter(function (c) { return c.proyecto === pr[0]; });
+        if (!xs.length) return;
+        xs.sort(function (a, b) { return ORDEN_EST.indexOf(a.estado) - ORDEN_EST.indexOf(b.estado) || (+a.prio || 9) - (+b.prio || 9) || (a.ab || 0) - (b.ab || 0); });
+        h += '<div class="c full"><h3>' + pr[0] + ' · casos abiertos</h3><p>Primero los que todavía no se atendieron; después por prioridad</p><div style="overflow-x:auto"><table class="vt"><tr><th>WO</th><th>Prio</th><th>' + pr[1] + '</th><th>Estado</th><th>Abierto hace</th><th>SLA</th></tr>' +
+          xs.map(function (c) {
+            var sla = !c.sla ? '<small>—</small>' : c.sla.vencido ? '<span class="pill" style="background:#fee2e2;color:#991b1b">vencido</span>'
+              : c.sla.pausado ? '<span class="pill" style="background:#f1f5f9;color:#475569">en pausa</span>'
+              : c.vence ? '<span class="pill" style="background:' + (c.vence - ahora < 36e5 ? '#fef3c7;color:#92400e' : '#dcfce7;color:#166534') + '">vence ' + (ddmm(c.vence) !== ddmm(new Date()) ? ddmm(c.vence) + ' ' : '') + hm(c.vence) + '</span> <small>en ' + dur((c.vence - ahora) / 60000) + '</small>' : '<small>—</small>';
+            return '<tr><td><b>' + esc(c.wo || '') + '</b></td><td>' + (c.prio ? 'P' + esc(c.prio) : '') + '</td><td>' + esc(c.ci || '') + '</td><td>' + chip(c.estado) +
+              (c.estado === 'pausado' && c.motivo ? '<br><small>' + esc(c.motivo) + '</small>' : '') + '</td><td>' + (c.ab ? dur((ahora - c.ab) / 60000) + '<br><small>' + ddmm(c.ab) + ' ' + hm(c.ab) + '</small>' : '') + '</td><td>' + sla + '</td></tr>';
+          }).join('') + '</table></div></div>';
+      });
+      $('wrap').innerHTML = h;
+    }, function (e) {
+      if (st.vista !== 'vivo') return;
+      $('act').textContent = 'En vivo';
+      if (primera) $('wrap').innerHTML = '<div class="c full"><div class="vacio">No pude leer los casos abiertos (' + esc(e.message) + ').</div></div>';
+    }).then(function () { if (st.vista === 'vivo') st.vivoT = setTimeout(function () { pintarVivo(false); }, 60000); });
+  }
+
   // ---------- pantalla
   function pintar() {
+    var vivo = st.vista === 'vivo';
+    $('per').hidden = vivo; $('tabs').style.display = vivo ? 'none' : ''; document.querySelector('.top').style.paddingBottom = vivo ? '16px' : '';
+    if (vivo) { pintarVivo(true); return; }
+    clearTimeout(st.vivoT);
     var ps = periodos(), p = ps[st.per] || ps[0], ant = st.vista === 'dia' ? {desde: mas(p.desde, -1), hasta: mas(p.desde, -1)}
       : st.vista === 'semana' ? {desde: mas(p.desde, -7), hasta: mas(p.hasta, -7)}
       : st.vista === 'anio' ? {desde: new Date(p.desde.getFullYear() - 1, 0, 1), hasta: new Date(p.desde.getFullYear() - 1, 11, 31)}
