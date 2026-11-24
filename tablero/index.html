@@ -349,7 +349,7 @@ svg{display:block;width:100%;height:auto}
     ((st.tiempos || {}).turnos || []).forEach(function (t) {
       var sem = {0: [], 1: [], 2: [], 3: [], 4: [], 5: [], 6: []}, hay = false;
       Object.keys(t.filas || {}).forEach(function (nom) {
-        if (!CUAD_PROY[proy].test(nom)) return;
+        if (!/ - /.test(nom) || !CUAD_PROY[proy].test(nom)) return;   // las cuadrillas van de a dos ("Sergio - Lucas"); así no se cuelan los dispatchers
         (t.filas[nom] || []).forEach(function (hs, i) {
           var m = /(\d{1,2})\s*a\s*(\d{1,2})/.exec(hs || ''); if (!m) return;
           sem[(i + 1) % 7].push([+m[1] % 24, +m[2] % 24]); hay = true;
@@ -418,15 +418,18 @@ svg{display:block;width:100%;height:auto}
     h += k('Horas con más casos que cuadrillas', hex + ' h', hs.length ? 'de ' + hs.length + ' horas del período' : '', hex ? '#dc2626' : null);
     h += k('Tiempo medio de resolución', ti.res ? dur(ti.res.prom) : '—', mitad(ti.res));
     h += k('Llegada / traslado', (ti.lle ? dur(ti.lle.prom) : '—') + ' <span style="font-size:15px;color:#64748b">/ ' + (ti.tra ? dur(ti.tra.prom) : '—') + '</span>', 'ingreso → en sitio / patente → en sitio');
-    // por hora del día (últimos 90 días)
-    var d90 = Date.now() - 90 * 864e5, fin = st.simDias === 'fin';
-    var xs90 = an.horas.filter(function (x) { return x.t >= d90 && (fin ? x.dow === 0 || x.dow === 6 : x.dow >= 1 && x.dow <= 5); });
+    // por hora del día, en el período elegido (en un solo día no se separa lunes a viernes / fin de semana)
+    var unDia = b - a <= 864e5 + 36e5, fin = st.simDias === 'fin';
+    var xs90 = hs.filter(function (x) { return unDia || (fin ? x.dow === 0 || x.dow === 6 : x.dow >= 1 && x.dow <= 5); });
+    var nomPer = st.vista === 'dia' ? 'en el día' : st.vista === 'semana' ? 'en la semana' : st.vista === 'anio' ? 'en el año' : 'en el mes';
     var perfil = []; for (var hh = 0; hh < 24; hh++) { var xs = xs90.filter(function (x) { return x.h === hh; });
       perfil.push({h: hh, prom: xs.length ? xs.reduce(function (s, x) { return s + x.n; }, 0) / xs.length : 0, max: Math.max.apply(null, xs.map(function (x) { return x.n; }).concat([0])),
         cuad: xs.length ? xs.reduce(function (s, x) { return s + x.cuad; }, 0) / xs.length : 0, ex: xs.length ? Math.round(100 * xs.filter(function (x) { return x.cuad > 0 && x.n > x.cuad; }).length / xs.length) : 0}); }
-    h += '<div class="c full"><h3>Casos que necesitan cuadrilla, por hora del día · ' + (fin ? 'sábado y domingo' : 'lunes a viernes') + '</h3><p>Últimos 90 días. La barra es el promedio de casos y el punto, el máximo; la línea verde, las cuadrillas trabajando. Abajo, en qué % de esos días hubo más casos que cuadrillas a esa hora.</p>' +
-      '<div class="mini"><button data-sd="lab"' + (fin ? '' : ' class="on"') + '>Lunes a viernes</button><button data-sd="fin"' + (fin ? ' class="on"' : '') + '>Sábado y domingo</button></div>' +
-      '<div class="ley"><b style="background:#93c5fd"></b>casos (promedio) &nbsp; <b style="background:#f87171"></b>más casos que cuadrillas &nbsp; <b style="background:#475569;border-radius:50%"></b>máximo &nbsp; <b style="background:#16a34a"></b>cuadrillas</div>' + grafPerfil(perfil) + '</div>';
+    h += '<div class="c full"><h3>Casos que necesitan cuadrilla, por hora del día' + (unDia ? '' : ' · ' + (fin ? 'sábado y domingo' : 'lunes a viernes')) + '</h3><p>' +
+      (unDia ? 'Cuántos casos necesitaban cuadrilla en cada hora del día (la barra) contra las cuadrillas trabajando (la línea verde). En rojo, las horas con más casos que cuadrillas.'
+             : 'Por hora, ' + nomPer + '. La barra es el promedio de casos y el punto, el máximo; la línea verde, las cuadrillas trabajando. Abajo, en qué % de esos días hubo más casos que cuadrillas a esa hora.') + '</p>' +
+      (unDia ? '' : '<div class="mini"><button data-sd="lab"' + (fin ? '' : ' class="on"') + '>Lunes a viernes</button><button data-sd="fin"' + (fin ? ' class="on"' : '') + '>Sábado y domingo</button></div>') +
+      '<div class="ley"><b style="background:#93c5fd"></b>casos' + (unDia ? '' : ' (promedio)') + ' &nbsp; <b style="background:#f87171"></b>más casos que cuadrillas &nbsp; ' + (unDia ? '' : '<b style="background:#475569;border-radius:50%"></b>máximo &nbsp; ') + '<b style="background:#16a34a"></b>cuadrillas</div>' + (xs90.length ? grafPerfil(perfil, unDia) : '<div class="vacio">No hay ' + (fin ? 'sábados ni domingos' : 'días de semana') + ' en este período.</div>') + '</div>';
     // mes a mes
     var meses = [], m0 = new Date(T_DESDE.getTime());
     for (var mm = new Date(hoy().getFullYear(), hoy().getMonth(), 1); mm >= m0; mm = new Date(mm.getFullYear(), mm.getMonth() - 1, 1)) meses.push(mm);
@@ -459,7 +462,7 @@ svg{display:block;width:100%;height:auto}
     h += '<div class="c full"><h3>Últimos 90 días</h3><p>Casos ingresados por día (barras) y horas del día con más casos que cuadrillas (línea roja, de 0 a 24 h)</p><div class="ley"><b style="background:#93c5fd"></b>ingresados &nbsp; <b style="background:#dc2626"></b>horas con más casos que cuadrillas</div>' + graf90(dias) + '</div>';
     return h;
   }
-  function grafPerfil(p) {
+  function grafPerfil(p, unDia) {
     var W = 1180, H = 250, x0 = 40, y1 = 200, cw = (W - x0) / 24, top = Math.max(4, Math.max.apply(null, p.map(function (x) { return Math.max(x.max, x.cuad); })));
     var Y = function (v) { return y1 - (y1 - 20) * v / top; }, s = '<svg viewBox="0 0 ' + W + ' ' + H + '">';
     for (var v = 0; v <= top; v += top > 8 ? 2 : 1) s += '<line x1="' + x0 + '" x2="' + W + '" y1="' + Y(v) + '" y2="' + Y(v) + '" stroke="#eef0f3"/><text x="' + (x0 - 6) + '" y="' + (Y(v) + 4) + '" font-size="11" fill="#94a3b8" text-anchor="end">' + v + '</text>';
@@ -467,12 +470,12 @@ svg{display:block;width:100%;height:auto}
     p.forEach(function (x, i) {
       var cx = x0 + cw * i + cw / 2;
       s += '<rect x="' + (cx - cw * .32) + '" y="' + Y(x.prom) + '" width="' + (cw * .64) + '" height="' + (y1 - Y(x.prom)) + '" rx="3" fill="' + (x.prom > x.cuad ? '#f87171' : '#93c5fd') + '"><title>' + x.h + ' h: promedio ' + uno(x.prom) + ', máximo ' + x.max + ', cuadrillas ' + uno(x.cuad) + '</title></rect>';
-      if (x.max) s += '<circle cx="' + cx + '" cy="' + Y(x.max) + '" r="3.5" fill="#475569"/>';
+      if (x.max && !unDia) s += '<circle cx="' + cx + '" cy="' + Y(x.max) + '" r="3.5" fill="#475569"/>';
       s += '<text x="' + cx + '" y="' + (y1 + 15) + '" font-size="11" fill="#64748b" text-anchor="middle">' + ('0' + x.h).slice(-2) + '</text>';
-      s += '<text x="' + cx + '" y="' + (y1 + 32) + '" font-size="10.5" font-weight="700" fill="' + (x.ex >= 50 ? '#dc2626' : x.ex >= 25 ? '#d97706' : '#94a3b8') + '" text-anchor="middle">' + x.ex + '%</text>';
+      if (!unDia) s += '<text x="' + cx + '" y="' + (y1 + 32) + '" font-size="10.5" font-weight="700" fill="' + (x.ex >= 50 ? '#dc2626' : x.ex >= 25 ? '#d97706' : '#94a3b8') + '" text-anchor="middle">' + x.ex + '%</text>';
       path += (i ? 'L' : 'M') + (x0 + cw * i) + ' ' + Y(x.cuad) + ' L' + (x0 + cw * (i + 1)) + ' ' + Y(x.cuad) + ' ';
     });
-    return s + '<path d="' + path + '" fill="none" stroke="#16a34a" stroke-width="3"/><text x="' + x0 + '" y="' + (y1 + 46) + '" font-size="11" fill="#64748b">% de los días en que hubo más casos que cuadrillas a esa hora</text></svg>';
+    return s + '<path d="' + path + '" fill="none" stroke="#16a34a" stroke-width="3"/>' + (unDia ? '' : '<text x="' + x0 + '" y="' + (y1 + 46) + '" font-size="11" fill="#64748b">% de los días en que hubo más casos que cuadrillas a esa hora</text>') + '</svg>';
   }
   function graf90(ds) {
     var W = 1180, H = 210, x0 = 30, y1 = 170, cw = (W - x0) / ds.length, tp = Math.max(5, Math.max.apply(null, ds.map(function (d) { return d.ing; })));
