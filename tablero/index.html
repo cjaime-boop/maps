@@ -544,7 +544,7 @@ svg{display:block;width:100%;height:auto}
     var proy = st.proy, color = proy === 'lineales' ? '#2563eb' : '#8b5cf6', nom = proy === 'lineales' ? 'Lineales' : 'GPON';
     var d0 = new Date(p.desde.getFullYear(), p.desde.getMonth(), p.desde.getDate()), d1 = mas(d0, 1);
     $('wrap').innerHTML = '<div class="c full"><div class="vacio">Cargando el día…</div></div>';
-    leerDia(d0).then(function (j) {
+    Promise.all([leerDia(d0), st.tiempos ? null : leerTiempos().catch(function (e) { st.tiempos = {err: e.message}; })]).then(function (rr) { var j = rr[0];
       if (st.vista !== 'dia' || st.proy !== proy || iso(d0) !== iso((periodos()[st.per] || {}).desde || d0)) return;   // ya cambió de vista
       var cs = (j.casos || []).filter(function (c) { return c.proyecto === proy; }).map(function (c) {
         return {wo: c.wo, prio: c.prio, cli: c.cli, ven: c.vencido, baja: c.baja, ab: new Date(c.abierto), ce: c.cerrado ? new Date(c.cerrado) : null};
@@ -581,14 +581,25 @@ svg{display:block;width:100%;height:auto}
       var W = 560, H = 200, x0 = 26, y1 = 150, cw = (W - x0 - 6) / 24, top = Math.max(4, Math.max.apply(null, horas.map(function (q) { return q.ab; })));
       var g = '<svg viewBox="0 0 ' + W + ' ' + H + '">';
       for (var v = 0; v <= top; v += Math.max(1, Math.round(top / 4))) { var yy = y1 - (y1 - 22) * v / top; g += '<line x1="' + x0 + '" x2="' + W + '" y1="' + yy + '" y2="' + yy + '" stroke="#eef0f3"/><text x="' + (x0 - 5) + '" y="' + (yy + 4) + '" font-size="10" fill="#94a3b8" text-anchor="end">' + v + '</text>'; }
+      // en mano: los que necesitaban cuadrilla en esa hora (sin pausas que liberan a la cuadrilla, sin verificación, sin P4/P5)
+      var mano = null, path = '';
+      try { if (st.tiempos && !st.tiempos.err && (st.tiempos.casos || []).length) { var anD = analisis(proy); mano = {};
+        anD.horas.forEach(function (z) { if (z.t >= d0.getTime() && z.t < d1.getTime()) mano[new Date(z.t).getHours()] = z; }); } } catch (e) { mano = null; }
+      var cMano = proy === 'lineales' ? '#60a5fa' : '#a78bfa';
       horas.forEach(function (q, hh) {
         var cx = x0 + cw * hh + cw / 2, bh = (y1 - 22) * q.ab / top;
         if (q.ab) g += '<rect x="' + (cx - cw * 0.38) + '" y="' + (y1 - bh) + '" width="' + (cw * 0.76) + '" height="' + bh + '" rx="2" fill="' + (proy === 'lineales' ? '#dbeafe' : '#ede9fe') + '"><title>' + ('0' + hh).slice(-2) + ':00 · ' + q.ab + ' abiertos</title></rect>';
+        var mz = mano && mano[hh];
+        if (mz && mz.n) { var mh = (y1 - 22) * Math.min(mz.n, top) / top;
+          g += '<rect x="' + (cx - cw * 0.38) + '" y="' + (y1 - mh) + '" width="' + (cw * 0.76) + '" height="' + mh + '" rx="2" fill="' + (mz.cuad > 0 && mz.n > mz.cuad ? '#f87171' : cMano) + '"><title>' + ('0' + hh).slice(-2) + ':00 · ' + mz.n + ' en mano · ' + mz.cuad + (mz.cuad === 1 ? ' cuadrilla' : ' cuadrillas') + '</title></rect>'; }
+        if (mz) { var yc = y1 - (y1 - 22) * Math.min(mz.cuad, top) / top; path += (hh ? 'L' : 'M') + (x0 + cw * hh) + ' ' + yc + ' L' + (x0 + cw * (hh + 1)) + ' ' + yc + ' '; }
         if (q.ing) g += '<circle cx="' + cx + '" cy="' + (y1 - bh - 10) + '" r="' + (q.ing > 1 ? 8 : 6) + '" fill="' + color + '"><title>' + q.ing + (q.ing === 1 ? ' ingreso' : ' ingresos') + '</title></circle>' + (q.ing > 1 ? '<text x="' + cx + '" y="' + (y1 - bh - 6.5) + '" font-size="10" font-weight="700" fill="#fff" text-anchor="middle">' + q.ing + '</text>' : '');
         if (hh % 3 === 0) g += '<text x="' + cx + '" y="' + (y1 + 16) + '" font-size="10.5" fill="#64748b" text-anchor="middle">' + ('0' + hh).slice(-2) + '</text>';
       });
+      if (path) g += '<path d="' + path + '" fill="none" stroke="#16a34a" stroke-width="2.5"/>';
       g += '</svg>';
-      h += '<div class="c"><h3>Ingresos por hora</h3><p>Cuándo entraron los casos y cuántos había abiertos en cada hora</p><div class="ley"><b style="background:' + color + ';border-radius:50%"></b>entró un caso &nbsp; <b style="background:' + (proy === 'lineales' ? '#dbeafe' : '#ede9fe') + '"></b>casos abiertos en esa hora</div>' + g + '</div>';
+      h += '<div class="c"><h3>Ingresos por hora</h3><p>Cuándo entraron los casos y, en cada hora, cuántos había abiertos en total y cuántos en mano (necesitando cuadrilla)</p><div class="ley"><b style="background:' + color + ';border-radius:50%"></b>entró un caso &nbsp; <b style="background:' + (proy === 'lineales' ? '#dbeafe' : '#ede9fe') + '"></b>abiertos en total' +
+        (mano ? ' &nbsp; <b style="background:' + cMano + '"></b>en mano &nbsp; <b style="background:#f87171"></b>más en mano que cuadrillas &nbsp; <b style="background:#16a34a"></b>cuadrillas' : '') + '</div>' + g + '</div>';
       // casos del día: primero los que venían de antes
       var fila = function (c, deAntes) {
         var sla = c.baja ? '<span class="pill" style="background:#f1f5f9;color:#475569">prioridad baja</span>'
