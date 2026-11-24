@@ -12,6 +12,9 @@
 select{background:rgba(255,255,255,.15);color:#fff;border:0;border-radius:8px;padding:7px 10px;font:13px inherit}select option{color:#0f172a}
 .tabs{display:flex;gap:4px;margin-top:14px}.tabs button{border:0;background:none;padding:10px 22px;border-radius:10px 10px 0 0;font:600 14px inherit;color:#cbd5e1;cursor:pointer}.tabs .on{background:var(--bg);color:var(--tx)}
 .wrap{padding:20px 28px;display:grid;grid-template-columns:repeat(12,1fr);gap:16px;max-width:1280px}
+.k2{grid-column:span 2;background:var(--card);border-radius:14px;padding:12px 14px;box-shadow:0 1px 3px rgba(15,23,42,.08)}.k2 small{color:var(--mu);font-size:12px}.k2 b{display:block;font-size:24px;margin-top:3px}.k2 i{font-style:normal;font-size:11.5px;color:var(--mu)}
+.mt td,.mt th{text-align:right;white-space:nowrap}.mt td:first-child,.mt th:first-child{text-align:left}.mt small{color:#94a3b8;font-size:11px;display:block}
+.trm{display:grid;grid-template-columns:110px 1fr 230px;gap:10px;align-items:center;font-size:13px;margin:8px 0}.trm i{display:block;height:16px;border-radius:4px;background:#fca5a5}
 .k{grid-column:span 4;background:var(--card);border-radius:14px;padding:14px 16px;box-shadow:0 1px 3px rgba(15,23,42,.08)}
 .k small{color:var(--mu);font-size:12.5px}.k b{display:block;font-size:30px;margin-top:4px}.k i{font-style:normal;font-size:12px}
 .c{grid-column:span 6;background:var(--card);border-radius:14px;padding:16px 18px;box-shadow:0 1px 3px rgba(15,23,42,.08);min-width:0}.c.full{grid-column:span 12}
@@ -38,7 +41,7 @@ svg{display:block;width:100%;height:auto}
 .est{display:grid;grid-template-columns:1fr auto;gap:6px 12px;font-size:13.5px}.est span{color:#334155}.est b{text-align:right}
 .chip{display:inline-block;border-radius:10px;padding:3px 9px;font-size:11.5px;font-weight:700;white-space:nowrap}
 .vt td{vertical-align:top}.vt td:first-child,.vt td:nth-child(5){white-space:nowrap}.vt small{color:var(--mu)}
-@media (max-width:820px){.k{grid-column:span 12}.c{grid-column:span 12}.wrap{padding:14px}.top{padding:14px 14px 0}.seg{margin-left:0}}
+@media (max-width:820px){.k2{grid-column:span 6}.trm{grid-template-columns:1fr}.k{grid-column:span 12}.c{grid-column:span 12}.wrap{padding:14px}.top{padding:14px 14px 0}.seg{margin-left:0}}
 </style></head><body>
 <div id="login" hidden><h2>📊 Tablero Mobisond</h2><p>Escribí la contraseña del tablero.</p>
 <input id="pass" type="password" autocomplete="current-password"><button id="entrar">Entrar</button><div class="err" id="err"></div></div>
@@ -317,19 +320,192 @@ svg{display:block;width:100%;height:auto}
              '</td><td><b style="color:' + C_ESP + '">' + x.espera + '</b></td><td>' + x.pausa + '</td></tr>';
     }).join('') + '</table>';
   }
+
+  // ---------- casos que necesitan cuadrilla contra cuadrillas trabajando (desde agosto 2026) y tiempos
+  // Un caso "necesita cuadrilla" desde que entra hasta que pasa a verificación del cliente, salvo en las pausas que liberan a
+  // la cuadrilla (nodo/falla del cliente, otro corte, falta información…). Las de BOFO, seguridad o custodia la mantienen ocupada.
+  // Sin prioridades bajas (P4/P5). Las cuadrillas salen de la planilla de turnos de cada semana.
+  var T_DESDE = new Date(2026, 7, 1);
+  var CUAD_PROY = {lineales: /penayo|braian|brian|olivo|sergio|gustavo|hugo/i, gpon: /mendoza|sebasti|victor|villafa/i};
+  var CUAD_DEF = {                         // si todavía no hay planilla guardada: la semana típica (lunes=1 … domingo=0)
+    lineales: {1: [[7, 17], [8, 16], [9, 17], [15, 23], [15, 23], [22, 6]], 2: [[6, 14], [7, 17], [8, 16], [9, 17], [15, 23], [15, 23], [22, 6]], 3: [[6, 14], [7, 17], [8, 16], [9, 17], [15, 23], [15, 23], [22, 6]],
+               4: [[6, 14], [7, 17], [8, 16], [15, 23], [15, 23], [22, 6]], 5: [[6, 14], [7, 17], [8, 16], [23, 7], [15, 23], [15, 23]], 6: [[9, 17], [7, 15], [7, 15], [15, 23], [23, 7]], 0: [[7, 15], [9, 17], [15, 23], [22, 6]]},
+    gpon: {1: [[11, 19], [11, 19], [7, 15], [7, 15]], 2: [[11, 19], [11, 19], [7, 15], [7, 15]], 3: [[11, 19], [11, 19], [7, 15], [7, 15]], 4: [[11, 19], [11, 19], [7, 15], [7, 15]],
+           5: [[11, 19], [11, 19], [7, 15], [7, 15]], 6: [[7, 19], [7, 19]], 0: [[7, 19], [7, 19]]}};
+  function leerTiempos() {
+    var d = mas(hoy(), -210); if (d < T_DESDE) d = T_DESDE;
+    return fetch(SB + '/rest/v1/rpc/tab_tiempos', {method: 'POST', headers: {apikey: KEY, 'Content-Type': 'application/json'}, body: JSON.stringify({p_pass: st.pass, p_desde: iso(d)})})
+      .then(function (r) { return r.json().then(function (j) { if (!r.ok) throw new Error(j.message || r.status); st.tiempos = j || {}; st.simAn = {}; return j; }); });
+  }
+  function cuadPorHora(sem) {             // sem[díaSemana] = [[7,17], [22,6], …] -> cuántas cuadrillas en cada hora de cada día
+    var c = []; for (var d = 0; d < 7; d++) { c.push([]); for (var h = 0; h < 24; h++) c[d].push(0); }
+    Object.keys(sem).forEach(function (d) { (sem[d] || []).forEach(function (t) {
+      for (var h = t[0], k = 0; h !== t[1] && k < 24; h = (h + 1) % 24, k++) c[h < t[0] ? (+d + 1) % 7 : +d][h]++;
+    }); });
+    return c;
+  }
+  function turnosDe(proy) {               // {lunes ISO: cnt[dow][h]} de las planillas guardadas
+    var out = {};
+    ((st.tiempos || {}).turnos || []).forEach(function (t) {
+      var sem = {0: [], 1: [], 2: [], 3: [], 4: [], 5: [], 6: []}, hay = false;
+      Object.keys(t.filas || {}).forEach(function (nom) {
+        if (!CUAD_PROY[proy].test(nom)) return;
+        (t.filas[nom] || []).forEach(function (hs, i) {
+          var m = /(\d{1,2})\s*a\s*(\d{1,2})/.exec(hs || ''); if (!m) return;
+          sem[(i + 1) % 7].push([+m[1] % 24, +m[2] % 24]); hay = true;
+        });
+      });
+      if (hay) out[t.lunes] = cuadPorHora(sem);
+    });
+    return out;
+  }
+  function necesita(c, s) {               // ¿el caso necesita cuadrilla en el momento s?
+    var fin = c.res || c.ce || Infinity;
+    if (!(c.ab <= s && fin > s)) return false;
+    for (var k = 0; k < (c.libre || []).length; k++) { var z = c.libre[k]; if (z[0] <= s && (z[1] || Infinity) > s) return false; }
+    return true;
+  }
+  function analisis(proy) {
+    st.simAn = st.simAn || {};
+    if (st.simAn[proy]) return st.simAn[proy];
+    var cs = ((st.tiempos || {}).casos || []).filter(function (c) { return c.p === proy && !(+c.prio >= 4) && c.ab; });
+    var tur = turnosDe(proy), lunesT = Object.keys(tur).sort(), def = cuadPorHora(CUAD_DEF[proy]);
+    var cuad = function (t) {             // la planilla de esa semana; si no está, la más cercana guardada (o la típica)
+      var l = lunes(new Date(t)), k = iso(l), use = tur[k];
+      if (!use && lunesT.length) { var prev = lunesT.filter(function (x) { return x <= k; }); use = tur[prev.length ? prev[prev.length - 1] : lunesT[0]]; }
+      var d = new Date(t); return (use || def)[d.getDay()][d.getHours()];
+    };
+    var ahora = Date.now(), horas = [], t0 = T_DESDE.getTime();
+    var vivos = cs.filter(function (c) { return (c.res || c.ce || ahora) > t0; }).sort(function (a, b) { return a.ab - b.ab; });
+    for (var t = t0; t < ahora; t += 36e5) {
+      var mx = 0;
+      for (var s = t; s < t + 36e5 && s < ahora; s += 600000) {
+        var n = 0; for (var i = 0; i < vivos.length && vivos[i].ab <= s; i++) if (necesita(vivos[i], s)) n++;
+        if (n > mx) mx = n;
+      }
+      var d = new Date(t); horas.push({t: t, dow: d.getDay(), h: d.getHours(), n: mx, cuad: cuad(t)});
+    }
+    var tramos = [], cur = null;
+    horas.forEach(function (x) {
+      if (x.cuad > 0 && x.n > x.cuad) { if (!cur) cur = {ini: x.t, fin: 0, casos: 0, cuad: x.cuad, ex: -1}; cur.fin = x.t + 36e5; if (x.n - x.cuad > cur.ex) { cur.ex = x.n - x.cuad; cur.casos = x.n; cur.cuad = x.cuad; } }
+      else if (cur) { tramos.push(cur); cur = null; }
+    });
+    if (cur) tramos.push(cur);
+    return (st.simAn[proy] = {cs: cs, horas: horas, tramos: tramos, planilla: lunesT.length});
+  }
+  function dur(min) { if (min === null || min === undefined) return '—'; min = Math.round(min); var hh = Math.floor(min / 60), mi = min % 60;
+    if (hh >= 48) return Math.floor(hh / 24) + ' d ' + (hh % 24) + ' h'; return hh ? hh + ' h' + (mi ? ' ' + ('0' + mi).slice(-2) : '') : mi + ' min'; }
+  function tiempos(cs) {                  // promedio y "la mitad en menos de" (en minutos)
+    var r = function (f) { var a = cs.map(f).filter(function (x) { return x !== null && x > 0; }).sort(function (x, y) { return x - y; });
+      return a.length ? {n: a.length, prom: a.reduce(function (x, y) { return x + y; }, 0) / a.length, med: a[Math.floor(a.length / 2)]} : null; };
+    return {res: r(function (c) { return c.res ? (c.res - c.ab) / 60000 : null; }),
+            lle: r(function (c) { return c.lle && c.lle > c.ab ? (c.lle - c.ab) / 60000 : null; }),
+            tra: r(function (c) { return c.sal && c.lle && c.lle > c.sal && c.lle - c.sal < 6 * 36e5 ? (c.lle - c.sal) / 60000 : null; })};
+  }
+  function bloqueTiempos(p) {
+    var proy = st.simProy.toLowerCase(), an = analisis(proy);
+    if (!an.cs.length) return '<div class="c full"><div class="vacio">Todavía no hay datos de tiempos y cuadrillas cargados.</div></div>';
+    var a = p.desde.getTime(), b = Math.min(mas(p.hasta, 1).getTime(), Date.now());
+    var hs = an.horas.filter(function (x) { return x.t >= a && x.t < b; }), cs = an.cs.filter(function (c) { return c.ab >= a && c.ab < b; });
+    var t = sumar(porDia(proy), p.desde, p.hasta), ti = tiempos(cs);
+    var pico = hs.reduce(function (m, x) { return !m || x.n > m.n ? x : m; }, null), hex = hs.filter(function (x) { return x.cuad > 0 && x.n > x.cuad; }).length;
+    var k = function (tt, v, s, c) { return '<div class="k2"><small>' + tt + '</small><b' + (c ? ' style="color:' + c + '"' : '') + '>' + v + '</b><i>' + s + '</i></div>'; };
+    var mitad = function (x) { return x ? 'la mitad, en menos de ' + dur(x.med) : 'sin datos'; };
+    var h = '';
+    h += k('Ingresados', t.ing, 'en el período');
+    h += k('Vencidos', t.ven, t.ing ? Math.round(100 * t.ven / t.ing) + '% de los ingresados' : '', '#dc2626');
+    h += k('Simultaneidad máxima', pico ? pico.n + (pico.n === 1 ? ' caso' : ' casos') : '—', pico ? 'con ' + pico.cuad + (pico.cuad === 1 ? ' cuadrilla' : ' cuadrillas') + ' trabajando · ' + DSEM[new Date(pico.t).getDay()] + ' ' + ddmm(new Date(pico.t)) + ' ' + ('0' + pico.h).slice(-2) + ' h' : '');
+    h += k('Horas con más casos que cuadrillas', hex + ' h', hs.length ? 'de ' + hs.length + ' horas del período' : '', hex ? '#dc2626' : null);
+    h += k('Tiempo medio de resolución', ti.res ? dur(ti.res.prom) : '—', mitad(ti.res));
+    h += k('Llegada / traslado', (ti.lle ? dur(ti.lle.prom) : '—') + ' <span style="font-size:15px;color:#64748b">/ ' + (ti.tra ? dur(ti.tra.prom) : '—') + '</span>', 'ingreso → en sitio / patente → en sitio');
+    // por hora del día (últimos 90 días)
+    var d90 = Date.now() - 90 * 864e5, fin = st.simDias === 'fin';
+    var xs90 = an.horas.filter(function (x) { return x.t >= d90 && (fin ? x.dow === 0 || x.dow === 6 : x.dow >= 1 && x.dow <= 5); });
+    var perfil = []; for (var hh = 0; hh < 24; hh++) { var xs = xs90.filter(function (x) { return x.h === hh; });
+      perfil.push({h: hh, prom: xs.length ? xs.reduce(function (s, x) { return s + x.n; }, 0) / xs.length : 0, max: Math.max.apply(null, xs.map(function (x) { return x.n; }).concat([0])),
+        cuad: xs.length ? xs.reduce(function (s, x) { return s + x.cuad; }, 0) / xs.length : 0, ex: xs.length ? Math.round(100 * xs.filter(function (x) { return x.cuad > 0 && x.n > x.cuad; }).length / xs.length) : 0}); }
+    h += '<div class="c full"><h3>Casos que necesitan cuadrilla, por hora del día · ' + (fin ? 'sábado y domingo' : 'lunes a viernes') + '</h3><p>Últimos 90 días. La barra es el promedio de casos y el punto, el máximo; la línea verde, las cuadrillas trabajando. Abajo, en qué % de esos días hubo más casos que cuadrillas a esa hora.</p>' +
+      '<div class="mini"><button data-sd="lab"' + (fin ? '' : ' class="on"') + '>Lunes a viernes</button><button data-sd="fin"' + (fin ? ' class="on"' : '') + '>Sábado y domingo</button></div>' +
+      '<div class="ley"><b style="background:#93c5fd"></b>casos (promedio) &nbsp; <b style="background:#f87171"></b>más casos que cuadrillas &nbsp; <b style="background:#475569;border-radius:50%"></b>máximo &nbsp; <b style="background:#16a34a"></b>cuadrillas</div>' + grafPerfil(perfil) + '</div>';
+    // mes a mes
+    var meses = [], m0 = new Date(T_DESDE.getTime());
+    for (var mm = new Date(hoy().getFullYear(), hoy().getMonth(), 1); mm >= m0; mm = new Date(mm.getFullYear(), mm.getMonth() - 1, 1)) meses.push(mm);
+    h += '<div class="c full"><h3>Mes a mes</h3><p>Resolución, llegada y traslado: promedio y, abajo, en cuánto tiempo se resuelve la mitad de los casos</p><div style="overflow-x:auto"><table class="mt"><tr><th>Mes</th><th>Ingresados</th><th>Vencidos</th><th>Simult. máxima</th><th>Horas con más casos que cuadrillas</th><th>Tramos de 3 h o más</th><th>Resolución</th><th>Llegada</th><th>Traslado</th></tr>' +
+      meses.map(function (m1) {
+        var m2 = new Date(m1.getFullYear(), m1.getMonth() + 1, 1), x = sumar(porDia(proy), m1, mas(m2, -1));
+        var hm = an.horas.filter(function (z) { return z.t >= m1.getTime() && z.t < m2.getTime(); }), tm = tiempos(an.cs.filter(function (c) { return c.ab >= m1.getTime() && c.ab < m2.getTime(); }));
+        var cel = function (o) { return o ? dur(o.prom) + '<small>mitad: ' + dur(o.med) + '</small>' : '—'; };
+        return '<tr><td>' + MES[m1.getMonth()].replace(/^./, function (c) { return c.toUpperCase(); }) + (m2 > hoy() ? ' <small style="display:inline">(en curso)</small>' : '') + '</td><td>' + x.ing + '</td><td>' + x.ven + '</td><td>' +
+          Math.max.apply(null, hm.map(function (z) { return z.n; }).concat([0])) + '</td><td><b>' + hm.filter(function (z) { return z.cuad > 0 && z.n > z.cuad; }).length + ' h</b></td><td>' +
+          an.tramos.filter(function (z) { return z.ini >= m1.getTime() && z.ini < m2.getTime() && z.fin - z.ini >= 3 * 36e5; }).length + '</td><td>' + cel(tm.res) + '</td><td>' + cel(tm.lle) + '</td><td>' + cel(tm.tra) + '</td></tr>';
+      }).join('') + '</table></div></div>';
+    // tramos del período
+    var tr = an.tramos.filter(function (z) { return z.fin > a && z.ini < b; }), top = tr.slice().sort(function (x, y) { return (y.fin - y.ini) - (x.fin - x.ini) || y.ex - x.ex; }).slice(0, 5);
+    var mx = Math.max.apply(null, top.map(function (z) { return z.fin - z.ini; }).concat([1]));
+    h += '<div class="c"><h3>Tramos más largos con más casos que cuadrillas</h3><p>Horas seguidas en las que hubo más casos que cuadrillas trabajando · ' + tr.length + (tr.length === 1 ? ' tramo' : ' tramos') + ' en el período</p>' +
+      (top.length ? top.map(function (z) { var d = new Date(z.ini);
+        return '<div class="trm"><span>' + DSEM[d.getDay()] + ' ' + ddmm(d) + ' ' + ('0' + d.getHours()).slice(-2) + ':00</span><i style="width:' + (100 * (z.fin - z.ini) / mx) + '%"></i><span><b>' + dur((z.fin - z.ini) / 60000) + '</b> · hasta ' + z.casos + ' casos con ' + z.cuad + ' cuadr.</span></div>'; }).join('')
+        : '<div class="vacio">No hubo momentos con más casos que cuadrillas. 👌</div>') + '</div>';
+    // motivos de pausa del período
+    var mot = {}; cs.forEach(function (c) { (c.mot || []).forEach(function (m) { var n = m === 'otro' ? 'Otros (falta información, trabajo en conjunto…)' : m.charAt(0).toUpperCase() + m.slice(1); mot[n] = (mot[n] || 0) + 1; }); });
+    var mk = Object.keys(mot).sort(function (x, y) { return mot[y] - mot[x]; }), mm1 = mk.length ? mot[mk[0]] : 1;
+    h += '<div class="c"><h3>Motivos de pausa</h3><p>Pausas de los casos ingresados en el período (sin contar la espera de verificación del cliente)</p>' +
+      (mk.length ? mk.map(function (m) { return '<div class="cs"><span>' + esc(m) + '</span><div><i style="width:' + (100 * mot[m] / mm1) + '%;background:#94a3b8"></i></div><strong>' + mot[m] + '</strong><small></small></div>'; }).join('')
+        : '<div class="vacio">Sin pausas en este período.</div>') + '</div>';
+    // últimos 90 días
+    var dias = []; for (var dd = mas(hoy(), -89); dd <= hoy(); dd = mas(dd, 1)) {
+      var x0 = dd.getTime(), x1 = mas(dd, 1).getTime(), hd = an.horas.filter(function (z) { return z.t >= x0 && z.t < x1; });
+      dias.push({d: dd, ing: (porDia(proy)[iso(dd)] || {}).ing || 0, ex: hd.filter(function (z) { return z.cuad > 0 && z.n > z.cuad; }).length}); }
+    h += '<div class="c full"><h3>Últimos 90 días</h3><p>Casos ingresados por día (barras) y horas del día con más casos que cuadrillas (línea roja, de 0 a 24 h)</p><div class="ley"><b style="background:#93c5fd"></b>ingresados &nbsp; <b style="background:#dc2626"></b>horas con más casos que cuadrillas</div>' + graf90(dias) + '</div>';
+    return h;
+  }
+  function grafPerfil(p) {
+    var W = 1180, H = 250, x0 = 40, y1 = 200, cw = (W - x0) / 24, top = Math.max(4, Math.max.apply(null, p.map(function (x) { return Math.max(x.max, x.cuad); })));
+    var Y = function (v) { return y1 - (y1 - 20) * v / top; }, s = '<svg viewBox="0 0 ' + W + ' ' + H + '">';
+    for (var v = 0; v <= top; v += top > 8 ? 2 : 1) s += '<line x1="' + x0 + '" x2="' + W + '" y1="' + Y(v) + '" y2="' + Y(v) + '" stroke="#eef0f3"/><text x="' + (x0 - 6) + '" y="' + (Y(v) + 4) + '" font-size="11" fill="#94a3b8" text-anchor="end">' + v + '</text>';
+    var path = '';
+    p.forEach(function (x, i) {
+      var cx = x0 + cw * i + cw / 2;
+      s += '<rect x="' + (cx - cw * .32) + '" y="' + Y(x.prom) + '" width="' + (cw * .64) + '" height="' + (y1 - Y(x.prom)) + '" rx="3" fill="' + (x.prom > x.cuad ? '#f87171' : '#93c5fd') + '"><title>' + x.h + ' h: promedio ' + uno(x.prom) + ', máximo ' + x.max + ', cuadrillas ' + uno(x.cuad) + '</title></rect>';
+      if (x.max) s += '<circle cx="' + cx + '" cy="' + Y(x.max) + '" r="3.5" fill="#475569"/>';
+      s += '<text x="' + cx + '" y="' + (y1 + 15) + '" font-size="11" fill="#64748b" text-anchor="middle">' + ('0' + x.h).slice(-2) + '</text>';
+      s += '<text x="' + cx + '" y="' + (y1 + 32) + '" font-size="10.5" font-weight="700" fill="' + (x.ex >= 50 ? '#dc2626' : x.ex >= 25 ? '#d97706' : '#94a3b8') + '" text-anchor="middle">' + x.ex + '%</text>';
+      path += (i ? 'L' : 'M') + (x0 + cw * i) + ' ' + Y(x.cuad) + ' L' + (x0 + cw * (i + 1)) + ' ' + Y(x.cuad) + ' ';
+    });
+    return s + '<path d="' + path + '" fill="none" stroke="#16a34a" stroke-width="3"/><text x="' + x0 + '" y="' + (y1 + 46) + '" font-size="11" fill="#64748b">% de los días en que hubo más casos que cuadrillas a esa hora</text></svg>';
+  }
+  function graf90(ds) {
+    var W = 1180, H = 210, x0 = 30, y1 = 170, cw = (W - x0) / ds.length, tp = Math.max(5, Math.max.apply(null, ds.map(function (d) { return d.ing; })));
+    var s = '<svg viewBox="0 0 ' + W + ' ' + H + '">', pth = '';
+    for (var v = 0; v <= tp; v += 5) { var y = y1 - (y1 - 20) * v / tp; s += '<line x1="' + x0 + '" x2="' + W + '" y1="' + y + '" y2="' + y + '" stroke="#eef0f3"/><text x="' + (x0 - 5) + '" y="' + (y + 4) + '" font-size="10" fill="#94a3b8" text-anchor="end">' + v + '</text>'; }
+    ds.forEach(function (d, i) {
+      var cx = x0 + cw * i + cw / 2, bh = (y1 - 20) * d.ing / tp;
+      s += '<rect x="' + (cx - cw * .35) + '" y="' + (y1 - bh) + '" width="' + (cw * .7) + '" height="' + bh + '" fill="#93c5fd" rx="1.5"><title>' + ddmm(d.d) + ': ' + d.ing + ' ingresados · ' + d.ex + ' h con más casos que cuadrillas</title></rect>';
+      pth += (i ? 'L' : 'M') + cx + ' ' + (y1 - (y1 - 20) * d.ex / 24) + ' ';
+      if (i % 7 === 0) s += '<text x="' + cx + '" y="' + (y1 + 15) + '" font-size="10" fill="#64748b" text-anchor="middle">' + ddmm(d.d) + '</text>';
+    });
+    return s + '<path d="' + pth + '" fill="none" stroke="#dc2626" stroke-width="2"/></svg>';
+  }
   function pintarSimul(p) {
     var sel = '<div class="c full" style="padding:10px 18px"><div class="mini">' + ['Lineales', 'GPON'].map(function (n) {
       return '<button data-sp="' + n + '"' + (st.simProy === n ? ' class="on"' : '') + '>' + (n === 'Lineales' ? '🔧 ' : '📡 ') + n + '</button>'; }).join('') +
-      '</div><p style="margin:6px 0 0">Cuando entra un caso, se guarda cuántos otros casos del mismo proyecto había abiertos: <b style="color:' + C_MANO + '">en mano</b> (con cuadrilla: en curso, en camino o en una pausa con la cuadrilla ocupada, como validación con BOFO o lluvia) y <b style="color:' + C_ESP + '">en espera</b> (todavía sin cuadrilla). Se registra desde el 17/11/2026.</p></div>';
-    var atar = function () { document.querySelectorAll('[data-sp]').forEach(function (b) { b.onclick = function () { st.simProy = b.dataset.sp; pintar(); }; }); };
-    var k = iso(p.desde) + '|' + iso(p.hasta);
-    if (!st.simCache[k]) {
+      '</div><p style="margin:6px 0 0">Casos que necesitan cuadrilla en cada momento (sin atender, en camino, en curso o en una pausa con la cuadrilla ocupada, como validación con BOFO o seguridad) contra las cuadrillas que están trabajando según la planilla de turnos. Sin prioridades bajas (P4/P5).</p></div>';
+    var atar = function () {
+      document.querySelectorAll('[data-sp]').forEach(function (b) { b.onclick = function () { st.simProy = b.dataset.sp; pintar(); }; });
+      document.querySelectorAll('[data-sd]').forEach(function (b) { b.onclick = function () { st.simDias = b.dataset.sd; pintar(); }; });
+    };
+    var k = iso(p.desde) + '|' + iso(p.hasta), faltan = [];
+    if (!st.tiempos) faltan.push(leerTiempos().catch(function (e) { st.tiempos = {err: e.message}; }));
+    if (!st.simCache[k]) faltan.push(leerSimul(p).catch(function (e) { st.simCache[k] = []; st.simErr = e.message; }));
+    if (faltan.length) {
       $('wrap').innerHTML = sel + '<div class="c full"><div class="vacio">Cargando…</div></div>'; atar();
-      leerSimul(p).then(function () { if (st.proy === 'simul') pintar(); }, function (e) {
-        $('wrap').innerHTML = sel + '<div class="c full"><div class="vacio">No pude leer la simultaneidad (' + esc(e.message) + ').</div></div>'; atar();
-      });
+      Promise.all(faltan).then(function () { if (st.proy === 'simul') pintar(); });
       return;
     }
+    var arriba;
+    try { arriba = st.tiempos.err ? '<div class="c full"><div class="vacio">No pude leer los tiempos (' + esc(st.tiempos.err) + ').</div></div>' : bloqueTiempos(p); }
+    catch (e) { arriba = '<div class="c full"><div class="vacio">No pude calcular los tiempos (' + esc(e.message) + ').</div></div>'; }
+    sel += arriba + '<div class="c full"><h3>Carga al ingresar</h3><p style="margin:0">Cuando entra un caso, se guarda cuántos otros casos del mismo proyecto había abiertos: <b style="color:' + C_MANO + '">en mano</b> (con cuadrilla: en curso, en camino o en una pausa con la cuadrilla ocupada) y <b style="color:' + C_ESP + '">en espera</b> (todavía sin cuadrilla). Se registra desde el 17/11/2026.</p></div>';
     var xs = st.simCache[k].filter(function (x) { return String(x.proyecto || '').toLowerCase() === st.simProy.toLowerCase(); });
     if (!xs.length) { $('wrap').innerHTML = sel + '<div class="c full"><div class="vacio">No hay ingresos registrados en este período.</div></div>'; atar(); return; }
     var prom = function (f) { return xs.reduce(function (a, x) { return a + f(x); }, 0) / xs.length; };

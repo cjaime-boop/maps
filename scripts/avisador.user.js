@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Mobisond · Avisador
 // @namespace    mobisond
-// @version      3.72
+// @version      3.73
 // @description  Avisa los casos nuevos (celular, campana y grupo de Telegram), los Lineales sin notas hace 25 min, los SLA y los aceptados; comandos del bot (/status, /bandeja, /autoasignar…); dispenser de la semana, racha sin vencidos y mensajes en casos pausados.
 // @match        https://*.service-now.com/*
 // @grant        GM_xmlhttpRequest
@@ -3380,6 +3380,112 @@
   }
   setTimeout(subirMateriales, 90000);
   setInterval(subirMateriales, 5 * 60000);
+
+  // ---------------------------------------------------------------- tablero: tiempos y simultaneidad contra cuadrillas
+  // Una vez por día (una sola PC), por cada tarea de Lineales y GPON: cuándo entró, cuándo salió la cuadrilla (la patente en
+  // las notas de la WO), cuándo llegó (pasó a En curso), cuándo se resolvió (pasó a verificación del cliente), cuándo se cerró
+  // y las pausas en las que la cuadrilla queda libre. La primera vez sube desde el 1/8/2026; después, los últimos 21 días y
+  // las abiertas. También guarda la planilla de turnos de la semana (para comparar casos contra cuadrillas trabajando).
+  var TIEMPOS_DESDE = '2026-08-01';
+  var PAUSA_OCUPADA = /bofo|tr[aá]fico|lluvia|seguridad|zona peligrosa|custodia/i;     // en estas pausas la cuadrilla sigue en el caso
+  var PATENTE = /(patente|dominio|veh[ií]culo|m[oó]vil)\s*:?\s*[A-Z]{2,3}\s?\d{3}\s?[A-Z]{0,2}|\b[A-Z]{2}\s?\d{3}\s?[A-Z]{2}\b/i;
+  function entradasNotas(t) {          // [{t, quien, txt}] de un campo de notas o comentarios (incluye "Observaciones adicionales")
+    var re = /(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}|\d{2}[\/-]\d{2}[\/-]\d{4} \d{2}:\d{2}:\d{2}) - (.+?) \((?:Notas de trabajo|Work notes|Observaciones adicionales|Comentarios adicionales|Additional comments|Comentarios)\)/g, m, out = [];
+    t = t || '';
+    while ((m = re.exec(t))) out.push({t: fechaJournal(m[1]), quien: m[2].trim(), st: m.index, ini: re.lastIndex});
+    out.forEach(function (n, i) { n.txt = t.slice(n.ini, i + 1 < out.length ? out[i + 1].st : undefined).trim(); });
+    return out;
+  }
+  function apiTodo(tabla, query, campos) {       // como api(), pero trae más de 1000 (de a páginas)
+    var todas = [], pagina = function (off) {
+      var h = {'Accept': 'application/json'}, tk = token(); if (tk) h['X-UserToken'] = tk;
+      return fetch(location.origin + '/api/now/table/' + tabla + '?sysparm_display_value=all&sysparm_exclude_reference_link=true&sysparm_limit=1000&sysparm_offset=' + off +
+                   '&sysparm_fields=' + campos + '&sysparm_query=' + encodeURIComponent(query), {credentials: 'same-origin', headers: h}).then(function (r) {
+        if (r.status === 401) sesionPerdida();
+        if (!r.ok) throw new Error('ServiceNow ' + r.status);
+        return r.json();
+      }).then(function (j) { var rs = j.result || []; todas = todas.concat(rs); return rs.length === 1000 ? pagina(off + 1000) : todas; });
+    };
+    return pagina(0);
+  }
+  function deA50(ids, fn) {            // consulta de a 50 ids, una tanda después de la otra
+    var tandas = []; for (var i = 0; i < ids.length; i += 50) tandas.push(ids.slice(i, i + 50));
+    var todo = [];
+    return tandas.reduce(function (p, t) { return p.then(function () { return fn(t).then(function (r) { todo = todo.concat(r); }); }); }, Promise.resolve()).then(function () { return todo; });
+  }
+  function subirTiempos() {
+    if (!hayGrupo() || !soyLider() || sesionCaida()) return;
+    var hoy = new Date(), dia = hoy.getFullYear() + '-' + (hoy.getMonth() + 1) + '-' + hoy.getDate();
+    if (GM_getValue('tiempos_dia', '') === dia) return;
+    GM_setValue('tiempos_dia', dia);
+    sbRpc('bot_reclamar', {p_aviso: 'tiempos:' + dia, p_pc: pcId()}).then(function (gano) {
+      if (gano === false) return;
+      var inicial = !GM_getValue('tiempos_inicial_ok', false), d = new Date(); d.setDate(d.getDate() - 21);
+      var desde = inicial ? TIEMPOS_DESDE : d.getFullYear() + '-' + ('0' + (d.getMonth() + 1)).slice(-2) + '-' + ('0' + d.getDate()).slice(-2);
+      var q = 'assignment_group.nameSTARTSWITH' + GRUPOS.lineales + '^ORassignment_group.nameSTARTSWITH' + GRUPOS.gpon +
+              '^opened_at>=' + desde + ' 03:00:00' + (inicial ? '' : '^ORactive=true');
+      var marca = String(Date.now());
+      try { if (!localStorage.getItem('mobisond_ocupado')) localStorage.setItem('mobisond_ocupado', marca); } catch (e) {}
+      var soltar = function () { try { if (localStorage.getItem('mobisond_ocupado') === marca) localStorage.removeItem('mobisond_ocupado'); } catch (e) {} };
+      return apiTodo('wm_task', q, 'sys_id,number,parent,opened_at,work_start,closed_at,state,priority,assignment_group').then(function (ts) {
+        ts = ts.filter(function (t) { return !/cancel/i.test(dv(t, 'state')) && proyecto(t); });
+        var padres = ts.map(function (t) { return vl(t, 'parent'); }).filter(function (x, i, a) { return x && a.indexOf(x) === i; });
+        return Promise.all([
+          deA50(ts.map(function (t) { return vl(t, 'sys_id'); }), function (l) { return api('wm_task', 'sys_idIN' + l.join(','), 'sys_id,work_notes,comments'); }),
+          deA50(padres, function (l) { return api('wm_order', 'sys_idIN' + l.join(','), 'sys_id,work_notes,comments'); })
+        ]).then(function (x) {
+          var notasT = {}, patentes = {};
+          x[0].forEach(function (w) { notasT[vl(w, 'sys_id')] = entradasNotas(dv(w, 'work_notes')).concat(entradasNotas(dv(w, 'comments'))).sort(function (a, b) { return a.t - b.t; }); });
+          x[1].forEach(function (w) {
+            patentes[vl(w, 'sys_id')] = entradasNotas(dv(w, 'work_notes')).concat(entradasNotas(dv(w, 'comments')))
+              .filter(function (n) { return n.quien !== 'System' && PATENTE.test(n.txt); }).map(function (n) { return n.t; }).sort(function (a, b) { return a - b; });
+          });
+          var casos = ts.map(function (t) {
+            var ab = utc(vl(t, 'opened_at')), lle = utc(vl(t, 'work_start')) || null, ce = utc(vl(t, 'closed_at')) || null;
+            var ev = notasT[vl(t, 'sys_id')] || [], pz = [], cur = null;
+            ev.forEach(function (e) {        // "Tarea paused en …" / "Tarea resumed en …" (notas de System) y el motivo al lado
+              if (/^(tarea|task) paused/i.test(e.txt)) {
+                if (cur) return;
+                cur = {a: e.t, b: null, m: ''};
+                var cerca = ev.filter(function (o) { return o !== e && Math.abs(o.t - e.t) < 6 * 60000; });
+                cerca.some(function (o) { var mm = /En pausa por ([^\n]+)/i.exec(o.txt); if (mm) cur.m = mm[1].trim(); return !!mm; });
+                if (!cur.m && cerca.some(function (o) { return /verificaci[oó]n del cliente/i.test(o.txt); })) cur.m = 'verificación del cliente';
+              } else if (/^(tarea|task) resumed/i.test(e.txt) && cur) { cur.b = e.t; pz.push(cur); cur = null; }
+            });
+            if (cur) pz.push(cur);
+            var ver = pz.filter(function (z) { return /verificaci/i.test(z.m) && z.a >= ab; }).map(function (z) { return z.a; })[0] || null;
+            var pts = patentes[vl(t, 'parent')] || [], sal = lle ? pts.filter(function (p) { return p <= lle + 5 * 60000; }).pop() || null : null;
+            return {wot: dv(t, 'number'), wo: dv(t, 'parent') || dv(t, 'number'), proyecto: proyecto(t).toLowerCase(), prio: vl(t, 'priority'),
+              abierto: ab, salida: sal, llegada: lle, resuelto: ver, cerrado: /cerrad|closed|complet|resuel/i.test(dv(t, 'state')) ? ce : null,
+              libres: pz.filter(function (z) { return !/verificaci/i.test(z.m) && !PAUSA_OCUPADA.test(z.m); }).map(function (z) { return [z.a, z.b]; }),
+              pausas: pz.filter(function (z) { return !/verificaci/i.test(z.m) && (!ver || z.a < ver); }).map(function (z) { return z.m || 'otro'; })};
+          }).filter(function (c) { return c.abierto; });
+          var envios = []; for (var k = 0; k < casos.length; k += 200) envios.push(casos.slice(k, k + 200));
+          return envios.reduce(function (p, lote) { return p.then(function () { return sbRpc('tab_tiempos_guardar', {p_casos: lote}); }); }, Promise.resolve())
+            .then(function () { return casos.length; });
+        });
+      }).then(function (n) {
+        soltar(); if (inicial) GM_setValue('tiempos_inicial_ok', true); botLog('tablero, tiempos: ' + n + ' tareas');
+        return guardarTurnos();
+      }, function (e) { soltar(); throw e; });
+    }).catch(function (e) { GM_setValue('tiempos_dia', ''); botLog('tablero, tiempos: ' + e.message); });
+  }
+  function guardarTurnos() {           // la planilla de turnos de la semana (la que lee /activos), para el tablero
+    return sbRpc('bot_autoasignar', {p_on: null, p_quien: null}).then(function (e) {
+      var a = null; try { a = JSON.parse((e && e.activos) || 'null'); } catch (x) {}
+      var hoy = new Date();
+      return ((a && a.semanas) || []).reduce(function (p, s) {
+        var m = /(\d{1,2})\/(\d{1,2})/.exec(s.titulo || ''); if (!m || !s.filas || !s.filas.length) return p;
+        var l = new Date(hoy.getFullYear(), +m[2] - 1, +m[1]);
+        if (l - hoy > 180 * 864e5) l.setFullYear(l.getFullYear() - 1); else if (hoy - l > 180 * 864e5) l.setFullYear(l.getFullYear() + 1);
+        var filas = {}; s.filas.forEach(function (f) { if (f.nombre) filas[f.nombre] = f.horas || []; });
+        var lunes = l.getFullYear() + '-' + ('0' + (l.getMonth() + 1)).slice(-2) + '-' + ('0' + l.getDate()).slice(-2);
+        return p.then(function () { return sbRpc('tab_turnos_guardar', {p_lunes: lunes, p_filas: filas}); });
+      }, Promise.resolve());
+    }).catch(function (e) { botLog('tablero, turnos: ' + e.message); });
+  }
+  setTimeout(subirTiempos, 150000);
+  setInterval(subirTiempos, 15 * 60000);
 
   // ---------------------------------------------------------------- cuándo revisar
   setTimeout(controles, 4000);
