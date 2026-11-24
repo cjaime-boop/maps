@@ -468,7 +468,7 @@ svg{display:block;width:100%;height:auto}
         var xs = cs.filter(function (c) { return c.proyecto === pr[0]; });
         if (!xs.length) return;
         xs.sort(function (a, b) { return ORDEN_EST.indexOf(a.estado) - ORDEN_EST.indexOf(b.estado) || (+a.prio || 9) - (+b.prio || 9) || (a.ab || 0) - (b.ab || 0); });
-        h += '<div class="c full"><h3>' + pr[0] + ' · casos abiertos</h3><p>Primero los que todavía no se atendieron; después por prioridad</p><div style="overflow-x:auto"><table class="vt"><tr><th>WO</th><th>Prio</th><th>' + pr[1] + '</th><th>Estado</th><th>Abierto hace</th><th>SLA</th></tr>' +
+        h += '<div class="c full"><h3>' + pr[0] + ' · casos abiertos</h3><div style="overflow-x:auto"><table class="vt"><tr><th>WO</th><th>Prio</th><th>' + pr[1] + '</th><th>Estado</th><th>Abierto hace</th><th>SLA</th></tr>' +
           xs.map(function (c) {
             var sla = !c.sla ? '<small>—</small>' : c.sla.vencido ? '<span class="pill" style="background:#fee2e2;color:#991b1b">vencido</span>'
               : c.sla.pausado ? '<span class="pill" style="background:#f1f5f9;color:#475569">en pausa</span>'
