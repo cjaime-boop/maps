@@ -32,6 +32,9 @@ svg{display:block;width:100%;height:auto}
 .seg [data-v="vivo"]:before{content:"";display:inline-block;width:8px;height:8px;border-radius:50%;background:#ef4444;margin-right:6px;vertical-align:1px;animation:late 1.6s infinite}
 @keyframes late{0%{box-shadow:0 0 0 0 rgba(239,68,68,.7)}70%{box-shadow:0 0 0 7px rgba(239,68,68,0)}100%{box-shadow:0 0 0 0 rgba(239,68,68,0)}}
 .vp{grid-column:span 6}.vp .tot{display:flex;align-items:baseline;gap:10px;margin:2px 0 12px}.vp .tot b{font-size:34px}.vp .tot span{color:var(--mu);font-size:13px}
+.kv{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-top:12px}.kv div{border-radius:12px;padding:10px 12px}.kv small{display:block;font-size:12px;font-weight:600}
+.kv b{display:block;font-size:30px;line-height:1.15;margin-top:2px}.kv i{font-style:normal;font-size:11.5px;opacity:.85}.kv .cero{opacity:.45}
+@media (max-width:520px){.kv{grid-template-columns:repeat(2,1fr)}}
 .est{display:grid;grid-template-columns:1fr auto;gap:6px 12px;font-size:13.5px}.est span{color:#334155}.est b{text-align:right}
 .chip{display:inline-block;border-radius:10px;padding:3px 9px;font-size:11.5px;font-weight:700;white-space:nowrap}
 .vt td{vertical-align:top}.vt td:first-child,.vt td:nth-child(5){white-space:nowrap}.vt small{color:var(--mu)}
@@ -451,10 +454,15 @@ svg{display:block;width:100%;height:auto}
         var xs = cs.filter(function (c) { return c.proyecto === pr[0]; }), cnt = {};
         xs.forEach(function (c) { cnt[c.estado] = (cnt[c.estado] || 0) + 1; });
         var ven = xs.filter(function (c) { return c.sla && c.sla.vencido; }).length;
-        h += '<div class="c vp"><h3>' + pr[1] + ' ' + pr[0] + '</h3><div class="tot"><b style="color:' + pr[2] + '">' + xs.length + '</b><span>' + (xs.length === 1 ? 'caso abierto' : 'casos abiertos') +
-          (ven ? ' · <b style="font-size:13px;color:#dc2626">' + ven + ' con SLA vencido</b>' : '') + '</span></div>' +
-          (xs.length ? '<div class="est">' + ORDEN_EST.filter(function (e) { return cnt[e]; }).map(function (e) { return '<span>' + EST[e][0] + '</span><b' + (e === 'sin' ? ' style="color:#dc2626"' : '') + '>' + cnt[e] + '</b>'; }).join('') + '</div>'
-            : '<div class="vacio">Sin casos abiertos 😴</div>') + '</div>';
+        // lo que importa: en curso (con los que van en camino) y pausados; el total queda chico
+        var nC = (cnt.curso || 0) + (cnt.camino || 0), nV = (cnt.verif || 0) + (cnt.aceptado || 0);
+        var caja = function (t, n, bg, fg, sub) { return '<div class="' + (n ? '' : 'cero') + '" style="background:' + bg + ';color:' + fg + '"><small>' + t + '</small><b>' + n + '</b><i>' + (sub || '&nbsp;') + '</i></div>'; };
+        h += '<div class="c vp"><h3>' + pr[1] + ' ' + pr[0] + ' <span style="font-weight:400;font-size:13px;color:#64748b">· ' + xs.length + (xs.length === 1 ? ' abierto' : ' abiertos') +
+          (ven ? ' · <b style="color:#dc2626">' + ven + ' con SLA vencido</b>' : '') + '</span></h3>' +
+          '<div class="kv">' + caja('▶️ En curso', nC, '#dcfce7', '#166534', cnt.camino ? cnt.camino + ' en camino' : '') +
+          caja('⏸️ Pausados', cnt.pausado || 0, '#fef3c7', '#92400e') +
+          caja('⏳ Sin atender', cnt.sin || 0, '#fee2e2', '#991b1b') +
+          caja('🔍 Verificación', nV, '#f1f5f9', '#475569', cnt.aceptado ? cnt.aceptado + ' aceptados' : '') + '</div></div>';
       });
       [['Lineales', 'Enlace'], ['GPON', 'CTO']].forEach(function (pr) {
         var xs = cs.filter(function (c) { return c.proyecto === pr[0]; });
