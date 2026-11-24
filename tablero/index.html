@@ -600,7 +600,7 @@ svg{display:block;width:100%;height:auto}
       g += '</svg>';
       h += '<div class="c"><h3>Ingresos por hora</h3><p>Cuándo entraron los casos y, en cada hora, cuántos había abiertos en total y cuántos en mano (necesitando cuadrilla)</p><div class="ley"><b style="background:' + color + ';border-radius:50%"></b>entró un caso &nbsp; <b style="background:' + (proy === 'lineales' ? '#dbeafe' : '#ede9fe') + '"></b>abiertos en total' +
         (mano ? ' &nbsp; <b style="background:' + cMano + '"></b>en mano &nbsp; <b style="background:#f87171"></b>más en mano que cuadrillas &nbsp; <b style="background:#16a34a"></b>cuadrillas' : '') + '</div>' + g + '</div>';
-      // casos del día: primero los que venían de antes
+      // casos del día: primero los que entraron ese día, después los que venían de antes
       var fila = function (c, deAntes) {
         var sla = c.baja ? '<span class="pill" style="background:#f1f5f9;color:#475569">prioridad baja</span>'
           : c.ven ? '<span class="pill" style="background:#fee2e2;color:#991b1b">vencido</span>'
@@ -610,8 +610,8 @@ svg{display:block;width:100%;height:auto}
         return '<tr' + (deAntes ? ' style="background:#f8fafc"' : '') + '><td>' + esc(c.wo) + '</td><td>' + (deAntes ? ddmm(c.ab) + ' ' + hm(c.ab) + ' <small style="color:#64748b">◀ de antes</small>' : hm(c.ab)) +
           '</td><td>' + (c.prio ? 'P' + c.prio : '') + '</td><td>' + esc(c.cli || '') + (proy === 'lineales' && NOMBRE_CLI[c.cli] ? ' <small style="color:#64748b">' + NOMBRE_CLI[c.cli] + '</small>' : '') + '</td><td>' + sla + '</td></tr>';
       };
-      h += '<div class="c full"><h3>Casos del día</h3><p>Los que estuvieron abiertos ese día: primero los que venían de antes</p><table><tr><th>WO</th><th>Entró</th><th>Prio</th><th>' + (proy === 'lineales' ? 'Cliente' : 'Zona') + '</th><th>SLA</th></tr>' +
-        antes.map(function (c) { return fila(c, true); }).join('') + ing.map(function (c) { return fila(c, false); }).join('') + '</table></div>';
+      h += '<div class="c full"><h3>Casos del día</h3><p>Los que estuvieron abiertos ese día: primero los que entraron ese día y después los que venían de antes</p><table><tr><th>WO</th><th>Entró</th><th>Prio</th><th>' + (proy === 'lineales' ? 'Cliente' : 'Zona') + '</th><th>SLA</th></tr>' +
+        ing.map(function (c) { return fila(c, false); }).join('') + antes.map(function (c) { return fila(c, true); }).join('') + '</table></div>';
       $('wrap').innerHTML = h;
     }, function (e) {
       $('wrap').innerHTML = '<div class="c full"><div class="vacio">No pude leer el detalle del día (' + esc(e.message) + ').</div></div>';
