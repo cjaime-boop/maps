@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Mobisond · Avisador
 // @namespace    mobisond
-// @version      3.75
+// @version      3.76
 // @description  Avisa los casos nuevos (celular, campana y grupo de Telegram), los Lineales sin notas hace 25 min, los SLA y los aceptados; comandos del bot (/status, /bandeja, /autoasignar…); dispenser de la semana, racha sin vencidos y mensajes en casos pausados.
 // @match        https://*.service-now.com/*
 // @grant        GM_xmlhttpRequest
@@ -726,9 +726,11 @@
           if (w) entradasNotas(dv(w, 'work_notes')).concat(entradasNotas(dv(w, 'comments'))).forEach(function (n) {
             if (/espera la verificaci[oó]n del cliente/i.test(n.txt) && !/hijo/i.test(n.txt) && n.t >= ab && (!t || n.t < t)) t = n.t;
           });
-          return {wot: dv(r, 'number'), wo: woDe(r), proyecto: proyecto(r), prio: vl(r, 'priority'), ci: dv(r, 'cmdb_ci'), abierto: ab || null, resuelto: t, sinHora: !t && aceptado(r)};
+          var sl = slaDe[vl(r, 'sys_id')] || slaDe[vl(r, 'parent')];
+          return {wot: dv(r, 'number'), wo: woDe(r), proyecto: proyecto(r), prio: vl(r, 'priority'), ci: dv(r, 'cmdb_ci'), abierto: ab || null, resuelto: t, sinHora: !t && aceptado(r),
+                  vencido: sl ? vl(sl, 'has_breached') === 'true' : null, vence: sl ? utc(vl(sl, 'planned_end_time')) || null : null};
         }).filter(function (c) { return !c.sinHora; });
-      var firmaR = resu.map(function (c) { return c.wot + (c.resuelto ? '' : '?'); }).sort().join(',');
+      var firmaR = resu.map(function (c) { return c.wot + (c.resuelto ? '' : '?') + (c.vencido ? 'v' : ''); }).sort().join(',');
       if (resu.length && firmaR !== GM_getValue('resueltos_mandados', '')) {
         sbRpc('tab_resueltos_guardar', {p_casos: resu}).then(function () { GM_setValue('resueltos_mandados', firmaR); }).catch(function () {});
       }
@@ -3506,12 +3508,15 @@
     var desde = new Date(hoy0).toISOString().replace('T', ' ').slice(0, 19);
     var q = 'assignment_group.nameSTARTSWITH' + GRUPOS.lineales + '^ORassignment_group.nameSTARTSWITH' + GRUPOS.gpon + '^closed_at>=' + desde;
     api('wm_task', q, 'sys_id,number,parent,opened_at,closed_at,state,priority,assignment_group,cmdb_ci').then(function (ts) {
-      var ya = GM_getValue('resueltos_cerr', {}), dia = String(hoy0);
+      var ya = GM_getValue('resueltos_cerr2', {}), dia = String(hoy0);
       if (ya.dia !== dia) ya = {dia: dia};
       ts = ts.filter(function (t) { return !/cancel/i.test(dv(t, 'state')) && proyecto(t) && vl(t, 'parent') && !ya[dv(t, 'number')]; });
       if (!ts.length) return;
-      return api('wm_order', 'sys_idIN' + ts.map(function (t) { return vl(t, 'parent'); }).join(','), 'sys_id,work_notes,comments').then(function (wos) {
-        var porId = {}; wos.forEach(function (w) { porId[vl(w, 'sys_id')] = w; });
+      var ids = ts.map(function (t) { return vl(t, 'sys_id'); }).concat(ts.map(function (t) { return vl(t, 'parent'); }));
+      return Promise.all([api('wm_order', 'sys_idIN' + ts.map(function (t) { return vl(t, 'parent'); }).join(','), 'sys_id,work_notes,comments'),
+                          api('task_sla', 'taskIN' + ids.join(','), 'task,has_breached,planned_end_time').catch(function () { return []; })]).then(function (rr) {
+        var wos = rr[0], porId = {}, slas = {}; wos.forEach(function (w) { porId[vl(w, 'sys_id')] = w; });
+        rr[1].forEach(function (s) { var k = vl(s, 'task'), b = vl(s, 'has_breached') === 'true'; if (!slas[k] || (b && !slas[k].b)) slas[k] = {b: b, v: utc(vl(s, 'planned_end_time')) || null}; });
         var lote = [];
         ts.forEach(function (t) {
           var w = porId[vl(t, 'parent')], ab = utc(vl(t, 'opened_at')) || 0, v = null;
@@ -3519,9 +3524,11 @@
             if (/espera la verificaci[oó]n del cliente/i.test(n.txt) && !/hijo/i.test(n.txt) && n.t >= ab && (!v || n.t < v)) v = n.t;
           });
           ya[dv(t, 'number')] = 1;
-          if (v && v >= hoy0) lote.push({wot: dv(t, 'number'), wo: woDe(t), proyecto: proyecto(t), prio: vl(t, 'priority'), ci: dv(t, 'cmdb_ci'), abierto: ab || null, resuelto: v});
+          var s = slas[vl(t, 'sys_id')] || slas[vl(t, 'parent')];
+          if (v && v >= hoy0) lote.push({wot: dv(t, 'number'), wo: woDe(t), proyecto: proyecto(t), prio: vl(t, 'priority'), ci: dv(t, 'cmdb_ci'), abierto: ab || null, resuelto: v,
+                                         vencido: s ? s.b : null, vence: s ? s.v : null});
         });
-        return (lote.length ? sbRpc('tab_resueltos_guardar', {p_casos: lote}) : Promise.resolve()).then(function () { GM_setValue('resueltos_cerr', ya); });
+        return (lote.length ? sbRpc('tab_resueltos_guardar', {p_casos: lote}) : Promise.resolve()).then(function () { GM_setValue('resueltos_cerr2', ya); });
       });
     }).catch(function (e) { console.log('[Mobisond] resueltos cerrados: ' + (e && e.message)); });
   }
