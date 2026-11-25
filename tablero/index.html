@@ -648,8 +648,9 @@ svg{display:block;width:100%;height:auto}
       var hoy0 = j.hoy ? +j.hoy : new Date(new Date().setHours(0, 0, 0, 0)).getTime();
       var vencHoy = function (p) {
         var vis = {}, n = 0;
-        cs.forEach(function (c) { if (c.proyecto === p && c.sla && c.sla.vencido && !(+c.prio >= 4) && (!c.vence || c.vence >= hoy0) && !vis[c.wo]) { vis[c.wo] = 1; n++; } });
-        rs.forEach(function (c) { if (c.proyecto === p && c.vencido && !(+c.prio >= 4) && (!c.ve || c.ve >= hoy0) && !vis[c.wo]) { vis[c.wo] = 1; n++; } });
+        // como el /status: SLA neto vencido hoy (lo marca el Avisador en cada caso abierto y en cada resuelto)
+        cs.forEach(function (c) { if (c.proyecto === p && c.venc_hoy === true && !(+c.prio >= 4) && !vis[c.wo]) { vis[c.wo] = 1; n++; } });
+        rs.forEach(function (c) { if (c.proyecto === p && c.vencido === true && c.ve && c.ve >= hoy0 && !(+c.prio >= 4) && !vis[c.wo]) { vis[c.wo] = 1; n++; } });
         return n;
       };
       var h = '';
@@ -695,7 +696,7 @@ svg{display:block;width:100%;height:auto}
         h += '<div class="c full"><h3>' + pr[0] + ' · resueltos hoy</h3><p>Pasaron a verificación del cliente en el día</p><div style="overflow-x:auto"><table class="vt"><tr><th>WO</th><th>Prio</th><th>' + pr[1] + '</th><th>Entró</th><th>Resuelto</th><th>Tardó</th></tr>' +
           xs.map(function (c) {
             return '<tr><td><b>' + esc(c.wo || '') + '</b></td><td>' + (c.prio ? 'P' + esc(c.prio) : '') + '</td><td>' + esc(c.ci || '') + '</td><td>' + (c.ab ? ddmm(c.ab) + ' ' + hm(c.ab) : '') +
-              '</td><td><span class="pill" style="background:#e0f2fe;color:#075985">' + (c.re ? hm(c.re) : '') + '</span>' + (c.vencido ? ' <span class="pill" style="background:#fee2e2;color:#991b1b">vencido</span>' : '') + '</td><td>' + (c.ab && c.re ? dur((c.re - c.ab) / 60000) : '') + '</td></tr>';
+              '</td><td><span class="pill" style="background:#e0f2fe;color:#075985">' + (c.re ? hm(c.re) : '') + '</span>' + (c.vencido === true && c.ve && c.ve >= hoy0 ? ' <span class="pill" style="background:#fee2e2;color:#991b1b">vencido hoy</span>' : '') + '</td><td>' + (c.ab && c.re ? dur((c.re - c.ab) / 60000) : '') + '</td></tr>';
           }).join('') + '</table></div></div>';
       });
       $('wrap').innerHTML = h;
