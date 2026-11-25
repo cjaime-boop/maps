@@ -35,7 +35,7 @@ svg{display:block;width:100%;height:auto}
 .seg [data-v="vivo"]:before{content:"";display:inline-block;width:8px;height:8px;border-radius:50%;background:#ef4444;margin-right:6px;vertical-align:1px;animation:late 1.6s infinite}
 @keyframes late{0%{box-shadow:0 0 0 0 rgba(239,68,68,.7)}70%{box-shadow:0 0 0 7px rgba(239,68,68,0)}100%{box-shadow:0 0 0 0 rgba(239,68,68,0)}}
 .vp{grid-column:span 6}.vp .tot{display:flex;align-items:baseline;gap:10px;margin:2px 0 12px}.vp .tot b{font-size:34px}.vp .tot span{color:var(--mu);font-size:13px}
-.kv{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-top:12px}.kv div{border-radius:12px;padding:10px 12px}.kv small{display:block;font-size:12px;font-weight:600}
+.kv{display:grid;grid-template-columns:repeat(5,1fr);gap:10px;margin-top:12px}.kv div{border-radius:12px;padding:10px 12px}.kv small{display:block;font-size:12px;font-weight:600}
 .kv b{display:block;font-size:30px;line-height:1.15;margin-top:2px}.kv i{font-style:normal;font-size:11.5px;opacity:.85}.kv .cero{opacity:.45}
 @media (max-width:520px){.kv{grid-template-columns:repeat(2,1fr)}}
 .est{display:grid;grid-template-columns:1fr auto;gap:6px 12px;font-size:13.5px}.est span{color:#334155}.est b{text-align:right}
@@ -393,8 +393,6 @@ svg{display:block;width:100%;height:auto}
     if (cur) tramos.push(cur);
     return (st.simAn[proy] = {cs: cs, horas: horas, tramos: tramos, planilla: lunesT.length});
   }
-  function dur(min) { if (min === null || min === undefined) return '—'; min = Math.round(min); var hh = Math.floor(min / 60), mi = min % 60;
-    if (hh >= 48) return Math.floor(hh / 24) + ' d ' + (hh % 24) + ' h'; return hh ? hh + ' h' + (mi ? ' ' + ('0' + mi).slice(-2) : '') : mi + ' min'; }
   function tiempos(cs) {                  // promedio y "la mitad en menos de" (en minutos)
     var r = function (f) { var a = cs.map(f).filter(function (x) { return x !== null && x > 0; }).sort(function (x, y) { return x - y; });
       return a.length ? {n: a.length, prom: a.reduce(function (x, y) { return x + y; }, 0) / a.length, med: a[Math.floor(a.length / 2)]} : null; };
@@ -639,6 +637,7 @@ svg{display:block;width:100%;height:auto}
       $('act').innerHTML = act ? (viejo ? '⚠️ Sin datos nuevos desde las ' + hm(act) + (ddmm(act) !== ddmm(new Date()) ? ' del ' + ddmm(act) : '') + ' · se actualiza solo'
         : 'En vivo · actualizado ' + hm(act) + ' · se actualiza solo cada minuto') : 'Todavía no hay datos en vivo';
       var cs = (j.casos || []).map(function (c) { c.ab = fecha(c.abierto); c.vence = c.sla ? fecha(c.sla.vence) : null; return c; });
+      var rs = (j.resueltos || []).map(function (c) { c.ab = fecha(c.abierto); c.re = fecha(c.resuelto); return c; });
       var h = '';
       [['Lineales', '🔵', '#2563eb'], ['GPON', '🟣', '#8b5cf6']].forEach(function (pr) {
         var xs = cs.filter(function (c) { return c.proyecto === pr[0]; }), cnt = {};
@@ -652,7 +651,8 @@ svg{display:block;width:100%;height:auto}
           '<div class="kv">' + caja('▶️ En curso', nC, '#dcfce7', '#166534', cnt.camino ? cnt.camino + ' en camino' : '') +
           caja('⏸️ Pausados', cnt.pausado || 0, '#fef3c7', '#92400e') +
           caja('⏳ Sin atender', cnt.sin || 0, '#fee2e2', '#991b1b') +
-          caja('🔍 Verificación', nV, '#f1f5f9', '#475569', cnt.aceptado ? cnt.aceptado + (cnt.aceptado === 1 ? ' aceptado' : ' aceptados') : '') + '</div></div>';
+          caja('🔍 Verificación', nV, '#f1f5f9', '#475569', cnt.aceptado ? cnt.aceptado + (cnt.aceptado === 1 ? ' aceptado' : ' aceptados') : '') +
+          caja('✅ Resueltos hoy', rs.filter(function (c) { return c.proyecto === pr[0]; }).length, '#e0f2fe', '#075985') + '</div></div>';
       });
       [['Lineales', 'Enlace'], ['GPON', 'CTO']].forEach(function (pr) {
         var xs = cs.filter(function (c) { return c.proyecto === pr[0]; });
@@ -666,6 +666,15 @@ svg{display:block;width:100%;height:auto}
               : c.vence ? '<span class="pill" style="background:' + (c.vence - ahora < 36e5 ? '#fef3c7;color:#92400e' : '#dcfce7;color:#166534') + '">vence ' + (ddmm(c.vence) !== ddmm(new Date()) ? ddmm(c.vence) + ' ' : '') + hm(c.vence) + '</span> <small>en ' + dur((c.vence - ahora) / 60000) + '</small>' : '<small>—</small>';
             return '<tr><td><b>' + esc(c.wo || '') + '</b></td><td>' + (c.prio ? 'P' + esc(c.prio) : '') + '</td><td>' + esc(c.ci || '') + '</td><td>' + chip(c.estado) +
               (c.estado === 'pausado' && c.motivo ? '<br><small>' + esc(c.motivo) + '</small>' : '') + '</td><td>' + (c.ab ? dur((ahora - c.ab) / 60000) + '<br><small>' + ddmm(c.ab) + ' ' + hm(c.ab) + '</small>' : '') + '</td><td>' + sla + '</td></tr>';
+          }).join('') + '</table></div></div>';
+      });
+      [['Lineales', 'Enlace'], ['GPON', 'CTO']].forEach(function (pr) {
+        var xs = rs.filter(function (c) { return c.proyecto === pr[0]; });
+        if (!xs.length) return;
+        h += '<div class="c full"><h3>' + pr[0] + ' · resueltos hoy</h3><p>Pasaron a verificación del cliente en el día</p><div style="overflow-x:auto"><table class="vt"><tr><th>WO</th><th>Prio</th><th>' + pr[1] + '</th><th>Entró</th><th>Resuelto</th><th>Tardó</th></tr>' +
+          xs.map(function (c) {
+            return '<tr><td><b>' + esc(c.wo || '') + '</b></td><td>' + (c.prio ? 'P' + esc(c.prio) : '') + '</td><td>' + esc(c.ci || '') + '</td><td>' + (c.ab ? ddmm(c.ab) + ' ' + hm(c.ab) : '') +
+              '</td><td><span class="pill" style="background:#e0f2fe;color:#075985">' + (c.re ? hm(c.re) : '') + '</span></td><td>' + (c.ab && c.re ? dur((c.re - c.ab) / 60000) : '') + '</td></tr>';
           }).join('') + '</table></div></div>';
       });
       $('wrap').innerHTML = h;

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Mobisond · Avisador
 // @namespace    mobisond
-// @version      3.73
+// @version      3.74
 // @description  Avisa los casos nuevos (celular, campana y grupo de Telegram), los Lineales sin notas hace 25 min, los SLA y los aceptados; comandos del bot (/status, /bandeja, /autoasignar…); dispenser de la semana, racha sin vencidos y mensajes en casos pausados.
 // @match        https://*.service-now.com/*
 // @grant        GM_xmlhttpRequest
@@ -718,6 +718,20 @@
       })}).then(function () {
         var m = {}; lista.forEach(function (c) { if (c.wot) m[c.wot] = 1; }); GM_setValue('simult_mandados', m);
       }).catch(function () {});             // si la función no existe todavía, no pasa nada (se reintenta en 2 min)
+      // tablero "En vivo": los que están en verificación del cliente o aceptados, con la hora del primer pase a verificación
+      // (el comentario "Se espera la verificación del cliente" de la WO). Supabase guarda la primera vez que ve cada uno.
+      var resu = casos.filter(function (r) { return enCurso(r) && !enCamino(r) && (aceptado(r) || (pausado(r) && /verificaci/i.test(dv(r, 'u_pause_reason')))); })
+        .map(function (r) {
+          var w = woRec[vl(r, 'parent')], ab = utc(vl(r, 'opened_at')) || 0, t = null;
+          if (w) entradasNotas(dv(w, 'work_notes')).concat(entradasNotas(dv(w, 'comments'))).forEach(function (n) {
+            if (/espera la verificaci[oó]n del cliente/i.test(n.txt) && !/hijo/i.test(n.txt) && n.t >= ab && (!t || n.t < t)) t = n.t;
+          });
+          return {wot: dv(r, 'number'), wo: woDe(r), proyecto: proyecto(r), prio: vl(r, 'priority'), ci: dv(r, 'cmdb_ci'), abierto: ab || null, resuelto: t, sinHora: !t && aceptado(r)};
+        }).filter(function (c) { return !c.sinHora; });
+      var firmaR = resu.map(function (c) { return c.wot + (c.resuelto ? '' : '?'); }).sort().join(',');
+      if (resu.length && firmaR !== GM_getValue('resueltos_mandados', '')) {
+        sbRpc('tab_resueltos_guardar', {p_casos: resu}).then(function () { GM_setValue('resueltos_mandados', firmaR); }).catch(function () {});
+      }
       return sbRpc('bot_casos_abiertos', {p_pc: pcId(), p_casos: lista});
     }).catch(function (e) { soltar(); console.log('[Mobisond] casos abiertos (QGIS): ' + (e && e.message)); });   // si la tabla no existe, no pasa nada
   }
