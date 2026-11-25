@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Mobisond · Avisador
 // @namespace    mobisond
-// @version      3.74
+// @version      3.75
 // @description  Avisa los casos nuevos (celular, campana y grupo de Telegram), los Lineales sin notas hace 25 min, los SLA y los aceptados; comandos del bot (/status, /bandeja, /autoasignar…); dispenser de la semana, racha sin vencidos y mensajes en casos pausados.
 // @match        https://*.service-now.com/*
 // @grant        GM_xmlhttpRequest
@@ -3498,6 +3498,35 @@
       }, Promise.resolve());
     }).catch(function (e) { botLog('tablero, turnos: ' + e.message); });
   }
+  // Resueltos del día que ya se cerraron (en GPON a veces se cierran a los pocos minutos de pasar a verificación y la
+  // bandeja no llega a verlos): cada 10 min busca los cerrados hoy y manda los que pasaron a verificación hoy.
+  function barrerResueltos() {
+    if (!hayGrupo() || !soyLider() || sesionCaida()) return;
+    var d = new Date(), hoy0 = new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+    var desde = new Date(hoy0).toISOString().replace('T', ' ').slice(0, 19);
+    var q = 'assignment_group.nameSTARTSWITH' + GRUPOS.lineales + '^ORassignment_group.nameSTARTSWITH' + GRUPOS.gpon + '^closed_at>=' + desde;
+    api('wm_task', q, 'sys_id,number,parent,opened_at,closed_at,state,priority,assignment_group,cmdb_ci').then(function (ts) {
+      var ya = GM_getValue('resueltos_cerr', {}), dia = String(hoy0);
+      if (ya.dia !== dia) ya = {dia: dia};
+      ts = ts.filter(function (t) { return !/cancel/i.test(dv(t, 'state')) && proyecto(t) && vl(t, 'parent') && !ya[dv(t, 'number')]; });
+      if (!ts.length) return;
+      return api('wm_order', 'sys_idIN' + ts.map(function (t) { return vl(t, 'parent'); }).join(','), 'sys_id,work_notes,comments').then(function (wos) {
+        var porId = {}; wos.forEach(function (w) { porId[vl(w, 'sys_id')] = w; });
+        var lote = [];
+        ts.forEach(function (t) {
+          var w = porId[vl(t, 'parent')], ab = utc(vl(t, 'opened_at')) || 0, v = null;
+          if (w) entradasNotas(dv(w, 'work_notes')).concat(entradasNotas(dv(w, 'comments'))).forEach(function (n) {
+            if (/espera la verificaci[oó]n del cliente/i.test(n.txt) && !/hijo/i.test(n.txt) && n.t >= ab && (!v || n.t < v)) v = n.t;
+          });
+          ya[dv(t, 'number')] = 1;
+          if (v && v >= hoy0) lote.push({wot: dv(t, 'number'), wo: woDe(t), proyecto: proyecto(t), prio: vl(t, 'priority'), ci: dv(t, 'cmdb_ci'), abierto: ab || null, resuelto: v});
+        });
+        return (lote.length ? sbRpc('tab_resueltos_guardar', {p_casos: lote}) : Promise.resolve()).then(function () { GM_setValue('resueltos_cerr', ya); });
+      });
+    }).catch(function (e) { console.log('[Mobisond] resueltos cerrados: ' + (e && e.message)); });
+  }
+  setTimeout(barrerResueltos, 60000);
+  setInterval(barrerResueltos, 10 * 60000);
   setTimeout(subirTiempos, 150000);
   setInterval(subirTiempos, 15 * 60000);
 
