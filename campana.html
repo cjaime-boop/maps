@@ -49,6 +49,7 @@
     <div class="campana" id="campana">🔔</div>
     <div class="estado apagada" id="estado">Apagada</div>
     <button class="grande" id="activar">Habilitar sonido</button>
+    <div class="nota" id="notifNota" style="margin-top:10px" hidden></div>
   </div>
 
   <div class="card">
@@ -304,8 +305,7 @@
       vistos[m.id] = 1;
       var titulo = m.title || 'Aviso';
       anotar(titulo, m.message);
-      sonar();
-      if (!sonido()) titilar(titulo);      // si Chrome todavía no deja sonar, que por lo menos se vea
+      avisar(titulo, m.message || '');
     };
   }
   function marcarId(ev) { try { var m = JSON.parse(ev.data); if (m.id) ultimoId = m.id; } catch (e) {} }
@@ -342,6 +342,35 @@
     clearInterval(titulando); var n = 0;
     titulando = setInterval(function () { document.title = (n++ % 2) ? '🔔 ' + t : tituloBase; if (n > 40) { clearInterval(titulando); document.title = tituloBase; } }, 700);
   }
+  // Si Chrome no deja sonar (después de dormir la PC o si descartó la pestaña), se intenta reactivar el sonido;
+  // si igual no puede, sale una notificación de Windows (esa suena sola, sin tocar nada) y titila el título.
+  function avisar(titulo, texto) {
+    var a = audio();
+    var plan = function () {
+      if (sonido()) { sonar(); return; }
+      titilar(titulo);
+      try {
+        if (window.Notification && Notification.permission === 'granted') {
+          var n = new Notification('🔔 ' + titulo, {body: texto, tag: 'campana', renotify: true, requireInteraction: true});
+          n.onclick = function () { window.focus(); habilitar(); n.close(); };
+        }
+      } catch (e) {}
+    };
+    if (a && a.state !== 'running') a.resume().then(plan, plan); else plan();
+  }
+  function pintarNotif() {                 // pide una sola vez el permiso de notificaciones (queda guardado en Chrome)
+    var el = $('notifNota'); if (!window.Notification) { el.hidden = true; return; }
+    el.hidden = false;
+    el.innerHTML = Notification.permission === 'granted' ? '✅ Si Chrome frena el sonido, igual te llega una notificación de Windows.'
+      : Notification.permission === 'denied' ? '⚠️ Las notificaciones están bloqueadas: tocá el candado de la barra de direcciones → Notificaciones → Permitir.'
+      : '<button id="pedirNotif">🔔 Permitir notificaciones</button> <span>para que avise aunque Chrome frene el sonido.</span>';
+    var b = $('pedirNotif'); if (b) b.onclick = function () { Notification.requestPermission().then(pintarNotif, pintarNotif); };
+  }
+  pintarNotif();
+  // al volver a la pestaña o despertar la PC, se intenta reactivar el sonido solo
+  document.addEventListener('visibilitychange', function () { if (!document.hidden) { var a = audio(); if (a) a.resume().then(pintarEstado, function () {}); } });
+  window.addEventListener('focus', function () { var a = audio(); if (a) a.resume().then(pintarEstado, function () {}); });
+  setInterval(function () { var a = audio(); if (a && a.state === 'suspended') a.resume().then(pintarEstado, function () {}); }, 30000);
   function habilitar() {
     var a = audio(); if (!a) return;
     var antes = sonido();
@@ -358,6 +387,7 @@
     try { ctx = ctx || new (window.AudioContext || window.webkitAudioContext)(); ctx.resume(); } catch (e) {}
     sonar();
   };
+  if (document.wasDiscarded) anotar('Chrome había cerrado esta pestaña para ahorrar memoria', 'Para que no pase más: Configuración de Chrome → Rendimiento → "Siempre mantener activos estos sitios" → Agregar → cjaime-boop.github.io');
 })();
 </script>
 </body>
