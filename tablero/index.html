@@ -47,7 +47,7 @@ svg{display:block;width:100%;height:auto}
 <input id="pass" type="password" autocomplete="current-password"><button id="entrar">Entrar</button><div class="err" id="err"></div></div>
 <div id="app" hidden>
 <div class="top"><div class="r1"><div><h1>📊 Tablero Mobisond · ATC</h1><small id="act"></small></div>
-<div class="seg"><button data-v="vivo">En vivo</button><button data-v="dia">Día</button><button data-v="semana" class="on">Semana</button><button data-v="mes">Mes</button><button data-v="anio">Año</button></div><select id="per"></select></div>
+<div class="seg"><button data-v="vivo" class="on">En vivo</button><button data-v="dia">Día</button><button data-v="semana">Semana</button><button data-v="mes">Mes</button><button data-v="anio">Año</button></div><select id="per"></select></div>
 <div class="tabs" id="tabs"><button data-p="lineales" class="on">🔧 Lineales</button><button data-p="gpon">📡 GPON</button><button data-p="termino">📈 En término</button><button data-p="simul">⏱️ Simultaneidad</button></div></div>
 <div class="wrap" id="wrap"></div></div>
 <script>
@@ -58,7 +58,7 @@ svg{display:block;width:100%;height:auto}
   var DSEM = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'];
   var MES = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
   var NOMBRE_CLI = {CLR: 'Claro', EDN: 'Edenor', MUNI: 'Municipal', TP: 'Telecom', MVS: 'Movistar', Otros: 'sin cliente'};
-  var st = {diaCache: {}, vista: 'semana', proy: 'lineales', per: 0, datos: null, pass: null, simProy: 'Lineales', simCache: {}};
+  var st = {diaCache: {}, vista: 'vivo', proy: 'lineales', per: 0, datos: null, pass: null, simProy: 'Lineales', simCache: {}};
   var $ = function (id) { return document.getElementById(id); };
   function lsGet(k) { try { return localStorage.getItem(k); } catch (e) { return null; } }
   function lsSet(k, v) { try { if (v === null) localStorage.removeItem(k); else localStorage.setItem(k, v); } catch (e) {} }
