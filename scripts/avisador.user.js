@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Mobisond · Avisador
 // @namespace    mobisond
-// @version      3.77
+// @version      3.78
 // @description  Avisa los casos nuevos (celular, campana y grupo de Telegram), los Lineales sin notas hace 25 min, los SLA y los aceptados; comandos del bot (/status, /bandeja, /autoasignar…); dispenser de la semana, racha sin vencidos y mensajes en casos pausados.
 // @match        https://*.service-now.com/*
 // @grant        GM_xmlhttpRequest
@@ -2151,7 +2151,13 @@
       t.push('Alguna emergencia: ' + (G.emergencia ? 'sí' : 'no'));
       t.push('Casos en mano: ' + enManoTxt(G.enMano, false));
       }
-      return {dia: new Date(DIA.getTime()), hoy: esDiaHoy(), texto: t.join('\n'), sinSla: !venc, sinVerif: !vh,
+      var num = function (r) {             // los números del /status, para guardar el cierre del día
+        return {ingresados: r.ingresados, resueltos: r.resueltos, acumulados: r.acumulados, verificacion: r.verificacion,
+                pausados: Array.isArray(r.pausas) ? r.pausas.length : r.pausas, pausas: Array.isArray(r.pausas) ? contar(r.pausas) : [],
+                vencidos: r.vencidos, vencidosWO: r.vencidosWO || [], sinAtender: r.sinAtender, claroSin: r.claroSin, sinNoche: r.sinNoche || 0,
+                enMano: Array.isArray(r.enMano) ? r.enMano.length : null, enManoTxt: r.enMano ? enManoTxt(r.enMano, true) : '—', emergencia: !!r.emergencia};
+      };
+      return {dia: new Date(DIA.getTime()), hoy: esDiaHoy(), texto: t.join('\n'), sinSla: !venc, sinVerif: !vh, datos: {lineales: num(L), gpon: num(G)},
               detalle: 'Resueltos Lineales: ' + (L.resueltosDet.join(', ') || 'ninguno') + ' · GPON: ' + (G.resueltosDet.join(', ') || 'ninguno')};
     }
 
@@ -3546,6 +3552,25 @@
       });
     }).catch(function (e) { console.log('[Mobisond] resueltos cerrados: ' + (e && e.message)); });
   }
+  // Cierre del día: a las 23:55 (una sola PC) se guardan los números del /status de hoy para el tablero.
+  // Si a esa hora no había ninguna PC, al prenderse guarda el día anterior (sin acumulados ni pausados, que ya no se saben).
+  function guardarCierre() {
+    if (!hayGrupo() || !soyLider() || sesionCaida()) return;
+    var d = new Date(), clave = function (x) { return x.getFullYear() + '-' + ('0' + (x.getMonth() + 1)).slice(-2) + '-' + ('0' + x.getDate()).slice(-2); };
+    var ayer = new Date(d.getFullYear(), d.getMonth(), d.getDate() - 1), dia = null, tarde = false;
+    if (d.getHours() === 23 && d.getMinutes() >= 55) dia = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+    else if (GM_getValue('cierre_ok', '') < clave(ayer) && GM_getValue('cierre_desde', '') && GM_getValue('cierre_desde', '') <= clave(ayer)) { dia = ayer; tarde = true; }
+    if (!GM_getValue('cierre_desde', '')) GM_setValue('cierre_desde', clave(d));   // recién instalado: no reclama días viejos
+    if (!dia || GM_getValue('cierre_ok', '') >= clave(dia)) return;
+    sbRpc('bot_reclamar', {p_aviso: 'cierre:' + clave(dia), p_pc: pcId()}).then(function (gano) {
+      if (gano === false) { GM_setValue('cierre_ok', clave(dia)); return; }
+      return RESUMEN.armar(tarde ? dia : undefined).then(function (res) {
+        return sbRpc('tab_cierre_guardar', {p_dia: clave(dia), p_datos: res.datos, p_tarde: tarde});
+      }).then(function () { GM_setValue('cierre_ok', clave(dia)); botLog('tablero, cierre del día ' + clave(dia) + (tarde ? ' (tarde)' : '')); });
+    }).catch(function (e) { botLog('tablero, cierre: ' + (e && e.message)); });
+  }
+  setTimeout(guardarCierre, 120000);
+  setInterval(guardarCierre, 60000);
   setTimeout(barrerResueltos, 60000);
   setInterval(barrerResueltos, 10 * 60000);
   setTimeout(subirTiempos, 150000);
