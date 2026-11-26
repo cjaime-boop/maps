@@ -655,9 +655,9 @@ svg{display:block;width:100%;height:auto}
   function fecha(v) { if (v === null || v === undefined || v === '') return null; var d = new Date(typeof v === 'string' && /^\d+$/.test(v) ? +v : v); return isNaN(d) ? null : d; }
   function dur(min) { min = Math.max(0, Math.round(min)); if (min < 60) return min + ' min'; var hh = Math.floor(min / 60), m = min % 60;
     if (hh < 24) return hh + ' h' + (m ? ' ' + ('0' + m).slice(-2) : ''); var dd2 = Math.floor(hh / 24); return dd2 + (dd2 === 1 ? ' día' : ' días') + (hh % 24 ? ' ' + (hh % 24) + ' h' : ''); }
-  function prioNom(p) {                   // 1 Emergencia · 2 Urgente · 3 Moderada · 4/5 Baja
-    var n = {1: ['Emergencia', '#991b1b'], 2: ['Urgente', '#c2410c'], 3: ['Moderada', '#a16207'], 4: ['Baja', '#64748b'], 5: ['Baja', '#64748b']}[+p];
-    return n ? '<span style="color:' + n[1] + ';font-weight:600">' + n[0] + '</span>' : (p ? esc(String(p)) : '');
+  function prioNom(p) {                   // colores de siempre: 🔴 P1 Emergencia · 🟡 P2 Urgente · 🟢 P3 Moderada · ⚪ P4/P5 Baja
+    var n = {1: ['Emergencia', '#e8433a', '#fff'], 2: ['Urgente', '#f2c94c', '#1f2937'], 3: ['Moderada', '#2fb36b', '#fff'], 4: ['Baja', '#e5e7eb', '#374151'], 5: ['Baja', '#e5e7eb', '#374151']}[+p];
+    return n ? '<span class="chip" style="background:' + n[1] + ';color:' + n[2] + '">' + n[0] + '</span>' : (p ? esc(String(p)) : '');
   }
   function chip(e) { var x = EST[e] || [e || '—', '#f1f5f9', '#475569']; return '<span class="chip" style="background:' + x[1] + ';color:' + x[2] + '">' + x[0] + '</span>'; }
   function pintarVivo(primera) {
