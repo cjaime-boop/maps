@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Mobisond · Avisador
 // @namespace    mobisond
-// @version      3.78
+// @version      3.79
 // @description  Avisa los casos nuevos (celular, campana y grupo de Telegram), los Lineales sin notas hace 25 min, los SLA y los aceptados; comandos del bot (/status, /bandeja, /autoasignar…); dispenser de la semana, racha sin vencidos y mensajes en casos pausados.
 // @match        https://*.service-now.com/*
 // @grant        GM_xmlhttpRequest
@@ -731,12 +731,14 @@
           });
           var vt = vencHoy ? (vencHoy[vl(r, 'sys_id')] || vencHoy[vl(r, 'parent')] || null) : null;
           return {wot: dv(r, 'number'), wo: woDe(r), proyecto: proyecto(r), prio: vl(r, 'priority'), ci: dv(r, 'cmdb_ci'), abierto: ab || null, resuelto: t, sinHora: !t && aceptado(r),
-                  vencido: vencHoy ? !!vt : null, vence: vt};
+                  vencido: vencHoy ? !!vt : null, vence: vt, _sid: vl(r, 'sys_id'), _lle: utc(vl(r, 'work_start')) || null};
         }).filter(function (c) { return !c.sinHora; });
-      var firmaR = resu.map(function (c) { return c.wot + (c.resuelto ? '' : '?') + (c.vencido ? 'v' : ''); }).sort().join(',');
-      if (resu.length && firmaR !== GM_getValue('resueltos_mandados', '')) {
-        sbRpc('tab_resueltos_guardar', {p_casos: resu}).then(function () { GM_setValue('resueltos_mandados', firmaR); }).catch(function () {});
-      }
+      if (resu.length) conTrabajo(resu).then(function (resu) {
+        var firmaR = resu.map(function (c) { return c.wot + (c.resuelto ? '' : '?') + (c.vencido ? 'v' : '') + (c.trabajo !== null ? 't' : ''); }).sort().join(',');
+        if (firmaR !== GM_getValue('resueltos_mandados', '')) {
+          sbRpc('tab_resueltos_guardar', {p_casos: resu}).then(function () { GM_setValue('resueltos_mandados', firmaR); }).catch(function () {});
+        }
+      });
       return sbRpc('bot_casos_abiertos', {p_pc: pcId(), p_casos: lista});
     }).catch(function (e) { soltar(); console.log('[Mobisond] casos abiertos (QGIS): ' + (e && e.message)); });   // si la tabla no existe, no pasa nada
   }
@@ -3523,13 +3525,47 @@
     });
     return out;
   }
+  // Tiempo real de trabajo (minutos): desde que la cuadrilla pasó a En curso hasta que pasó a verificación del cliente,
+  // sin las pausas del medio ("Tarea paused/resumed" de las notas de la tarea).
+  function minutosTrabajo(lle, res, notas) {
+    if (!lle || !res || res <= lle) return null;
+    var pz = [], cur = null;
+    notas.slice().sort(function (a, b) { return a.t - b.t; }).forEach(function (e) {
+      if (/^(tarea|task) paused/i.test(e.txt)) { if (!cur) cur = {a: e.t, b: null}; }
+      else if (/^(tarea|task) resumed/i.test(e.txt) && cur) { cur.b = e.t; pz.push(cur); cur = null; }
+    });
+    if (cur) pz.push(cur);
+    var fuera = 0;
+    pz.forEach(function (z) { var a = Math.max(z.a, lle), b = Math.min(z.b || res, res); if (b > a) fuera += b - a; });
+    return Math.max(0, Math.round((res - lle - fuera) / 60000));
+  }
+  // a cada resuelto ({_sid, _lle, resuelto}) le pone "trabajo"; las notas de la tarea se leen una sola vez por caso y día
+  function conTrabajo(lista) {
+    var d = new Date(), dia = d.getFullYear() + '-' + (d.getMonth() + 1) + '-' + d.getDate();
+    var cache = GM_getValue('trabajo_cache', {}); if (cache.dia !== dia) cache = {dia: dia, m: {}};
+    var falta = lista.filter(function (c) { return c.resuelto && c._lle && c._sid && !(c.wot in cache.m); });
+    var leer = falta.length ? api('wm_task', 'sys_idIN' + falta.map(function (c) { return c._sid; }).join(','), 'sys_id,work_notes,comments').catch(function () { return null; }) : Promise.resolve([]);
+    return leer.then(function (ws) {
+      if (ws) {
+        var notas = {};
+        ws.forEach(function (w) { notas[vl(w, 'sys_id')] = entradasNotas(dv(w, 'work_notes')).concat(entradasNotas(dv(w, 'comments'))); });
+        falta.forEach(function (c) { if (notas[c._sid]) cache.m[c.wot] = minutosTrabajo(c._lle, c.resuelto, notas[c._sid]); });
+        if (falta.length) GM_setValue('trabajo_cache', cache);
+      }
+      return lista.map(function (c) {
+        var x = {}; Object.keys(c).forEach(function (k) { if (k.charAt(0) !== '_') x[k] = c[k]; });
+        x.trabajo = cache.m[c.wot] !== undefined ? cache.m[c.wot] : null;
+        return x;
+      });
+    });
+  }
   function barrerResueltos() {
     if (!hayGrupo() || !soyLider() || sesionCaida()) return;
     var d = new Date(), hoy0 = new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
     var desde = new Date(hoy0).toISOString().replace('T', ' ').slice(0, 19);
     var q = 'assignment_group.nameSTARTSWITH' + GRUPOS.lineales + '^ORassignment_group.nameSTARTSWITH' + GRUPOS.gpon + '^closed_at>=' + desde;
-    api('wm_task', q, 'sys_id,number,parent,opened_at,closed_at,state,priority,assignment_group,cmdb_ci').then(function (ts) {
-      var ya = GM_getValue('resueltos_cerr3', {}), dia = String(hoy0);
+    api('wm_task', q, 'sys_id,number,parent,opened_at,closed_at,work_start,state,priority,assignment_group,cmdb_ci').then(function (ts) {
+      var ya = GM_getValue('resueltos_cerr4', {}), dia = String(hoy0);
       if (ya.dia !== dia) ya = {dia: dia};
       ts = ts.filter(function (t) { return !/cancel/i.test(dv(t, 'state')) && proyecto(t) && vl(t, 'parent') && !ya[dv(t, 'number')]; });
       if (!ts.length) return;
@@ -3546,9 +3582,9 @@
           ya[dv(t, 'number')] = 1;
           var vt = vh ? (vh[vl(t, 'sys_id')] || vh[vl(t, 'parent')] || null) : null;
           if (v && v >= hoy0) lote.push({wot: dv(t, 'number'), wo: woDe(t), proyecto: proyecto(t), prio: vl(t, 'priority'), ci: dv(t, 'cmdb_ci'), abierto: ab || null, resuelto: v,
-                                         vencido: vh ? !!vt : null, vence: vt});
+                                         vencido: vh ? !!vt : null, vence: vt, _sid: vl(t, 'sys_id'), _lle: utc(vl(t, 'work_start')) || null});
         });
-        return (lote.length ? sbRpc('tab_resueltos_guardar', {p_casos: lote}) : Promise.resolve()).then(function () { GM_setValue('resueltos_cerr3', ya); });
+        return (lote.length ? conTrabajo(lote).then(function (l) { return sbRpc('tab_resueltos_guardar', {p_casos: l}); }) : Promise.resolve()).then(function () { GM_setValue('resueltos_cerr4', ya); });
       });
     }).catch(function (e) { console.log('[Mobisond] resueltos cerrados: ' + (e && e.message)); });
   }

@@ -719,10 +719,10 @@ svg{display:block;width:100%;height:auto}
       [['Lineales', 'Enlace'], ['GPON', 'CTO']].forEach(function (pr) {
         var xs = rs.filter(function (c) { return c.proyecto === pr[0]; });
         if (!xs.length) return;
-        h += '<div class="c full"><h3>' + pr[0] + ' · resueltos hoy</h3><p>Pasaron a verificación del cliente en el día</p><div style="overflow-x:auto"><table class="vt"><tr><th>WO</th><th>Prioridad</th><th>' + pr[1] + '</th><th>Entró</th><th>Resuelto</th><th>Tardó</th></tr>' +
+        h += '<div class="c full"><h3>' + pr[0] + ' · resueltos hoy</h3><p>Pasaron a verificación del cliente en el día. Tardó: desde que entró. Trabajo real: desde que la cuadrilla empezó a trabajar, sin las pausas.</p><div style="overflow-x:auto"><table class="vt"><tr><th>WO</th><th>Prioridad</th><th>' + pr[1] + '</th><th>Entró</th><th>Resuelto</th><th>Tardó</th><th>Trabajo real</th></tr>' +
           xs.map(function (c) {
             return '<tr><td><b>' + esc(c.wo || '') + '</b></td><td>' + prioNom(c.prio) + '</td><td>' + esc(c.ci || '') + '</td><td>' + (c.ab ? ddmm(c.ab) + ' ' + hm(c.ab) : '') +
-              '</td><td><span class="pill" style="background:#e0f2fe;color:#075985">' + (c.re ? hm(c.re) : '') + '</span>' + (c.vencido === true && c.ve && c.ve >= hoy0 ? ' <span class="pill" style="background:#fee2e2;color:#991b1b">vencido hoy</span>' : '') + '</td><td>' + (c.ab && c.re ? dur((c.re - c.ab) / 60000) : '') + '</td></tr>';
+              '</td><td><span class="pill" style="background:#e0f2fe;color:#075985">' + (c.re ? hm(c.re) : '') + '</span>' + (c.vencido === true && c.ve && c.ve >= hoy0 ? ' <span class="pill" style="background:#fee2e2;color:#991b1b">vencido hoy</span>' : '') + '</td><td>' + (c.ab && c.re ? dur((c.re - c.ab) / 60000) : '') + '</td><td>' + (c.trabajo !== null && c.trabajo !== undefined ? '<b>' + dur(+c.trabajo) + '</b>' : '<small>—</small>') + '</td></tr>';
           }).join('') + '</table></div></div>';
       });
       $('wrap').innerHTML = h;
